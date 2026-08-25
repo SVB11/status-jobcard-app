@@ -73,7 +73,7 @@
             'Fail': active ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 border-red-200',
             'N/A': active ? 'bg-gray-600 text-white' : 'bg-gray-50 text-gray-600 border-gray-200'
         };
-        return '<button onclick="setStatus(' + itemId + ', \\x27' + value + '\\x27)" class="px-2 py-1 text-xs rounded border ' + colours[value] + '">' + label + '</button>';
+        return '<button type="button" onclick="setStatus(' + itemId + ', \'' + value + '\')" class="px-2 py-1 text-xs rounded border ' + colours[value] + '">' + label + '</button>';
     }
 
     async function loadPDI() {
@@ -135,10 +135,10 @@
 
             let btns = '';
             if ((role === 'workshop' || role === 'admin') && !job.pdi_signed_workshop) {
-                btns += '<button onclick="signPDI(\\x27workshop\\x27)" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Workshop</button>';
+                btns += '<button type="button" onclick="signPDI(\'workshop\')" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Workshop</button> ';
             }
             if ((role === 'sales' || role === 'admin') && !job.pdi_signed_sales) {
-                btns += '<button onclick="signPDI(\\x27sales\\x27)" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Sales</button>';
+                btns += '<button type="button" onclick="signPDI(\'sales\')" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Sales</button> ';
             }
             if (job.pdi_signed_workshop && job.pdi_signed_sales) {
                 btns += '<span class="text-green-600 text-sm font-medium">PDI fully signed</span>';
