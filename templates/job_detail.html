@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+
+{% block title %}Job Detail{% endblock %}
+
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-600"></span>
+    <a href="/jobs" class="text-sm text-status-blue hover:underline">All Jobs</a>
+    <a href="/dashboard" class="text-sm text-status-blue hover:underline">Dashboard</a>
+    <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="loading" class="text-gray-400">Loading job...</div>
+<div id="content" class="hidden space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800" id="jobNumber"></h1>
+            <p class="text-gray-500" id="vehicleLine"></p>
+        </div>
+        <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-xl shadow p-5">
+            <h2 class="font-semibold text-status-blue mb-3">Vehicle & Client</h2>
+            <dl class="text-sm space-y-2">
+                <div class="flex justify-between"><dt class="text-gray-500">Stock No</dt><dd id="stockNumber" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Type</dt><dd id="typeLine" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Year</dt><dd id="year" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
+            </dl>
+        </div>
+        <div class="bg-white rounded-xl shadow p-5">
+            <h2 class="font-semibold text-status-blue mb-3">Job Info</h2>
+            <dl class="text-sm space-y-2">
+                <div class="flex justify-between"><dt class="text-gray-500">Status</dt><dd id="status" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Priority</dt><dd id="priority" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Target Date</dt><dd id="targetDate" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Location</dt><dd id="location" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Created</dt><dd id="createdAt" class="font-medium"></dd></div>
+            </dl>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold text-status-blue">Work / Prep Tasks</h2>
+            <span id="taskProgress" class="text-sm text-gray-500"></span>
+        </div>
+        <div id="tasksList" class="space-y-3"></div>
+
+        <div id="addTaskSection" class="mt-5 pt-4 border-t hidden">
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Add Extra Task</h3>
+            <div class="flex gap-2">
+                <input type="text" id="newTaskName" placeholder="Task name..." class="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-status-blue">
+                <button onclick="addTask()" class="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700">Add</button>
+            </div>
+        </div>
+
+        <div id="otherInstructions" class="mt-4 text-sm text-gray-600 hidden"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const token = localStorage.getItem('token');
+    const fullName = localStorage.getItem('full_name') || '';
+    const role = localStorage.getItem('role') || '';
+    const userId = localStorage.getItem('user_id');
+    const jobId = {{ job_id }};
+    let currentJob = null;
+
+    if (!token) window.location.href = '/login';
+    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+
+    function logout() {
+        localStorage.clear();
+        window.location.href = '/login';
+    }
+
+    function canEditTasks() {
+        return role === 'workshop' || role === 'admin';
+    }
+
+    function statusColour(s) {
+        const map = {
+            'Not Started': 'bg-gray-100 text-gray-600',
+            'In Progress': 'bg-blue-100 text-blue-700',
+            'Completed': 'bg-green-100 text-green-700',
+            'Blocked': 'bg-red-100 text-red-700'
+        };
+        return map[s] || 'bg-gray-100 text-gray-600';
+    }
+
+    function renderTasks(tasks) {
+        const canEdit = canEditTasks() && currentJob && 
+            !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
+
+        let completed = 0;
+        let html = '';
+
+        if (!tasks || tasks.length === 0) {
+            html = '<p class="text-sm text-gray-400">No tasks listed</p>';
+        } else {
+            tasks.forEach(function(t) {
+                if (t.status === 'Completed') completed++;
+                html += '<div class="p-3 bg-gray-50 rounded-lg border">' +
+                    '<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
+                    '<div class="flex-1">' +
+                    '<div class="text-sm font-medium">' + t.task_name + 
+                    (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + '</div>' +
+                    (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
+                    '</div>';
+
+                if (canEdit) {
+                    html += '<select onchange="updateTaskStatus(' + t.id + ', this.value)" class="text-xs border rounded px-2 py-1 ' + statusColour(t.status) + '">' +
+                        '<option value="Not Started"' + (t.status === 'Not Started' ? ' selected' : '') + '>Not Started</option>' +
+                        '<option value="In Progress"' + (t.status === 'In Progress' ? ' selected' : '') + '>In Progress</option>' +
+                        '<option value="Completed"' + (t.status === 'Completed' ? ' selected' : '') + '>Completed</option>' +
+                        '<option value="Blocked"' + (t.status === 'Blocked' ? ' selected' : '') + '>Blocked</option>' +
+                        '</select>';
+                } else {
+                    html += '<span class="px-2 py-0.5 text-xs rounded-full ' + statusColour(t.status) + '">' + t.status + '</span>';
+                }
+                html += '</div>';
+
+                // Notes
+                if (canEdit) {
+                    html += '<div class="mt-2 flex gap-2">' +
+                        '<input type="text" id="note-' + t.id + '" value="' + (t.notes || '').replace(/"/g, '&quot;') + '" placeholder="Add note..." ' +
+                        'class="flex-1 text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-status-blue">' +
+                        '<button onclick="saveNote(' + t.id + ')" class="text-xs px-2 py-1 bg-gray-200 rounded hover:bg-gray-300">Save Note</button>' +
+                        '</div>';
+                } else if (t.notes) {
+                    html += '<div class="mt-1 text-xs text-orange-600">Note: ' + t.notes + '</div>';
+                }
+                html += '</div>';
+            });
+        }
+
+        document.getElementById('tasksList').innerHTML = html;
+        document.getElementById('taskProgress').textContent = completed + ' of ' + (tasks ? tasks.length : 0) + ' completed';
+
+        if (canEdit) {
+            document.getElementById('addTaskSection').classList.remove('hidden');
+        }
+    }
+
+    async function loadJob() {
+        try {
+            const res = await fetch('/api/jobs/' + jobId, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) throw new Error('Not found');
+            const j = await res.json();
+            currentJob = j;
+
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+
+            document.getElementById('jobNumber').textContent = j.job_number;
+            document.getElementById('vehicleLine').textContent = j.stock_number + ' — ' + j.vehicle_description;
+            document.getElementById('stockNumber').textContent = j.stock_number;
+            document.getElementById('typeLine').textContent = j.main_type + (j.sub_type ? ' / ' + j.sub_type : '');
+            document.getElementById('year').textContent = j.year || '—';
+            document.getElementById('clientName').textContent = j.client_name;
+            document.getElementById('salesman').textContent = j.salesman_name;
+            document.getElementById('status').textContent = j.status;
+            document.getElementById('priority').textContent = j.priority;
+            document.getElementById('targetDate').textContent = j.target_delivery_date || '—';
+            document.getElementById('location').textContent = j.current_location || '—';
+            document.getElementById('createdAt').textContent = j.created_at ? j.created_at.replace('T', ' ').substring(0, 16) : '—';
+
+            renderTasks(j.tasks);
+
+            if (j.other_instructions) {
+                const el = document.getElementById('otherInstructions');
+                el.classList.remove('hidden');
+                el.innerHTML = '<strong>Special Instructions:</strong> ' + j.other_instructions;
+            }
+
+            // Action buttons
+            let buttons = '';
+            if ((role === 'workshop' || role === 'admin') && j.status === 'Submitted to Workshop') {
+                buttons += '<button onclick="acceptJob()" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm hover:bg-blue-800">Accept Job</button>';
+            }
+            // Ready for Delivery - both parties
+            if (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery') {
+                if (role === 'sales' || role === 'admin') {
+                    buttons += '<button onclick="markReady(\x27sales\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Sales)</button>';
+                }
+                if (role === 'workshop' || role === 'admin') {
+                    buttons += '<button onclick="markReady(\x27workshop\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Workshop)</button>';
+                }
+            }
+            // PDI button when work is completed or later
+            if (['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery'].includes(j.status)) {
+                buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Open PDI Checklist</a>';
+            }
+            // Close - Salesman only
+            if ((role === 'sales' || role === 'admin') && j.status === 'Ready for Delivery') {
+                buttons += '<button onclick="closeJob()" class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900">Close / Delivered</button>';
+            }
+            document.getElementById('actionButtons').innerHTML = buttons;
+
+        } catch (err) {
+            document.getElementById('loading').textContent = 'Could not load job details.';
+        }
+    }
+
+    async function updateTaskStatus(taskId, newStatus) {
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    status: newStatus,
+                    user_id: userId ? parseInt(userId) : null
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to update');
+                loadJob();
+                return;
+            }
+            // Refresh to show new job status if it changed
+            loadJob();
+        } catch (err) {
+            alert('Connection error');
+            loadJob();
+        }
+    }
+
+    async function saveNote(taskId) {
+        const noteInput = document.getElementById('note-' + taskId);
+        const notes = noteInput ? noteInput.value : '';
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    notes: notes,
+                    user_id: userId ? parseInt(userId) : null
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to save note');
+                return;
+            }
+            // Brief visual feedback
+            noteInput.classList.add('border-green-400');
+            setTimeout(function() { noteInput.classList.remove('border-green-400'); }, 800);
+        } catch (err) {
+            alert('Connection error');
+        }
+    }
+
+    async function addTask() {
+        const input = document.getElementById('newTaskName');
+        const name = (input.value || '').trim();
+        if (!name) {
+            alert('Please enter a task name');
+            return;
+        }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/tasks/add', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    task_name: name,
+                    user_id: userId ? parseInt(userId) : null
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to add task');
+                return;
+            }
+            input.value = '';
+            loadJob();
+        } catch (err) {
+            alert('Connection error');
+        }
+    }
+
+    async function acceptJob() {
+        if (!confirm('Accept this job?')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/accept', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed');
+                return;
+            }
+            alert('Job accepted.');
+            loadJob();
+        } catch (err) {
+            alert('Connection error');
+        }
+    }
+
+
+    async function markReady(party) {
+        if (!confirm('Mark this job as Ready for Delivery (' + party + ')?')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/ready', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ party: party, user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            alert('Marked. Sales ready: ' + data.ready_sales + ' | Workshop ready: ' + data.ready_workshop);
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+    async function closeJob() {
+        if (!confirm('Close this job as Delivered? Make sure documents are printed and saved to Admin computer first.')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/close', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            alert('Job closed as Delivered.');
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+    loadJob();
+</script>
+{% endblock %}

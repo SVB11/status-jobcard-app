@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Job Cards{% endblock %}
+
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-600"></span>
+    <a href="/dashboard" class="text-sm text-status-blue hover:underline">Dashboard</a>
+    <a href="/jobs/create" class="text-sm text-status-blue hover:underline">+ New Job</a>
+    <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-800">Job Cards</h1>
+        <p class="text-gray-500 text-sm">All preparation jobs between Sales and Workshop</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+        <button onclick="loadJobs()" class="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">All</button>
+        <button onclick="loadJobs('Submitted to Workshop')" class="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Submitted</button>
+        <button onclick="loadJobs('Accepted by Workshop')" class="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Accepted</button>
+        <button onclick="loadJobs('In Progress')" class="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">In Progress</button>
+        <button onclick="loadJobs('Work Completed')" class="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Work Completed</button>
+    </div>
+</div>
+
+<div id="jobsContainer" class="space-y-3">
+    <p class="text-gray-400 text-sm">Loading jobs...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const token = localStorage.getItem('token');
+    const fullName = localStorage.getItem('full_name') || '';
+    const role = localStorage.getItem('role') || '';
+    const userId = localStorage.getItem('user_id');
+
+    if (!token) window.location.href = '/login';
+    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+
+    function logout() {
+        localStorage.clear();
+        window.location.href = '/login';
+    }
+
+    function priorityBadge(p) {
+        if (p === 'Urgent') return '<span class="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">Urgent</span>';
+        if (p === 'High') return '<span class="px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-700 font-medium">High</span>';
+        return '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Normal</span>';
+    }
+
+    function statusBadge(s) {
+        const colours = {
+            'Submitted to Workshop': 'bg-yellow-100 text-yellow-800',
+            'Accepted by Workshop': 'bg-blue-100 text-blue-800',
+            'In Progress': 'bg-indigo-100 text-indigo-800',
+            'Work Completed': 'bg-purple-100 text-purple-800',
+            'PDI in Progress': 'bg-pink-100 text-pink-800',
+            'PDI Completed': 'bg-teal-100 text-teal-800',
+            'Ready for Delivery': 'bg-green-100 text-green-800',
+            'Delivered / Closed': 'bg-gray-100 text-gray-600'
+        };
+        const c = colours[s] || 'bg-gray-100 text-gray-600';
+        return '<span class="px-2 py-0.5 text-xs rounded-full ' + c + ' font-medium">' + s + '</span>';
+    }
+
+    async function loadJobs(statusFilter) {
+        const container = document.getElementById('jobsContainer');
+        container.innerHTML = '<p class="text-gray-400 text-sm">Loading...</p>';
+
+        let url = '/api/jobs';
+        if (statusFilter) url += '?status=' + encodeURIComponent(statusFilter);
+
+        try {
+            const res = await fetch(url, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const data = await res.json();
+            const jobs = data.jobs || [];
+
+            if (jobs.length === 0) {
+                container.innerHTML = '<div class="bg-white rounded-xl shadow p-8 text-center text-gray-400">No jobs found</div>';
+                return;
+            }
+
+            let html = '';
+            jobs.forEach(function(j) {
+                const canAccept = (role === 'workshop' || role === 'admin') && j.status === 'Submitted to Workshop';
+                html += '<div class="bg-white rounded-xl shadow p-4 border-l-4 ' +
+                    (j.priority === 'Urgent' ? 'border-red-500' : j.priority === 'High' ? 'border-orange-400' : 'border-status-blue') + '">' +
+                    '<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
+                    '<div>' +
+                    '<div class="flex items-center gap-2 flex-wrap">' +
+                    '<span class="font-bold text-gray-800">' + j.job_number + '</span>' +
+                    priorityBadge(j.priority) +
+                    statusBadge(j.status) +
+                    '</div>' +
+                    '<div class="text-sm text-gray-700 mt-1">' + j.stock_number + ' &mdash; ' + j.vehicle_description + '</div>' +
+                    '<div class="text-xs text-gray-500 mt-1">Client: ' + j.client_name + ' | Sales: ' + j.salesman_name +
+                    (j.target_delivery_date ? ' | Target: ' + j.target_delivery_date : '') + '</div>' +
+                    '</div>' +
+                    '<div class="flex gap-2">' +
+                    '<a href="/jobs/' + j.id + '" class="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg">View</a>';
+                if (canAccept) {
+                    html += '<button onclick="acceptJob(' + j.id + ', \'' + j.job_number + '\')" class="px-3 py-1.5 text-sm bg-status-blue text-white hover:bg-blue-800 rounded-lg">Accept Job</button>';
+                }
+                html += '</div></div></div>';
+            });
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = '<p class="text-red-500 text-sm">Could not load jobs.</p>';
+        }
+    }
+
+    async function acceptJob(jobId, jobNumber) {
+        if (!confirm('Accept job ' + jobNumber + '?')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/accept', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to accept job');
+                return;
+            }
+            alert('Job ' + jobNumber + ' accepted successfully. Salesman has been notified.');
+            loadJobs();
+        } catch (err) {
+            alert('Connection error');
+        }
+    }
+
+    loadJobs();
+</script>
+{% endblock %}

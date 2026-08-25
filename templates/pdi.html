@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}PDI Checklist{% endblock %}
+
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-600"></span>
+    <a href="/jobs/{{ job_id }}" class="text-sm text-status-blue hover:underline">Job Detail</a>
+    <a href="/jobs" class="text-sm text-status-blue hover:underline">All Jobs</a>
+    <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="loading" class="text-gray-400">Loading PDI...</div>
+<div id="content" class="hidden space-y-4">
+    <div class="bg-white rounded-xl shadow p-5">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+                <h1 class="text-xl font-bold text-status-blue">Pre-Delivery Inspection (PDI)</h1>
+                <p class="text-sm text-gray-600" id="jobInfo"></p>
+                <p class="text-xs text-gray-500 mt-1" id="vehicleInfo"></p>
+            </div>
+            <div class="text-sm" id="signStatus"></div>
+        </div>
+    </div>
+
+    <div id="pdiSections" class="space-y-4"></div>
+
+    <div class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-3">Sign-off</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div class="p-3 bg-gray-50 rounded-lg">
+                <div class="text-sm font-medium">Workshop / Mechanic</div>
+                <div id="wsSign" class="text-xs text-gray-500 mt-1">Not signed</div>
+            </div>
+            <div class="p-3 bg-gray-50 rounded-lg">
+                <div class="text-sm font-medium">Sales / QC</div>
+                <div id="salesSign" class="text-xs text-gray-500 mt-1">Not signed</div>
+            </div>
+        </div>
+        <div id="signButtons" class="flex gap-2 flex-wrap"></div>
+        <p class="text-xs text-gray-400 mt-3">Both Workshop and Sales must sign before the PDI is complete.</p>
+    </div>
+
+    <div class="flex gap-2">
+        <button onclick="window.print()" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</button>
+        <a href="/jobs/{{ job_id }}" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Back to Job</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const token = localStorage.getItem('token');
+    const fullName = localStorage.getItem('full_name') || '';
+    const role = localStorage.getItem('role') || '';
+    const userId = localStorage.getItem('user_id');
+    const jobId = {{ job_id }};
+
+    if (!token) window.location.href = '/login';
+    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+
+    function logout() {
+        localStorage.clear();
+        window.location.href = '/login';
+    }
+
+    function statusBtn(itemId, current, value, label) {
+        const active = current === value;
+        const colours = {
+            'Pass': active ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 border-green-200',
+            'Fail': active ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 border-red-200',
+            'N/A': active ? 'bg-gray-600 text-white' : 'bg-gray-50 text-gray-600 border-gray-200'
+        };
+        return '<button onclick="setStatus(' + itemId + ', \\x27' + value + '\\x27)" class="px-2 py-1 text-xs rounded border ' + colours[value] + '">' + label + '</button>';
+    }
+
+    async function loadPDI() {
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/pdi', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!res.ok) throw new Error('Failed');
+            const data = await res.json();
+            const job = data.job;
+            const items = data.items;
+
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+
+            document.getElementById('jobInfo').textContent = job.job_number + '  |  Status: ' + job.status;
+            document.getElementById('vehicleInfo').textContent = job.stock_number + ' — ' + job.vehicle_description + ' (' + job.main_type + ' / ' + job.sub_type + ') | Client: ' + job.client_name;
+
+            // Group by section
+            const sections = {};
+            items.forEach(function(it) {
+                if (!sections[it.section]) sections[it.section] = [];
+                sections[it.section].push(it);
+            });
+
+            let html = '';
+            Object.keys(sections).forEach(function(sec) {
+                html += '<div class="bg-white rounded-xl shadow p-4">' +
+                    '<h3 class="font-semibold text-sm text-status-blue mb-3">' + sec + '</h3>' +
+                    '<div class="space-y-3">';
+                sections[sec].forEach(function(it) {
+                    html += '<div class="border-b border-gray-100 pb-3">' +
+                        '<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">' +
+                        '<div class="flex-1">' +
+                        '<div class="text-sm font-medium">' + it.item_number + '. ' + it.check_item + '</div>' +
+                        (it.acceptance_criteria ? '<div class="text-xs text-gray-500 mt-0.5">' + it.acceptance_criteria + '</div>' : '') +
+                        '</div>' +
+                        '<div class="flex gap-1 flex-shrink-0">' +
+                        statusBtn(it.id, it.status, 'Pass', 'Pass') +
+                        statusBtn(it.id, it.status, 'Fail', 'Fail') +
+                        statusBtn(it.id, it.status, 'N/A', 'N/A') +
+                        '</div></div>' +
+                        '<input type="text" id="note-' + it.id + '" value="' + (it.notes || '').replace(/"/g, '&quot;') + '" placeholder="Notes / defects..." ' +
+                        'class="mt-2 w-full text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-status-blue" ' +
+                        'onchange="saveNote(' + it.id + ')">' +
+                        '</div>';
+                });
+                html += '</div></div>';
+            });
+            document.getElementById('pdiSections').innerHTML = html;
+
+            // Sign status
+            document.getElementById('wsSign').textContent = job.pdi_signed_workshop
+                ? ('Signed' + (job.pdi_signed_workshop_at ? ' at ' + job.pdi_signed_workshop_at.replace('T',' ').substring(0,16) : ''))
+                : 'Not signed';
+            document.getElementById('salesSign').textContent = job.pdi_signed_sales
+                ? ('Signed' + (job.pdi_signed_sales_at ? ' at ' + job.pdi_signed_sales_at.replace('T',' ').substring(0,16) : ''))
+                : 'Not signed';
+
+            let btns = '';
+            if ((role === 'workshop' || role === 'admin') && !job.pdi_signed_workshop) {
+                btns += '<button onclick="signPDI(\\x27workshop\\x27)" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Workshop</button>';
+            }
+            if ((role === 'sales' || role === 'admin') && !job.pdi_signed_sales) {
+                btns += '<button onclick="signPDI(\\x27sales\\x27)" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Sales</button>';
+            }
+            if (job.pdi_signed_workshop && job.pdi_signed_sales) {
+                btns += '<span class="text-green-600 text-sm font-medium">PDI fully signed</span>';
+            }
+            document.getElementById('signButtons').innerHTML = btns;
+
+        } catch (err) {
+            document.getElementById('loading').textContent = 'Could not load PDI.';
+        }
+    }
+
+    async function setStatus(itemId, status) {
+        try {
+            await fetch('/api/jobs/' + jobId + '/pdi/items/' + itemId, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: status })
+            });
+            loadPDI();
+        } catch (err) {
+            alert('Failed to update');
+        }
+    }
+
+    async function saveNote(itemId) {
+        const notes = document.getElementById('note-' + itemId).value;
+        try {
+            await fetch('/api/jobs/' + jobId + '/pdi/items/' + itemId, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notes: notes })
+            });
+        } catch (err) {}
+    }
+
+    async function signPDI(party) {
+        if (!confirm('Sign this PDI as ' + party + '?')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/pdi/sign', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ party: party, user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            alert('PDI signed by ' + party);
+            loadPDI();
+        } catch (err) {
+            alert('Connection error');
+        }
+    }
+
+    loadPDI();
+</script>
+{% endblock %}

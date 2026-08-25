@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-600"></span>
+    <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-800">Dashboard</h1>
+    <p class="text-gray-500">Welcome to the Status Truck Sales Job Card System</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+    <!-- Create Job Card Card -->
+    <a href="/jobs/create" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-status-blue">
+        <div class="text-status-blue font-bold text-lg mb-1">Create Job Card</div>
+        <p class="text-sm text-gray-500">Start a new preparation job for a sold vehicle</p>
+    </a>
+
+    <!-- Open Jobs -->
+    <a href="/jobs" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-yellow-500">
+        <div class="text-yellow-600 font-bold text-lg mb-1">Open Jobs</div>
+        <p class="text-sm text-gray-500">View and manage active job cards</p>
+    </a>
+
+    <!-- Workshop / Jobs -->
+    <a href="/jobs" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-green-500">
+        <div class="text-green-600 font-bold text-lg mb-1">Workshop & Jobs</div>
+        <p class="text-sm text-gray-500">Accept jobs and update task progress</p>
+    </a>
+
+    <!-- Admin -->
+    <a href="/admin/users" id="adminCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-purple-500">
+        <div class="text-purple-600 font-bold text-lg mb-1">User Management</div>
+        <p class="text-sm text-gray-500">Add staff and assign roles (Admin only)</p>
+    </a>
+</div>
+
+<div class="bg-white rounded-xl shadow p-6">
+    <h2 class="font-bold text-lg mb-3">System Status</h2>
+    <ul class="text-sm text-gray-600 space-y-1">
+        <li>✅ Login system active</li>
+        <li>✅ Company logo loaded</li>
+        <li>✅ Database ready</li>
+        <li>✅ Create Job Card (full save + task rules)</li>
+        <li>✅ Job List + Accept Job</li>
+        <li>✅ Job Detail view</li>
+        <li>✅ Task status updating (In Progress / Completed / Blocked)</li>
+        <li>✅ Add extra tasks + notes</li>
+        <li>✅ Admin User Management</li>
+        <li>✅ Ready for Delivery (dual confirm)</li>
+        <li>✅ Close Job (Salesman)</li>
+        <li>⏳ Full digital PDI forms (structure ready)</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Simple auth check
+    const token = localStorage.getItem('token');
+    if (!token) {
+        window.location.href = '/login';
+    } else {
+        const name = localStorage.getItem('full_name') || 'User';
+        const role = localStorage.getItem('role') || '';
+        document.getElementById('userInfo').textContent = `${name} (${role})`;
+        if (role === 'admin') {
+            const card = document.getElementById('adminCard');
+            if (card) card.classList.remove('hidden');
+        }
+    }
+
+    function logout() {
+        localStorage.clear();
+        window.location.href = '/login';
+    }
+</script>
+{% endblock %}
