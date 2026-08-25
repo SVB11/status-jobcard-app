@@ -197,13 +197,17 @@
                     buttons += '<button onclick="markReady(\x27workshop\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Workshop)</button>';
                 }
             }
-            // PDI button when work is completed or later
-            if (['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery'].includes(j.status)) {
-                buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Open PDI Checklist</a>';
+            // PDI button - available once work is done, including after delivery
+            if (['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery', 'Delivered / Closed'].includes(j.status)) {
+                buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">View PDI Checklist</a>';
             }
             // Close - Salesman only
             if ((role === 'sales' || role === 'admin') && j.status === 'Ready for Delivery') {
                 buttons += '<button onclick="closeJob()" class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900">Close / Delivered</button>';
+            }
+            // Delete - Admin only
+            if (role === 'admin') {
+                buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
             document.getElementById('actionButtons').innerHTML = buttons;
 
@@ -349,6 +353,23 @@
             if (!res.ok) { alert(data.detail || 'Failed'); return; }
             alert('Job closed as Delivered.');
             loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+
+    async function deleteJob() {
+        if (!confirm('Permanently delete this job card? This cannot be undone.')) return;
+        if (!confirm('Are you sure? All tasks and PDI data for this job will be deleted.')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/delete', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId ? parseInt(userId) : null })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed to delete'); return; }
+            alert('Job deleted.');
+            window.location.href = '/jobs';
         } catch (err) { alert('Connection error'); }
     }
 

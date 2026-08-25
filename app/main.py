@@ -717,3 +717,30 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
         "pdi_signed_sales": job.pdi_signed_sales,
         "status": job.status
     }
+
+# ---------- DELETE JOB (Admin only) ----------
+
+@app.post("/api/jobs/{job_id}/delete")
+async def api_delete_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        body = {}
+
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    user_id = body.get("user_id")
+    job_number = job.job_number
+
+    # Delete related records first (tasks, pdi items, audit can stay or cascade)
+    db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).delete()
+    db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id).delete()
+    db.delete(job)
+    db.commit()
+
+    if user_id:
+        log_audit(db, user_id, "Deleted Job Card", None, f"Deleted job {job_number}")
+
+    return {"success": True, "message": f"Job {job_number} deleted"}
