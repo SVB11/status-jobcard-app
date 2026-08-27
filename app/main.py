@@ -66,6 +66,12 @@ def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, d
     db.add(entry)
     db.commit()
 
+def user_name(db: Session, user_id):
+    if not user_id:
+        return None
+    u = db.query(models.User).filter(models.User.id == user_id).first()
+    return u.full_name if u else None
+
 def parts_missing_order_numbers(db: Session, job_id: int):
     parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).all()
     return [p for p in parts if not (p.order_number or "").strip()]
@@ -134,7 +140,7 @@ async def api_create_job(
     # Required fields
     required = ["stock_number", "vehicle_description", "year", "main_type", "sub_type",
                 "client_name", "salesman_name", "priority", "target_delivery_date",
-                "vin_number", "chassis_number"]
+                "vin_number"]
     for field in required:
         if not body.get(field):
             raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
@@ -162,7 +168,6 @@ async def api_create_job(
         quotation_invoice_number=body.get("quotation_invoice_number") or None,
         other_instructions=body.get("other_instructions") or None,
         vin_number=(body.get("vin_number") or "").strip() or None,
-        chassis_number=(body.get("chassis_number") or "").strip() or None,
         registration_number=(body.get("registration_number") or "").strip().upper() or None,
         third_party_place=(body.get("third_party_place") or "").strip() or None,
         third_party_date=body.get("third_party_date") or None,
@@ -263,6 +268,14 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
     job.status = "Accepted by Workshop"
     job.accepted_at = datetime.utcnow()
     job.accepted_by = user_id
+    acceptor = user_name(db, user_id) or body.get("full_name") or "Workshop"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Job accepted by {acceptor}",
+        created_by_name=acceptor,
+        created_by=user_id
+    ))
     db.commit()
 
     if user_id:
@@ -293,6 +306,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "status": t.status,
             "notes": t.notes,
             "is_custom": t.is_custom,
+            "last_updated_by_name": getattr(t, "last_updated_by_name", None),
             "task_location": getattr(t, "task_location", None),
             "third_party_provider": getattr(t, "third_party_provider", None),
             "booked_date": getattr(t, "booked_date", None),
@@ -322,6 +336,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "follow_up": bool(getattr(p, "follow_up", False)),
             "follow_up_note": getattr(p, "follow_up_note", None),
             "created_by_name": p.created_by_name,
+            "order_number_by": getattr(p, "order_number_by", None),
             "created_at": p.created_at.isoformat() if p.created_at else None
         })
 
@@ -373,7 +388,9 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "pdi_signed_sales": job.pdi_signed_sales,
         "status": job.status,
         "created_at": job.created_at.isoformat() if job.created_at else None,
+        "created_by_name": user_name(db, job.created_by),
         "accepted_at": job.accepted_at.isoformat() if job.accepted_at else None,
+        "accepted_by_name": user_name(db, job.accepted_by),
         "tasks": tasks,
         "updates": updates,
         "third_party_bookings": bookings,
@@ -430,6 +447,26 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
 
     if notes is not None:
         task.notes = notes
+
+    changer = body.get("full_name") or user_name(db, user_id) or "Staff"
+    task.last_updated_by_name = changer
+    change_bits = []
+    if new_status:
+        change_bits.append(f"status {old_status} → {new_status}")
+    if "task_location" in body:
+        change_bits.append(f"location {task.task_location or '—'}")
+    if "third_party_provider" in body:
+        change_bits.append(f"3rd party {task.third_party_provider or '—'}")
+    if notes is not None:
+        change_bits.append("note updated")
+    if change_bits:
+        db.add(models.JobUpdate(
+            job_card_id=job.id,
+            category="progress",
+            description=f"{task.task_name}: " + "; ".join(change_bits),
+            created_by_name=changer,
+            created_by=user_id
+        ))
 
     # If job was only Accepted, move to In Progress when first task is worked on
     if job.status == "Accepted by Workshop" and new_status in ("In Progress", "Completed", "Blocked"):
@@ -1089,6 +1126,8 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
         job_card_id=job.id,
         description=desc,
         order_number=(body.get("order_number") or "").strip() or None,
+        part_progress=body.get("part_progress") or "To be ordered",
+        ordered_date=body.get("ordered_date") or None,
         created_by_name=name,
         created_by=user_id
     )
@@ -1124,10 +1163,11 @@ async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Se
     if not order_number:
         raise HTTPException(status_code=400, detail="Order number is required")
     part.order_number = order_number
+    part.order_number_by = body.get("full_name") or "Staff"
     db.add(models.JobUpdate(
         job_card_id=job_id,
         category="parts",
-        description=f"Order number added for {part.description}: {order_number}",
+        description=f"Order number added for {part.description}: {order_number} by {part.order_number_by}",
         created_by_name=body.get("full_name") or "Staff",
         created_by=body.get("user_id")
     ))

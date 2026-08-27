@@ -131,6 +131,7 @@ class JobTask(Base):
     is_custom = Column(Boolean, default=False)  # True if added by workshop or free-text
     status = Column(String, default="Not Started")
     notes = Column(Text, nullable=True)
+    last_updated_by_name = Column(String, nullable=True)
     task_location = Column(String, nullable=True)
     third_party_provider = Column(String, nullable=True)
     booked_date = Column(String, nullable=True)
@@ -196,6 +197,7 @@ class PartItem(Base):
     ordered_date = Column(String, nullable=True)
     follow_up = Column(Boolean, default=False)
     follow_up_note = Column(Text, nullable=True)
+    order_number_by = Column(String, nullable=True)
     created_by_name = Column(String, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

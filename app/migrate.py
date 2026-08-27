@@ -20,11 +20,13 @@ NEW_COLUMNS = {
         "ordered_date": "VARCHAR",
         "follow_up": "BOOLEAN",
         "follow_up_note": "TEXT",
+        "order_number_by": "VARCHAR",
     },
     "job_tasks": {
         "task_location": "VARCHAR",
         "third_party_provider": "VARCHAR",
         "booked_date": "VARCHAR",
+        "last_updated_by_name": "VARCHAR",
     },
 }
 
