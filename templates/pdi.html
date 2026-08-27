@@ -129,11 +129,12 @@
             document.getElementById('pdiSections').innerHTML = html;
 
             // Sign status
+            document.title = (job.stock_number || '') + ' ' + (job.vehicle_description || '') + ' PDI';
             document.getElementById('wsSign').textContent = job.pdi_signed_workshop
-                ? ('Signed' + (job.pdi_signed_workshop_at ? ' at ' + job.pdi_signed_workshop_at.replace('T',' ').substring(0,16) : ''))
+                ? ('Signed by ' + (job.pdi_signed_workshop_by_name || 'Workshop') + (job.pdi_signed_workshop_at ? ' at ' + job.pdi_signed_workshop_at.replace('T',' ').substring(0,16) : ''))
                 : 'Not signed';
             document.getElementById('salesSign').textContent = job.pdi_signed_sales
-                ? ('Signed' + (job.pdi_signed_sales_at ? ' at ' + job.pdi_signed_sales_at.replace('T',' ').substring(0,16) : ''))
+                ? ('Signed by ' + (job.pdi_signed_sales_by_name || 'Sales') + (job.pdi_signed_sales_at ? ' at ' + job.pdi_signed_sales_at.replace('T',' ').substring(0,16) : ''))
                 : 'Not signed';
 
             let btns = '';

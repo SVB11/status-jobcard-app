@@ -20,7 +20,45 @@ Base.metadata.create_all(bind=engine)
 migrate_schema()
 seed_database()
 
-app = FastAPI(title="Status Truck Sales - Job Card System")
+app = FastAPI(title="Status Truck Sales - Job Card System", docs_url=None, redoc_url=None, openapi_url=None)
+
+FAILED_LOGINS = {}
+MAX_FAILED = 6
+LOCK_MINUTES = 15
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+def login_blocked(username: str):
+    rec = FAILED_LOGINS.get((username or "").lower())
+    if not rec:
+        return False
+    count, when = rec
+    if count >= MAX_FAILED and (datetime.utcnow() - when).total_seconds() < LOCK_MINUTES * 60:
+        return True
+    if (datetime.utcnow() - when).total_seconds() >= LOCK_MINUTES * 60:
+        FAILED_LOGINS.pop((username or "").lower(), None)
+    return False
+
+def record_failed_login(username: str):
+    key = (username or "").lower()
+    count, _ = FAILED_LOGINS.get(key, (0, datetime.utcnow()))
+    FAILED_LOGINS[key] = (count + 1, datetime.utcnow())
+
+def clear_failed_login(username: str):
+    FAILED_LOGINS.pop((username or "").lower(), None)
+
+def require_admin(user: models.User):
+    if user.role not in ("admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Admin access only")
+    return user
 
 # Absolute paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,6 +104,13 @@ def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, d
     db.add(entry)
     db.commit()
 
+def assert_editable(db: Session, job, user_id):
+    if not job or job.status != "Delivered / Closed":
+        return
+    u = db.query(models.User).filter(models.User.id == user_id).first() if user_id else None
+    if not u or u.role not in ("admin", "accounts"):
+        raise HTTPException(status_code=400, detail="Job is delivered and locked. Only Admin can edit.")
+
 def user_name(db: Session, user_id):
     if not user_id:
         return None
@@ -80,13 +125,18 @@ def parts_missing_order_numbers(db: Session, job_id: int):
 
 @app.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = auth.authenticate_user(db, form_data.username, form_data.password)
+    username = form_data.username
+    if login_blocked(username):
+        raise HTTPException(status_code=429, detail="Too many failed logins. Try again in 15 minutes.")
+    user = auth.authenticate_user(db, username, form_data.password)
     if not user:
+        record_failed_login(username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    clear_failed_login(username)
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username, "role": user.role, "full_name": user.full_name},
@@ -140,7 +190,7 @@ async def api_create_job(
     # Required fields
     required = ["stock_number", "vehicle_description", "year", "main_type", "sub_type",
                 "client_name", "salesman_name", "priority", "target_delivery_date",
-                "vin_number", "registration_number"]
+                "vin_number", "registration_number", "quotation_invoice_number"]
     for field in required:
         if not body.get(field):
             raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
@@ -384,6 +434,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "vin_number": getattr(job, "vin_number", None),
         "chassis_number": getattr(job, "chassis_number", None),
         "registration_number": getattr(job, "registration_number", None),
+        "quotation_invoice_number": getattr(job, "quotation_invoice_number", None),
         "client_name": job.client_name,
         "salesman_name": job.salesman_name,
         "priority": job.priority,
@@ -402,6 +453,10 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "current_activity_by": getattr(job, "current_activity_by", None),
         "pdi_signed_workshop": job.pdi_signed_workshop,
         "pdi_signed_sales": job.pdi_signed_sales,
+        "pdi_signed_workshop_by_name": user_name(db, job.pdi_signed_workshop_by),
+        "pdi_signed_sales_by_name": user_name(db, job.pdi_signed_sales_by),
+        "pdi_signed_workshop_at": job.pdi_signed_workshop_at.isoformat() if job.pdi_signed_workshop_at else None,
+        "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None,
         "status": job.status,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "created_by_name": user_name(db, job.created_by),
@@ -426,6 +481,8 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    assert_editable(db, job, body.get("user_id"))
 
     task = db.query(models.JobTask).filter(
         models.JobTask.id == task_id,
@@ -533,6 +590,8 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    assert_editable(db, job, body.get("user_id"))
+
     task_name = (body.get("task_name") or "").strip()
     if not task_name:
         raise HTTPException(status_code=400, detail="Task name is required")
@@ -575,7 +634,8 @@ async def admin_users_page(request: Request):
     return render_template("admin_users.html", request=request, page_title="User Management")
 
 @app.get("/api/admin/users")
-async def api_list_users(db: Session = Depends(get_db)):
+async def api_list_users(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     users = db.query(models.User).order_by(models.User.role, models.User.full_name).all()
     return {
         "users": [
@@ -585,13 +645,15 @@ async def api_list_users(db: Session = Depends(get_db)):
                 "full_name": u.full_name,
                 "role": u.role,
                 "is_active": u.is_active,
+                "password": getattr(u, "password_plain", None) or "(changed — not stored)",
                 "created_at": u.created_at.isoformat() if u.created_at else None
             } for u in users
         ]
     }
 
 @app.post("/api/admin/users")
-async def api_create_user(request: Request, db: Session = Depends(get_db)):
+async def api_create_user(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     try:
         body = await request.json()
     except:
@@ -616,6 +678,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db)):
         username=username,
         full_name=full_name,
         hashed_password=auth.get_password_hash(password),
+        password_plain=password,
         role=role,
         is_active=True
     )
@@ -634,7 +697,8 @@ async def api_create_user(request: Request, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/admin/users/{user_id}/toggle")
-async def api_toggle_user(user_id: int, db: Session = Depends(get_db)):
+async def api_toggle_user(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -643,7 +707,8 @@ async def api_toggle_user(user_id: int, db: Session = Depends(get_db)):
     return {"success": True, "is_active": user.is_active}
 
 @app.post("/api/admin/users/{user_id}/reset-password")
-async def api_reset_password(user_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_reset_password(user_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     try:
         body = await request.json()
     except:
@@ -655,6 +720,25 @@ async def api_reset_password(user_id: int, request: Request, db: Session = Depen
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.hashed_password = auth.get_password_hash(new_password)
+    user.password_plain = new_password
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/me/password")
+async def api_change_own_password(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    body = await request.json()
+    user_id = current_user.id
+    current = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password too short")
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not auth.verify_password(current, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is wrong")
+    user.hashed_password = auth.get_password_hash(new_password)
+    user.password_plain = new_password
     db.commit()
     return {"success": True}
 
@@ -803,7 +887,9 @@ async def api_get_pdi(job_id: int, db: Session = Depends(get_db)):
             "pdi_signed_workshop": job.pdi_signed_workshop,
             "pdi_signed_sales": job.pdi_signed_sales,
             "pdi_signed_workshop_at": job.pdi_signed_workshop_at.isoformat() if job.pdi_signed_workshop_at else None,
-            "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None
+            "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None,
+            "pdi_signed_workshop_by_name": user_name(db, job.pdi_signed_workshop_by),
+            "pdi_signed_sales_by_name": user_name(db, job.pdi_signed_sales_by)
         },
         "items": items
     }
@@ -816,6 +902,7 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     job_lock = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    assert_editable(db, job_lock, body.get("user_id"))
     if job_lock and job_lock.pdi_signed_workshop and job_lock.pdi_signed_sales:
         raise HTTPException(status_code=400, detail="PDI is locked after dual sign-off")
 
@@ -889,6 +976,8 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    assert_editable(db, job, body.get("user_id"))
 
     fails = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id, models.PDIItem.status == "Fail").count()
     if fails:
@@ -1088,6 +1177,8 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    assert_editable(db, job, body.get("user_id"))
     service = (body.get("service") or "").strip()
     provider = (body.get("provider") or "").strip()
     booked_date = body.get("booked_date") or None
@@ -1180,6 +1271,8 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    assert_editable(db, job, body.get("user_id"))
     desc = (body.get("description") or "").strip()
     if not desc:
         raise HTTPException(status_code=400, detail="Part description is required")
@@ -1225,6 +1318,8 @@ async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Se
     part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    assert_editable(db, job, body.get("user_id"))
     order_number = (body.get("order_number") or "").strip()
     if not order_number:
         raise HTTPException(status_code=400, detail="Order number is required")
@@ -1241,7 +1336,8 @@ async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Se
     return {"success": True}
 
 @app.get("/api/admin/export/extras.csv")
-async def export_extras_csv(db: Session = Depends(get_db)):
+async def export_extras_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     import csv
     from io import StringIO
     buf = StringIO()
@@ -1268,7 +1364,8 @@ async def export_extras_csv(db: Session = Depends(get_db)):
     )
 
 @app.get("/api/admin/export/parts.csv")
-async def export_parts_csv(db: Session = Depends(get_db)):
+async def export_parts_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     import csv
     from io import StringIO
     buf = StringIO()
@@ -1294,7 +1391,8 @@ async def export_parts_csv(db: Session = Depends(get_db)):
     )
 
 @app.get("/api/admin/export/custom-tasks.csv")
-async def export_custom_tasks_csv(db: Session = Depends(get_db)):
+async def export_custom_tasks_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     import csv
     from io import StringIO
     buf = StringIO()
@@ -1352,6 +1450,8 @@ async def api_part_progress(job_id: int, part_id: int, request: Request, db: Ses
     part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    assert_editable(db, job, body.get("user_id"))
     progress = body.get("part_progress") or "To be ordered"
     if progress not in ("To be ordered", "Ordered", "Waiting for delivery", "Delivered"):
         raise HTTPException(status_code=400, detail="Invalid progress")
@@ -1406,6 +1506,12 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    assert_editable(db, job, body.get("user_id"))
+
+    assert_editable(db, job, body.get("user_id"))
+
+    assert_editable(db, job, body.get("user_id"))
     location = body.get("location")
     if location:
         job.current_location = location

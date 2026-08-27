@@ -2,6 +2,9 @@ from sqlalchemy import text, inspect
 from .database import engine
 
 NEW_COLUMNS = {
+    "users": {
+        "password_plain": "VARCHAR",
+    },
     "job_cards": {
         "vin_number": "VARCHAR",
         "chassis_number": "VARCHAR",

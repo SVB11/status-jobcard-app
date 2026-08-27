@@ -31,11 +31,14 @@ def seed_database():
     for username, full_name, role, password in STAFF:
         exists = db.query(models.User).filter(models.User.username == username).first()
         if exists:
+            if not getattr(exists, "password_plain", None):
+                exists.password_plain = password
             continue
         db.add(models.User(
             username=username,
             full_name=full_name,
             hashed_password=get_password_hash(password),
+            password_plain=password,
             role=role
         ))
         added.append(username)

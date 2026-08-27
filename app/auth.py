@@ -32,6 +32,8 @@ def authenticate_user(db: Session, username: str, password: str):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         return False
+    if not getattr(user, "is_active", True):
+        return False
     if not verify_password(password, user.hashed_password):
         return False
     return user

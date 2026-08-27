@@ -38,6 +38,7 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Year</dt><dd id="year" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">VIN</dt><dd id="vinNumber" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Reg No</dt><dd id="regNumber" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Quotation / Invoice</dt><dd id="quoteNo" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
             </dl>
@@ -173,6 +174,7 @@
     }
 
     function canEditTasks() {
+        if (currentJob && currentJob.status === 'Delivered / Closed' && !isAdmin) return false;
         return isWorkshop;
     }
 
@@ -347,6 +349,7 @@
             document.getElementById('year').textContent = j.year || '—';
             document.getElementById('vinNumber').textContent = j.vin_number || '—';
             document.getElementById('regNumber').textContent = j.registration_number || '—';
+            document.getElementById('quoteNo').textContent = j.quotation_invoice_number || '—';
             document.getElementById('clientName').textContent = j.client_name;
             document.getElementById('salesman').textContent = j.salesman_name;
             document.getElementById('status').textContent = j.status;
@@ -359,10 +362,15 @@
             document.getElementById('acceptedBy').textContent = j.accepted_by_name ? (j.accepted_by_name + (j.accepted_at ? ' — ' + j.accepted_at.replace('T',' ').substring(0,16) : '')) : 'Not accepted yet';
             renderUpdates(j);
             loadLists();
-            if (isWorkshop) {
+            const locked = (j.status === 'Delivered / Closed' && !isAdmin);
+            if (isWorkshop && !locked) {
                 document.getElementById('extrasForm').classList.remove('hidden');
                 document.getElementById('tpForm').classList.remove('hidden');
                 document.getElementById('partsForm').classList.remove('hidden');
+            } else {
+                document.getElementById('extrasForm').classList.add('hidden');
+                document.getElementById('tpForm').classList.add('hidden');
+                document.getElementById('partsForm').classList.add('hidden');
             }
             renderThirdParty(j);
             const tpSec = document.getElementById('thirdPartySection');
@@ -376,8 +384,7 @@
                     (j.current_activity_notes ? '<div class="text-xs text-gray-500">' + j.current_activity_notes + '</div>' : '') +
                     (j.current_activity_by ? '<div class="text-xs text-gray-400">' + j.current_activity_by + (j.current_activity_at ? ' — ' + j.current_activity_at.replace('T',' ').substring(0,16) : '') + '</div>' : '');
             }
-            if (document.getElementById('currentActivity') && j.current_activity) document.getElementById('currentActivity').value = j.current_activity;
-
+            
 
             renderTasks(j.tasks);
 
@@ -684,7 +691,21 @@
                 html += '<div class="flex gap-2 mt-2"><input type="text" id="ord-' + p.id + '" placeholder="Order number" class="flex-1 px-2 py-1 border rounded text-xs">' +
                     '<button type="button" onclick="savePartOrder(' + p.id + ')" class="px-2 py-1 bg-gray-800 text-white text-xs rounded">Save order no</button></div>';
             }
-            html += '<div class="text-xs text-gray-600 mt-1">Status is updated under Work / Prep Tasks</div>';
+            const prog = p.part_progress || 'To be ordered';
+            const showInv = (prog === 'Ordered' || prog === 'Waiting for delivery' || prog === 'Delivered');
+            if (isWorkshop) {
+                html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">' +
+                    '<select id="pprog-' + p.id + '" class="text-xs border rounded px-2 py-1" onchange="togglePartsTabInvoice(' + p.id + ')">' +
+                    ['To be ordered','Ordered','Waiting for delivery','Delivered'].map(function(s){
+                        return '<option' + (prog===s?' selected':'') + '>' + s + '</option>';
+                    }).join('') + '</select>' +
+                    '<input type="date" id="ppdate-' + p.id + '" value="' + (p.ordered_date || '') + '" class="text-xs border rounded px-2 py-1">' +
+                    '<input type="text" id="pinv-' + p.id + '" value="' + (p.supplier_invoice || '') + '" placeholder="Supplier invoice no (required on Delivered)" class="text-xs border rounded px-2 py-1 ' + (showInv ? '' : 'hidden') + '">' +
+                    '<button type="button" onclick="savePartProgressFromTab(' + p.id + ')" class="text-xs px-2 py-1 bg-gray-800 text-white rounded">Save part status</button>' +
+                    '</div>';
+            } else {
+                html += '<div class="text-xs text-gray-600 mt-1">' + prog + (p.supplier_invoice ? ' | Inv ' + p.supplier_invoice : '') + '</div>';
+            }
             if (isAdmin) {
                 html += '<button type="button" onclick="requestFollowUp(' + p.id + ')" class="mt-2 px-2 py-1 text-xs bg-amber-600 text-white rounded">Follow up</button>';
                 if (p.follow_up) html += '<span class="ml-2 text-xs text-amber-700">Follow-up sent' + (p.follow_up_note ? ': ' + p.follow_up_note : '') + '</span>';
@@ -816,6 +837,8 @@
             });
             const data = await res.json();
             if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            document.getElementById('currentActivity').value = '';
+            document.getElementById('extraNotes').value = '';
             loadJob();
         } catch (err) { alert('Connection error'); }
     }
@@ -858,6 +881,40 @@
             document.getElementById('extraNotes').value = '';
             loadJob();
         } catch (err) { alert('Connection error'); }
+    }
+
+    function togglePartsTabInvoice(partId) {
+        const prog = document.getElementById('pprog-' + partId).value;
+        const inv = document.getElementById('pinv-' + partId);
+        if (inv) {
+            if (prog === 'Ordered' || prog === 'Waiting for delivery' || prog === 'Delivered') inv.classList.remove('hidden');
+            else inv.classList.add('hidden');
+        }
+    }
+
+    async function savePartProgressFromTab(partId) {
+        const progEl = document.getElementById('pprog-' + partId);
+        const dateEl = document.getElementById('ppdate-' + partId);
+        const invEl = document.getElementById('pinv-' + partId);
+        const chosen = progEl ? progEl.value : 'To be ordered';
+        if (chosen === 'Delivered' && !(invEl && invEl.value.trim())) {
+            alert('Supplier invoice number is required when the part is Delivered.');
+            return;
+        }
+        const res = await fetch('/api/jobs/' + jobId + '/parts/' + partId + '/progress', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                part_progress: chosen,
+                ordered_date: dateEl ? dateEl.value : '',
+                supplier_invoice: invEl ? invEl.value : '',
+                user_id: userId ? parseInt(userId) : null,
+                full_name: fullName
+            })
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Could not save'); return; }
+        loadJob();
     }
 
     function togglePartInvoice(partId) {

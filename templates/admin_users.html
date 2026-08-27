@@ -98,7 +98,7 @@
                     '<div>' +
                     '<div class="font-medium text-sm">' + u.full_name + ' ' + roleBadge(u.role) + 
                     (!u.is_active ? ' <span class="text-xs text-red-500">(inactive)</span>' : '') + '</div>' +
-                    '<div class="text-xs text-gray-500">@' + u.username + '</div>' +
+                    '<div class="text-xs text-gray-500">@' + u.username + ' &nbsp; Password: <span class="font-mono text-gray-800">' + (u.password || '—') + '</span></div>' +
                     '</div>' +
                     '<div class="flex gap-2">' +
                     '<button onclick="toggleUser(' + u.id + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' + 

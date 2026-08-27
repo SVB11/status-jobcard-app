@@ -31,8 +31,9 @@
 <script>
     const jobId = {{ job_id }};
     async function load() {
-        const j = await (await fetch('/api/jobs/' + jobId)).json();
-        document.getElementById('title').innerHTML = '<strong>' + j.job_number + '</strong><div class="muted">' + j.stock_number + ' — ' + j.status + '</div>';
+        const j = await (await fetch('/api/jobs/' + jobId, { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') } })).json();
+        document.title = (j.stock_number || '') + ' ' + (j.vehicle_description || '') + ' completed work';
+        document.getElementById('title').innerHTML = '<strong>' + (j.stock_number || j.job_number) + '</strong><div class="muted">' + (j.vehicle_description || '') + ' — ' + j.status + '</div>';
         let html = '<table>';
         [['Stock', j.stock_number], ['Vehicle', j.vehicle_description],
          ['VIN', j.vin_number || '—'], ['Reg', j.registration_number || '—'],
@@ -60,11 +61,11 @@
         });
         html += '</table>';
 
-        html += '<h2>Parts (order number created by Chantelle)</h2><table><tr><th>Part</th><th>Order number</th></tr>';
+        html += '<h2>Parts (order number created by Chantelle)</h2><table><tr><th>Part</th><th>Qty</th><th>Price</th><th>Order number</th><th>Invoice</th><th>Status</th></tr>';
         const parts = j.parts || [];
-        if (!parts.length) html += '<tr><td colspan="2">' + (j.parts_to_order || 'No parts listed') + '</td></tr>';
+        if (!parts.length) html += '<tr><td colspan="6">' + (j.parts_to_order || 'No parts listed') + '</td></tr>';
         parts.forEach(function(pt) {
-            html += '<tr><td>' + pt.description + '</td><td>' + (pt.order_number || 'MISSING') + '</td></tr>';
+            html += '<tr><td>' + pt.description + '</td><td>' + (pt.quantity || '1') + '</td><td>' + (pt.price || '') + '</td><td>' + (pt.order_number || 'MISSING') + '</td><td>' + (pt.supplier_invoice || '') + '</td><td>' + (pt.part_progress || '') + '</td></tr>';
         });
         html += '</table>';
 
