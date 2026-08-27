@@ -147,7 +147,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         "token_type": "bearer",
         "role": user.role,
         "full_name": user.full_name,
-        "user_id": user.id
+        "user_id": user.id,
+        "must_change_password": bool(getattr(user, "must_change_password", False))
     }
 
 @app.get("/login", response_class=HTMLResponse)
@@ -679,6 +680,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
         full_name=full_name,
         hashed_password=auth.get_password_hash(password),
         password_plain=password,
+        must_change_password=True,
         role=role,
         is_active=True
     )
@@ -721,6 +723,7 @@ async def api_reset_password(user_id: int, request: Request, db: Session = Depen
         raise HTTPException(status_code=404, detail="User not found")
     user.hashed_password = auth.get_password_hash(new_password)
     user.password_plain = new_password
+    user.must_change_password = True
     db.commit()
     return {"success": True}
 
@@ -739,6 +742,7 @@ async def api_change_own_password(request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=400, detail="Current password is wrong")
     user.hashed_password = auth.get_password_hash(new_password)
     user.password_plain = new_password
+    user.must_change_password = False
     db.commit()
     return {"success": True}
 

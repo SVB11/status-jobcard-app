@@ -74,8 +74,9 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-2">Change my password</h2>
+<div id="firstLoginBox" class="hidden bg-amber-50 border-2 border-amber-500 rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-2">First login — choose your own password</h2>
+    <p class="text-sm text-gray-700 mb-3">This is required once. After you save it, use that password from now on. This box will not show again.</p>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <input type="password" id="curPw" placeholder="Current password" class="px-3 py-2 border rounded">
         <input type="password" id="newPw" placeholder="New password" class="px-3 py-2 border rounded">
@@ -142,6 +143,9 @@
             if (bb) { bb.classList.remove('hidden'); loadBookings(); }
         }
         
+        if (localStorage.getItem('must_change_password') === '1') {
+            document.getElementById('firstLoginBox').classList.remove('hidden');
+        }
         loadLocationBoard();
         loadPdiFails();
     }
@@ -162,9 +166,11 @@
             const data = await res.json();
             if (!res.ok) { msg.className = 'text-sm mt-2 text-red-600'; msg.textContent = data.detail || 'Could not change password'; return; }
             msg.className = 'text-sm mt-2 text-green-700';
-            msg.textContent = 'Password updated';
+            msg.textContent = 'Password saved. Use this password from now on.';
             document.getElementById('curPw').value = '';
             document.getElementById('newPw').value = '';
+            localStorage.setItem('must_change_password', '0');
+            document.getElementById('firstLoginBox').classList.add('hidden');
         } catch (err) {
             msg.className = 'text-sm mt-2 text-red-600';
             msg.textContent = 'Connection error';

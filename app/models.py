@@ -44,6 +44,7 @@ class User(Base):
     full_name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     password_plain = Column(String, nullable=True)
+    must_change_password = Column(Boolean, default=True)
     role = Column(String, nullable=False)  # sales, workshop, accounts, admin
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -4,6 +4,7 @@ from .database import engine
 NEW_COLUMNS = {
     "users": {
         "password_plain": "VARCHAR",
+        "must_change_password": "BOOLEAN",
     },
     "job_cards": {
         "vin_number": "VARCHAR",

@@ -48,6 +48,19 @@
         <a href="/jobs/{{ job_id }}" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Back to Job</a>
     </div>
 </div>
+
+<div id="failModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+        <h2 class="text-xl font-bold text-red-700 mb-2">PDI FAIL — instruction for workshop</h2>
+        <p class="text-sm text-gray-700 mb-3">Type clearly what failed and what workshop must fix. This becomes a Work / Prep task.</p>
+        <p class="text-xs font-semibold text-gray-600 mb-1">TYPE THE WORKSHOP INSTRUCTION IN THIS BOX:</p>
+        <textarea id="failNote" rows="5" class="w-full border-2 border-red-500 rounded-lg p-3 text-base" placeholder="Example: Left rear brake light not working — replace bulb and retest"></textarea>
+        <div class="flex gap-2 mt-4">
+            <button type="button" onclick="confirmFail()" class="px-4 py-2 bg-red-600 text-white rounded-lg">Send fail to workshop</button>
+            <button type="button" onclick="cancelFail()" class="px-4 py-2 border rounded-lg">Cancel</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -154,15 +167,38 @@
         }
     }
 
-    async function setStatus(itemId, status) {
-        let notes = '';
+    let pendingFailId = null;
+
+    function setStatus(itemId, status) {
         if (status === 'Fail') {
-            notes = prompt('What failed? Give workshop the instruction to fix:') || '';
-            if (!notes.trim()) {
-                alert('A fail note is required so workshop knows what to fix.');
-                return;
-            }
+            pendingFailId = itemId;
+            document.getElementById('failNote').value = '';
+            document.getElementById('failModal').classList.remove('hidden');
+            document.getElementById('failNote').focus();
+            return;
         }
+        sendPdiStatus(itemId, status, '');
+    }
+
+    function cancelFail() {
+        pendingFailId = null;
+        document.getElementById('failModal').classList.add('hidden');
+    }
+
+    function confirmFail() {
+        const notes = (document.getElementById('failNote').value || '').trim();
+        if (!notes) {
+            document.getElementById('failNote').classList.add('ring-4', 'ring-red-400');
+            document.getElementById('failNote').focus();
+            return;
+        }
+        const id = pendingFailId;
+        document.getElementById('failModal').classList.add('hidden');
+        pendingFailId = null;
+        sendPdiStatus(id, 'Fail', notes);
+    }
+
+    async function sendPdiStatus(itemId, status, notes) {
         try {
             const res = await fetch('/api/jobs/' + jobId + '/pdi/items/' + itemId, {
                 method: 'POST',
@@ -171,7 +207,6 @@
             });
             const data = await res.json().catch(function(){ return {}; });
             if (!res.ok) { alert(data.detail || 'Failed to update'); return; }
-            if (status === 'Fail') alert('Marked Fail and sent back to workshop.');
             loadPDI();
         } catch (err) {
             alert('Failed to update');
