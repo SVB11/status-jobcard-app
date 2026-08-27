@@ -12,7 +12,7 @@ from .database import engine, get_db, Base
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
-from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS
+from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task
 from .migrate import migrate_schema
 
 # Create tables and seed
@@ -133,7 +133,8 @@ async def api_create_job(
 
     # Required fields
     required = ["stock_number", "vehicle_description", "year", "main_type", "sub_type",
-                "client_name", "salesman_name", "priority", "target_delivery_date"]
+                "client_name", "salesman_name", "priority", "target_delivery_date",
+                "vin_number", "chassis_number"]
     for field in required:
         if not body.get(field):
             raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
@@ -161,6 +162,7 @@ async def api_create_job(
         quotation_invoice_number=body.get("quotation_invoice_number") or None,
         other_instructions=body.get("other_instructions") or None,
         vin_number=(body.get("vin_number") or "").strip() or None,
+        chassis_number=(body.get("chassis_number") or "").strip() or None,
         registration_number=(body.get("registration_number") or "").strip().upper() or None,
         third_party_place=(body.get("third_party_place") or "").strip() or None,
         third_party_date=body.get("third_party_date") or None,
@@ -291,6 +293,10 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "status": t.status,
             "notes": t.notes,
             "is_custom": t.is_custom,
+            "task_location": getattr(t, "task_location", None),
+            "third_party_provider": getattr(t, "third_party_provider", None),
+            "booked_date": getattr(t, "booked_date", None),
+            "providers": providers_for_task(t.task_name),
             "completed_at": t.completed_at.isoformat() if t.completed_at else None
         })
 
@@ -311,6 +317,10 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "id": p.id,
             "description": p.description,
             "order_number": p.order_number,
+            "part_progress": getattr(p, "part_progress", None) or "To be ordered",
+            "ordered_date": getattr(p, "ordered_date", None),
+            "follow_up": bool(getattr(p, "follow_up", False)),
+            "follow_up_note": getattr(p, "follow_up_note", None),
             "created_by_name": p.created_by_name,
             "created_at": p.created_at.isoformat() if p.created_at else None
         })
@@ -341,6 +351,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "main_type": job.main_type,
         "sub_type": job.sub_type,
         "vin_number": getattr(job, "vin_number", None),
+        "chassis_number": getattr(job, "chassis_number", None),
         "registration_number": getattr(job, "registration_number", None),
         "client_name": job.client_name,
         "salesman_name": job.salesman_name,
@@ -354,6 +365,10 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "parts_to_order": getattr(job, "parts_to_order", None),
         "workshop_entered_at": job.workshop_entered_at.isoformat() if getattr(job, "workshop_entered_at", None) else None,
         "workshop_hours": workshop_hours,
+        "current_activity": getattr(job, "current_activity", None),
+        "current_activity_notes": getattr(job, "current_activity_notes", None),
+        "current_activity_at": job.current_activity_at.isoformat() if getattr(job, "current_activity_at", None) else None,
+        "current_activity_by": getattr(job, "current_activity_by", None),
         "pdi_signed_workshop": job.pdi_signed_workshop,
         "pdi_signed_sales": job.pdi_signed_sales,
         "status": job.status,
@@ -389,6 +404,14 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     user_id = body.get("user_id")
     new_status = body.get("status")
     notes = body.get("notes")
+    if "task_location" in body:
+        task.task_location = body.get("task_location") or None
+    if "third_party_provider" in body:
+        task.third_party_provider = body.get("third_party_provider") or None
+        if task.third_party_provider:
+            task.task_location = "3rd Party: " + task.third_party_provider
+    if "booked_date" in body:
+        task.booked_date = body.get("booked_date") or None
 
     allowed_statuses = ["Not Started", "In Progress", "Completed", "Blocked"]
     if new_status and new_status not in allowed_statuses:
@@ -468,7 +491,8 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
         description=body.get("description") or None,
         is_custom=True,
         status="Not Started",
-        notes=body.get("notes") or None
+        notes=body.get("notes") or None,
+        task_location=body.get("task_location") or None
     )
     db.add(task)
     db.commit()
@@ -998,14 +1022,40 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
         created_by_name=name,
         created_by=user_id
     ))
-    db.add(models.JobTask(
-        job_card_id=job.id,
-        task_name=f"3rd party: {desc}",
-        description=body.get("notes"),
-        is_custom=True,
-        status="Not Started",
-        notes=body.get("notes")
-    ))
+    # Fill the matching Work / Prep task with provider + date
+    match_key = service.lower()
+    matched = False
+    for t in job.tasks:
+        name = (t.task_name or "").lower()
+        hit = False
+        if "barrel" in match_key and "barrel" in name:
+            hit = True
+        elif "pressure" in match_key and "pressure" in name:
+            hit = True
+        elif "calibration" in match_key and "calibration" in name:
+            hit = True
+        elif "roadworthy" in match_key and "roadworthy" in name and "as is" not in name:
+            hit = True
+        elif "auto electrical" in match_key and ("auto electrical" in name or "man auto" in name):
+            hit = True
+        if hit:
+            t.third_party_provider = provider
+            t.booked_date = booked_date
+            t.task_location = f"3rd Party: {provider}"
+            t.notes = ((t.notes + " | ") if t.notes else "") + desc
+            matched = True
+    if not matched:
+        db.add(models.JobTask(
+            job_card_id=job.id,
+            task_name=f"3rd party: {desc}",
+            description=body.get("notes"),
+            is_custom=True,
+            status="Not Started",
+            notes=body.get("notes"),
+            task_location=f"3rd Party: {provider}",
+            third_party_provider=provider,
+            booked_date=booked_date
+        ))
     job.third_party_place = f"{service} - {provider}"
     job.third_party_date = booked_date
     db.commit()
@@ -1057,6 +1107,7 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
         is_custom=True,
         status="Not Started"
     ))
+    notify_role(db, "workshop", f"Part to be ordered: {desc} on {job.stock_number}", job.id)
     db.commit()
     return {"success": True, "id": part.id}
 
@@ -1161,3 +1212,136 @@ async def export_custom_tasks_csv(db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=manual_tasks.csv"}
     )
+
+@app.get("/api/workshop/bookings")
+async def api_workshop_bookings(db: Session = Depends(get_db)):
+    rows = db.query(models.ThirdPartyBooking).order_by(models.ThirdPartyBooking.booked_date).all()
+    out = []
+    for b in rows:
+        job = db.query(models.JobCard).filter(models.JobCard.id == b.job_card_id).first()
+        if job and job.status == "Delivered / Closed":
+            continue
+        out.append({
+            "id": b.id,
+            "service": b.service,
+            "provider": b.provider,
+            "booked_date": b.booked_date,
+            "job_id": b.job_card_id,
+            "job_number": job.job_number if job else "",
+            "stock_number": job.stock_number if job else "",
+            "vehicle_description": job.vehicle_description if job else "",
+            "year": job.year if job else "",
+            "label": f"{job.stock_number} {job.vehicle_description} {job.year or ''}".strip() if job else "",
+        })
+    return {"bookings": out}
+
+def notify_role(db, role, message, job_id=None):
+    users = db.query(models.User).filter(models.User.role == role, models.User.is_active == True).all()
+    for u in users:
+        db.add(models.Notification(user_id=u.id, job_card_id=job_id, message=message))
+
+@app.post("/api/jobs/{job_id}/parts/{part_id}/progress")
+async def api_part_progress(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    progress = body.get("part_progress") or "To be ordered"
+    if progress not in ("To be ordered", "Ordered", "Waiting for delivery", "Delivered"):
+        raise HTTPException(status_code=400, detail="Invalid progress")
+    part.part_progress = progress
+    if body.get("ordered_date"):
+        part.ordered_date = body.get("ordered_date")
+    db.add(models.JobUpdate(
+        job_card_id=job_id,
+        category="parts",
+        description=f"{part.description}: {progress}",
+        notes=part.ordered_date,
+        created_by_name=body.get("full_name") or "Staff",
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/jobs/{job_id}/parts/{part_id}/follow-up")
+async def api_part_followup(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    part.follow_up = True
+    part.follow_up_note = (body.get("note") or "").strip() or "Please follow up"
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    msg = f"Follow-up requested: {part.description} on {job.stock_number if job else job_id}"
+    if part.follow_up_note:
+        msg += f" — {part.follow_up_note}"
+    notify_role(db, "workshop", msg, job_id)
+    db.add(models.JobUpdate(
+        job_card_id=job_id,
+        category="parts",
+        description=msg,
+        created_by_name=body.get("full_name") or "Admin",
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/jobs/{job_id}/activity")
+async def api_set_activity(job_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    location = body.get("location")
+    if location:
+        job.current_location = location
+        if location in WORKSHOP_BAYS and not job.workshop_entered_at:
+            job.workshop_entered_at = datetime.utcnow()
+    job.current_activity = (body.get("activity") or "").strip() or None
+    job.current_activity_notes = (body.get("notes") or "").strip() or None
+    job.current_activity_at = datetime.utcnow()
+    job.current_activity_by = body.get("full_name") or "Workshop"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="activity",
+        description=f"{job.current_location or ''} — {job.current_activity or ''}".strip(" —"),
+        notes=job.current_activity_notes,
+        created_by_name=job.current_activity_by,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/workshop/parts")
+async def api_workshop_parts(db: Session = Depends(get_db)):
+    parts = db.query(models.PartItem).order_by(models.PartItem.created_at.desc()).all()
+    out = []
+    for p in parts:
+        job = db.query(models.JobCard).filter(models.JobCard.id == p.job_card_id).first()
+        if job and job.status == "Delivered / Closed":
+            continue
+        out.append({
+            "id": p.id,
+            "job_id": p.job_card_id,
+            "description": p.description,
+            "order_number": p.order_number,
+            "part_progress": getattr(p, "part_progress", None) or "To be ordered",
+            "ordered_date": getattr(p, "ordered_date", None),
+            "follow_up": bool(getattr(p, "follow_up", False)),
+            "follow_up_note": getattr(p, "follow_up_note", None),
+            "stock_number": job.stock_number if job else "",
+            "vehicle_description": job.vehicle_description if job else "",
+            "year": job.year if job else "",
+        })
+    return {"parts": out}
+
+@app.get("/api/notifications")
+async def api_notifications(user_id: int, db: Session = Depends(get_db)):
+    rows = db.query(models.Notification).filter(models.Notification.user_id == user_id).order_by(models.Notification.created_at.desc()).limit(30).all()
+    return {"notifications": [{
+        "id": n.id,
+        "message": n.message,
+        "job_card_id": n.job_card_id,
+        "is_read": n.is_read,
+        "created_at": n.created_at.isoformat() if n.created_at else None
+    } for n in rows]}

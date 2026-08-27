@@ -31,6 +31,7 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Type</dt><dd id="typeLine" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Year</dt><dd id="year" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">VIN</dt><dd id="vinNumber" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Chassis</dt><dd id="chassisNumber" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Reg No</dt><dd id="regNumber" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
@@ -58,8 +59,9 @@
 
         <div id="addTaskSection" class="mt-5 pt-4 border-t hidden">
             <h3 class="text-sm font-medium text-gray-700 mb-2">Add Extra Task</h3>
-            <div class="flex gap-2">
+            <div class="flex flex-col sm:flex-row gap-2">
                 <input type="text" id="newTaskName" placeholder="Task name..." class="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-status-blue">
+                <select id="newTaskLocation" class="px-3 py-2 border rounded-lg text-sm"></select>
                 <button onclick="addTask()" class="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700">Add</button>
             </div>
         </div>
@@ -114,32 +116,26 @@
         </div>
     </div>
 
-<div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
-        <h2 class="font-semibold text-status-blue mb-3">Workshop extras & updates</h2>
-        <p class="text-xs text-gray-500 mb-3">Once submitted, updates cannot be deleted.</p>
+    <div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-1">Current activity</h2>
+        <p class="text-xs text-gray-500 mb-3">Where the vehicle is now and what workshop is doing. Sales can see this.</p>
+        <div id="activityView" class="mb-3 text-sm text-gray-700"></div>
         <div id="extrasForm" class="hidden space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                    <label class="block text-xs font-medium mb-1">Change location</label>
+                    <label class="block text-xs font-medium mb-1">Current location</label>
                     <select id="newLocation" class="w-full px-2 py-2 border rounded text-sm"></select>
                 </div>
                 <div>
-                    <label class="block text-xs font-medium mb-1">Add extra work / activity</label>
-                    <select id="extraPreset" class="w-full px-2 py-2 border rounded text-sm"></select>
+                    <label class="block text-xs font-medium mb-1">What is being done now</label>
+                    <input type="text" id="currentActivity" placeholder="e.g. Brakes in Bay 1 Reuben" class="w-full px-2 py-2 border rounded text-sm">
                 </div>
             </div>
-            <input type="text" id="extraCustom" placeholder="Or type your own description..." class="w-full px-3 py-2 border rounded text-sm">
-            <textarea id="extraNotes" rows="2" placeholder="Notes (parts, 3rd party, delay...)" class="w-full px-3 py-2 border rounded text-sm"></textarea>
-            <div class="flex flex-wrap gap-2">
-                <button type="button" onclick="saveLocation()" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Update location</button>
-                <button type="button" onclick="saveExtra('extra_work')" class="px-3 py-2 bg-gray-800 text-white text-sm rounded">Add extra work</button>
-                <button type="button" onclick="saveExtra('activity')" class="px-3 py-2 bg-gray-800 text-white text-sm rounded">Log activity</button>
-                <button type="button" onclick="saveExtra('parts')" class="px-3 py-2 bg-orange-600 text-white text-sm rounded">Parts update</button>
-                <button type="button" onclick="saveExtra('third_party')" class="px-3 py-2 bg-orange-600 text-white text-sm rounded">3rd party update</button>
-                <button type="button" onclick="saveExtra('progress')" class="px-3 py-2 bg-teal-700 text-white text-sm rounded">Progress note</button>
-            </div>
+            <textarea id="extraNotes" rows="2" placeholder="Notes (optional)" class="w-full px-3 py-2 border rounded text-sm"></textarea>
+            <button type="button" onclick="saveActivity()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Update current activity</button>
         </div>
-        <div id="updatesList" class="space-y-2 text-sm"></div>
+        <h3 class="text-sm font-semibold mb-2">Updates log</h3>
+<div id="updatesList" class="space-y-2 text-sm"></div>
         <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
     </div>
 </div>
@@ -150,6 +146,8 @@
     const token = localStorage.getItem('token');
     const fullName = localStorage.getItem('full_name') || '';
     const role = localStorage.getItem('role') || '';
+    const isAdmin = (role === 'admin' || role === 'accounts');
+    const isWorkshop = (role === 'workshop' || isAdmin);
     const userId = localStorage.getItem('user_id');
     const jobId = {{ job_id }};
     let currentJob = null;
@@ -163,7 +161,7 @@
     }
 
     function canEditTasks() {
-        return role === 'workshop' || role === 'admin';
+        return isWorkshop;
     }
 
     function statusColour(s) {
@@ -174,6 +172,40 @@
             'Blocked': 'bg-red-100 text-red-700'
         };
         return map[s] || 'bg-gray-100 text-gray-600';
+    }
+
+
+    window.jobLocations = ["Yard","Bay 1 Reuben","Bay 2 Ricardo","Bay 3 Jonas","Bay 4 Josiah","Bay 5 Josiah 2","Wash Bay","Test Pit Bay 1","Test Pit Bay 2","Test Pit Bay 3","3rd Party","Out / Delivered"];
+
+    function locationOptions(t) {
+        let html = '<option value="">Location / bay</option>';
+        window.jobLocations.forEach(function(l) {
+            html += '<option value="' + l + '"' + (t.task_location === l ? ' selected' : '') + '>' + l + '</option>';
+        });
+        if (t.task_location && window.jobLocations.indexOf(t.task_location) === -1) {
+            html += '<option value="' + t.task_location + '" selected>' + t.task_location + '</option>';
+        }
+        return html;
+    }
+
+    async function saveTaskLocation(taskId) {
+        const loc = document.getElementById('loc-' + taskId).value;
+        await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_location: loc, user_id: userId ? parseInt(userId) : null })
+        });
+    }
+
+    async function saveTaskProvider(taskId) {
+        const prov = document.getElementById('prov-' + taskId) ? document.getElementById('prov-' + taskId).value : '';
+        const bdate = document.getElementById('bdate-' + taskId) ? document.getElementById('bdate-' + taskId).value : '';
+        await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ third_party_provider: prov, booked_date: bdate, user_id: userId ? parseInt(userId) : null })
+        });
+        loadJob();
     }
 
     function renderTasks(tasks) {
@@ -218,6 +250,28 @@
                 } else if (t.notes) {
                     html += '<div class="mt-1 text-xs text-orange-600">Note: ' + t.notes + '</div>';
                 }
+                if (canEdit) {
+                    html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">' +
+                        '<select id="loc-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskLocation(' + t.id + ')">' +
+                        locationOptions(t) + '</select>';
+                    const providers = t.providers || [];
+                    if (providers.length) {
+                        html += '<select id="prov-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">' +
+                            '<option value="">3rd party company</option>';
+                        providers.forEach(function(pr) {
+                            html += '<option value="' + pr + '"' + (t.third_party_provider === pr ? ' selected' : '') + '>' + pr + '</option>';
+                        });
+                        html += '</select>';
+                        html += '<input type="date" id="bdate-' + t.id + '" value="' + (t.booked_date || '') + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">';
+                    } else {
+                        html += '<div class="text-xs text-gray-400 self-center">' + (t.task_location ? t.task_location : 'Set bay / location') + '</div>';
+                    }
+                    html += '</div>';
+                } else if (t.task_location || t.third_party_provider || t.booked_date) {
+                    html += '<div class="mt-1 text-xs text-gray-600">Location: ' + (t.task_location || '—') +
+                        (t.third_party_provider ? ' | ' + t.third_party_provider : '') +
+                        (t.booked_date ? ' | ' + t.booked_date : '') + '</div>';
+                }
                 html += '</div>';
             });
         }
@@ -248,6 +302,7 @@
             document.getElementById('typeLine').textContent = j.main_type + (j.sub_type ? ' / ' + j.sub_type : '');
             document.getElementById('year').textContent = j.year || '—';
             document.getElementById('vinNumber').textContent = j.vin_number || '—';
+            document.getElementById('chassisNumber').textContent = j.chassis_number || '—';
             document.getElementById('regNumber').textContent = j.registration_number || '—';
             document.getElementById('clientName').textContent = j.client_name;
             document.getElementById('salesman').textContent = j.salesman_name;
@@ -258,7 +313,7 @@
             document.getElementById('workshopHours').textContent = j.workshop_hours != null ? j.workshop_hours + ' hrs' : '—';
             document.getElementById('createdAt').textContent = j.created_at ? j.created_at.replace('T', ' ').substring(0, 16) : '—';
             renderUpdates(j);
-            if (role === 'workshop' || role === 'admin') {
+            if (isWorkshop) {
                 document.getElementById('extrasForm').classList.remove('hidden');
                 document.getElementById('tpForm').classList.remove('hidden');
                 document.getElementById('partsForm').classList.remove('hidden');
@@ -266,6 +321,15 @@
             }
             renderThirdParty(j);
             renderParts(j);
+            const act = document.getElementById('activityView');
+            if (act) {
+                act.innerHTML = (j.current_location ? '<div><strong>Location:</strong> ' + j.current_location + '</div>' : '') +
+                    (j.current_activity ? '<div><strong>Doing now:</strong> ' + j.current_activity + '</div>' : '<div class="text-gray-400">No current activity logged</div>') +
+                    (j.current_activity_notes ? '<div class="text-xs text-gray-500">' + j.current_activity_notes + '</div>' : '') +
+                    (j.current_activity_by ? '<div class="text-xs text-gray-400">' + j.current_activity_by + (j.current_activity_at ? ' — ' + j.current_activity_at.replace('T',' ').substring(0,16) : '') + '</div>' : '');
+            }
+            if (document.getElementById('currentActivity') && j.current_activity) document.getElementById('currentActivity').value = j.current_activity;
+
 
             renderTasks(j.tasks);
 
@@ -277,15 +341,15 @@
 
             // Action buttons
             let buttons = '';
-            if ((role === 'workshop' || role === 'admin') && j.status === 'Submitted to Workshop') {
+            if (isWorkshop && j.status === 'Submitted to Workshop') {
                 buttons += '<button onclick="acceptJob()" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm hover:bg-blue-800">Accept Job</button>';
             }
             // Ready for Delivery - both parties
             if (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery') {
-                if (role === 'sales' || role === 'admin') {
+                if (role === 'sales' || isAdmin) {
                     buttons += '<button onclick="markReady(\x27sales\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Sales)</button>';
                 }
-                if (role === 'workshop' || role === 'admin') {
+                if (isWorkshop) {
                     buttons += '<button onclick="markReady(\x27workshop\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Workshop)</button>';
                 }
             }
@@ -294,11 +358,11 @@
                 buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">View PDI Checklist</a>';
             }
             // Close - Salesman only
-            if ((role === 'sales' || role === 'admin') && j.status === 'Ready for Delivery') {
+            if ((role === 'sales' || isAdmin) && j.status === 'Ready for Delivery') {
                 buttons += '<button onclick="closeJob()" class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900">Close / Delivered</button>';
             }
             // Delete - Admin only
-            if (role === 'admin') {
+            if (isAdmin) {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
             buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
@@ -381,6 +445,7 @@
                 },
                 body: JSON.stringify({
                     task_name: name,
+                    task_location: document.getElementById('newTaskLocation') ? document.getElementById('newTaskLocation').value : '',
                     user_id: userId ? parseInt(userId) : null
                 })
             });
@@ -458,6 +523,12 @@
             const loc = document.getElementById('newLocation');
             const preset = document.getElementById('extraPreset');
             loc.innerHTML = '';
+            window.jobLocations = data.locations || window.jobLocations;
+            const extraLoc = document.getElementById('newTaskLocation');
+            if (extraLoc) {
+                extraLoc.innerHTML = '<option value="">Location / bay</option>';
+                window.jobLocations.forEach(function(l) { extraLoc.innerHTML += '<option value="' + l + '">' + l + '</option>'; });
+            }
             (data.locations || []).forEach(function(l) {
                 loc.innerHTML += '<option value="' + l + '"' + (currentJob && currentJob.current_location === l ? ' selected' : '') + '>' + l + '</option>';
             });
@@ -523,9 +594,27 @@
             html += '<div class="p-2 bg-gray-50 rounded border">' +
                 '<div class="font-medium">' + p.description + '</div>' +
                 '<div class="text-xs ' + (has ? 'text-green-700' : 'text-red-600') + '">Order no: ' + (has || 'MISSING — add Chantelle order number') + '</div>';
-            if ((role === 'workshop' || role === 'admin') && !has) {
+            if (isWorkshop && !has) {
                 html += '<div class="flex gap-2 mt-2"><input type="text" id="ord-' + p.id + '" placeholder="Order number" class="flex-1 px-2 py-1 border rounded text-xs">' +
                     '<button type="button" onclick="savePartOrder(' + p.id + ')" class="px-2 py-1 bg-gray-800 text-white text-xs rounded">Save order no</button></div>';
+            }
+            if (isWorkshop) {
+                const prog = p.part_progress || 'To be ordered';
+                html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">' +
+                    '<select onchange="savePartProgress(' + p.id + ', this.value)" class="text-xs border rounded px-2 py-1">' +
+                    ['To be ordered','Ordered','Waiting for delivery','Delivered'].map(function(s){
+                        return '<option' + (prog===s?' selected':'') + '>' + s + '</option>';
+                    }).join('') + '</select>' +
+                    '<input type="date" id="pdate-' + p.id + '" value="' + (p.ordered_date || '') + '" class="text-xs border rounded px-2 py-1" onchange="savePartProgress(' + p.id + ', null, this.value)">' +
+                    '</div>';
+            } else {
+                html += '<div class="text-xs text-gray-600 mt-1">' + (p.part_progress || 'To be ordered') + (p.ordered_date ? ' | Ordered: ' + p.ordered_date : '') + '</div>';
+            }
+            if (isAdmin) {
+                html += '<button type="button" onclick="requestFollowUp(' + p.id + ')" class="mt-2 px-2 py-1 text-xs bg-amber-600 text-white rounded">Follow up</button>';
+                if (p.follow_up) html += '<span class="ml-2 text-xs text-amber-700">Follow-up sent' + (p.follow_up_note ? ': ' + p.follow_up_note : '') + '</span>';
+            } else if (p.follow_up) {
+                html += '<div class="text-xs text-amber-700 mt-1">Follow-up: ' + (p.follow_up_note || 'Please follow up') + '</div>';
             }
             html += '</div>';
         });
@@ -627,6 +716,25 @@
         return custom || preset;
     }
 
+    async function saveActivity() {
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/activity', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    location: document.getElementById('newLocation').value,
+                    activity: document.getElementById('currentActivity').value,
+                    notes: document.getElementById('extraNotes').value,
+                    user_id: userId ? parseInt(userId) : null,
+                    full_name: fullName
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
     async function saveLocation() {
         const location = document.getElementById('newLocation').value;
         const notes = document.getElementById('extraNotes').value;
@@ -665,6 +773,33 @@
             document.getElementById('extraNotes').value = '';
             loadJob();
         } catch (err) { alert('Connection error'); }
+    }
+
+    async function savePartProgress(partId, progress, orderedDate) {
+        const dateEl = document.getElementById('pdate-' + partId);
+        const payload = {
+            part_progress: progress || undefined,
+            ordered_date: orderedDate || (dateEl ? dateEl.value : ''),
+            user_id: userId ? parseInt(userId) : null,
+            full_name: fullName
+        };
+        await fetch('/api/jobs/' + jobId + '/parts/' + partId + '/progress', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        loadJob();
+    }
+
+    async function requestFollowUp(partId) {
+        const note = prompt('Follow-up note for workshop:') || 'Please follow up this part';
+        await fetch('/api/jobs/' + jobId + '/parts/' + partId + '/follow-up', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note: note, user_id: userId ? parseInt(userId) : null, full_name: fullName })
+        });
+        alert('Follow-up sent to workshop');
+        loadJob();
     }
 
     async function deleteJob() {

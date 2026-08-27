@@ -2,71 +2,48 @@ from .database import SessionLocal, engine, Base
 from . import models
 from .auth import get_password_hash
 
+STAFF = [
+    # Sales
+    ("calvin", "Calvin Kempenaar", "sales", "Calvin123"),
+    ("rob", "Rob Ling", "sales", "Rob123"),
+    ("drickus", "Drickus van Biljon", "sales", "Drickus123"),
+    ("stanley", "Stanley Johnson", "sales", "Stanley123"),
+    ("sebastian_sales", "Sebastian van Biljon", "sales", "Sebastian123"),
+    # Workshop
+    ("jean", "Jean-Pierre De Fillet", "workshop", "Jean123"),
+    ("tiaan", "Tiaan Van Wyk", "workshop", "Tiaan123"),
+    ("louis", "Louis Koekemoer", "workshop", "Louis123"),
+    # Admin (Sebastian listed in sales and admin — admin covers both)
+    ("tanita", "Tanita van Biljon", "admin", "Tanita123"),
+    ("siegfried", "Siegfried van Biljon", "admin", "Siegfried123"),
+    ("chantelle", "Chantelle Willemse", "admin", "Chantelle123"),
+    ("sebastian", "Sebastian van Biljon", "admin", "Sebastian123"),
+    # Accounts
+    ("cindy", "Cindy van Biljon", "accounts", "Cindy123"),
+    # Keep a system admin login
+    ("admin", "System Admin", "admin", "admin123"),
+]
+
 def seed_database():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
-
-    # Check if users already exist
-    existing = db.query(models.User).first()
-    if existing:
-        print("Database already seeded.")
-        db.close()
-        return
-
-    # Create initial users
-    users = [
-        # Admin
-        models.User(
-            username="admin",
-            full_name="System Admin",
-            hashed_password=get_password_hash("admin123"),
-            role="admin"
-        ),
-        # Sales examples
-        models.User(
-            username="sales1",
-            full_name="Sales Person 1",
-            hashed_password=get_password_hash("sales123"),
-            role="sales"
-        ),
-        models.User(
-            username="sales2",
-            full_name="Sales Person 2",
-            hashed_password=get_password_hash("sales123"),
-            role="sales"
-        ),
-        # Workshop examples
-        models.User(
-            username="workshop1",
-            full_name="Workshop Tech 1",
-            hashed_password=get_password_hash("workshop123"),
-            role="workshop"
-        ),
-        models.User(
-            username="workshop2",
-            full_name="Workshop Tech 2",
-            hashed_password=get_password_hash("workshop123"),
-            role="workshop"
-        ),
-        # Accounts
-        models.User(
-            username="accounts",
-            full_name="Accounts User",
-            hashed_password=get_password_hash("accounts123"),
-            role="accounts"
-        ),
-    ]
-
-    for user in users:
-        db.add(user)
-
+    added = []
+    for username, full_name, role, password in STAFF:
+        exists = db.query(models.User).filter(models.User.username == username).first()
+        if exists:
+            continue
+        db.add(models.User(
+            username=username,
+            full_name=full_name,
+            hashed_password=get_password_hash(password),
+            role=role
+        ))
+        added.append(username)
     db.commit()
-    print("Database seeded successfully with initial users.")
-    print("\nLogin credentials:")
-    print("  Admin     → username: admin     password: admin123")
-    print("  Sales     → username: sales1    password: sales123")
-    print("  Workshop  → username: workshop1 password: workshop123")
-    print("  Accounts  → username: accounts  password: accounts123")
+    if added:
+        print("Added users:", ", ".join(added))
+    else:
+        print("All staff users already exist.")
     db.close()
 
 if __name__ == "__main__":

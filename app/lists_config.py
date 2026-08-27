@@ -66,3 +66,19 @@ EXTRA_WORK_PRESETS = [
 
 
 BARREL_INTERVALS = ["3 year", "6 year", "3 and 6 year", "15 year"]
+
+
+TASK_PROVIDER_MAP = {
+    "Pressure test": ["PFT", "FK"],
+    "Barrel test": ["STT", "ITL"],
+    "Calibration": ["Liquid Flow"],
+    "Roadworthy": ["East Rand Testing Station"],
+    "Auto electrical": ["MAN Auto (Scotty)"],
+}
+
+def providers_for_task(task_name: str):
+    name = (task_name or "").lower()
+    for key, providers in TASK_PROVIDER_MAP.items():
+        if key.lower() in name:
+            return providers
+    return []

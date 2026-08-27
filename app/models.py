@@ -63,6 +63,7 @@ class JobCard(Base):
     main_type = Column(String, nullable=False)  # Tanker, Truck Tractor, Trailer, Tipper, Other
     sub_type = Column(String, nullable=False)
     vin_number = Column(String, nullable=True)
+    chassis_number = Column(String, nullable=True)
     registration_number = Column(String, nullable=True)
 
     # Client & Sales
@@ -83,6 +84,10 @@ class JobCard(Base):
     third_party_date = Column(String, nullable=True)
     parts_to_order = Column(Text, nullable=True)
     workshop_entered_at = Column(DateTime(timezone=True), nullable=True)
+    current_activity = Column(String, nullable=True)
+    current_activity_notes = Column(Text, nullable=True)
+    current_activity_at = Column(DateTime(timezone=True), nullable=True)
+    current_activity_by = Column(String, nullable=True)
 
     # Status & Tracking
     status = Column(String, default="Submitted to Workshop")
@@ -126,6 +131,9 @@ class JobTask(Base):
     is_custom = Column(Boolean, default=False)  # True if added by workshop or free-text
     status = Column(String, default="Not Started")
     notes = Column(Text, nullable=True)
+    task_location = Column(String, nullable=True)
+    third_party_provider = Column(String, nullable=True)
+    booked_date = Column(String, nullable=True)
     completed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -184,6 +192,10 @@ class PartItem(Base):
     job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
     description = Column(String, nullable=False)
     order_number = Column(String, nullable=True)
+    part_progress = Column(String, default="To be ordered")
+    ordered_date = Column(String, nullable=True)
+    follow_up = Column(Boolean, default=False)
+    follow_up_note = Column(Text, nullable=True)
     created_by_name = Column(String, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

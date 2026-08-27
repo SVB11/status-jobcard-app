@@ -46,6 +46,21 @@
     <div id="allJobsList" class="space-y-2 text-sm">Loading...</div>
 </div>
 
+<div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
+    <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
+    <div id="partsDashList" class="space-y-2 text-sm">Loading...</div>
+</div>
+<div id="notifyBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">Notifications</h2>
+    <div id="notifyList" class="space-y-2 text-sm">Loading...</div>
+</div>
+<div id="bookingsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">3rd party bookings diary</h2>
+    <p class="text-sm text-gray-500 mb-4">Where and when each vehicle is booked (WS, make, year).</p>
+    <div id="bookingsList" class="space-y-2 text-sm">Loading...</div>
+</div>
+
 <div class="bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Vehicle Locations</h2>
     <p class="text-sm text-gray-500 mb-4">Where every active vehicle is right now</p>
@@ -80,8 +95,9 @@
     } else {
         const name = localStorage.getItem('full_name') || 'User';
         const role = localStorage.getItem('role') || '';
+        const isAdmin = (role === 'admin' || role === 'accounts');
         document.getElementById('userInfo').textContent = `${name} (${role})`;
-        if (role === 'admin') {
+        if (isAdmin) {
             document.getElementById('adminCard').classList.remove('hidden');
             document.getElementById('systemStatusBox').classList.remove('hidden');
             document.getElementById('workshopCard').classList.remove('hidden');
@@ -99,11 +115,18 @@
         if (role === 'workshop') {
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
+            document.getElementById('bookingsBox').classList.remove('hidden');
+            document.getElementById('partsDashBox').classList.remove('hidden');
+            document.getElementById('notifyBox').classList.remove('hidden');
+            loadBookings();
+            loadPartsDash();
+            loadNotifications();
         }
-        if (role === 'accounts') {
-            document.getElementById('allJobsBox').classList.remove('hidden');
-            loadJobList('/api/jobs', 'allJobsList');
+        if (isAdmin) {
+            const bb = document.getElementById('bookingsBox');
+            if (bb) { bb.classList.remove('hidden'); loadBookings(); }
         }
+        
         loadLocationBoard();
     }
 
@@ -129,6 +152,58 @@
             box.innerHTML = jobs.map(jobRow).join('');
         } catch (err) {
             box.innerHTML = '<p class="text-red-500">Could not load jobs</p>';
+        }
+    }
+
+    async function loadPartsDash() {
+        try {
+            const res = await fetch('/api/workshop/parts', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.parts || [];
+            const box = document.getElementById('partsDashList');
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open parts</p>'; return; }
+            box.innerHTML = rows.map(function(p) {
+                return '<a href="/jobs/' + p.job_id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
+                    '<div class="font-medium">' + p.description + ' — ' + (p.part_progress || 'To be ordered') + (p.follow_up ? ' | FOLLOW-UP' : '') + '</div>' +
+                    '<div class="text-xs text-gray-500">' + p.stock_number + ' ' + p.vehicle_description + ' ' + (p.year || '') +
+                    (p.order_number ? ' | Order ' + p.order_number : ' | No order no') +
+                    (p.ordered_date ? ' | ' + p.ordered_date : '') + '</div></a>';
+            }).join('');
+        } catch (err) {
+            document.getElementById('partsDashList').innerHTML = '<p class="text-red-500">Could not load parts</p>';
+        }
+    }
+
+    async function loadNotifications() {
+        const uid = localStorage.getItem('user_id');
+        if (!uid) return;
+        try {
+            const res = await fetch('/api/notifications?user_id=' + uid, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.notifications || [];
+            const box = document.getElementById('notifyList');
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No notifications</p>'; return; }
+            box.innerHTML = rows.map(function(n) {
+                return '<div class="p-2 bg-gray-50 rounded">' + n.message +
+                    '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + '</div></div>';
+            }).join('');
+        } catch (err) {}
+    }
+
+    async function loadBookings() {
+        try {
+            const res = await fetch('/api/workshop/bookings', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.bookings || [];
+            const box = document.getElementById('bookingsList');
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No bookings yet</p>'; return; }
+            box.innerHTML = rows.map(function(b) {
+                return '<a href="/jobs/' + b.job_id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
+                    '<div class="font-medium">' + (b.booked_date || 'No date') + ' — ' + b.service + ' at ' + b.provider + '</div>' +
+                    '<div class="text-xs text-gray-500">' + b.label + '</div></a>';
+            }).join('');
+        } catch (err) {
+            document.getElementById('bookingsList').innerHTML = '<p class="text-red-500">Could not load bookings</p>';
         }
     }
 
