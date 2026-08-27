@@ -292,7 +292,13 @@
                     html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">' +
                         '<select id="loc-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskLocation(' + t.id + ')">' +
                         locationOptions(t) + '</select>';
-                    const providers = (currentJob && currentJob.main_type === 'Tanker') ? (t.providers || []) : [];
+                    const providers = (function() {
+                    const all = t.providers || [];
+                    if (currentJob && currentJob.main_type === 'Tanker') return all;
+                    const name = (t.task_name || '').toLowerCase();
+                    if (name.indexOf('roadworthy') !== -1) return all.length ? all : ['East Rand Testing Station'];
+                    return [];
+                })();
                     if (providers.length) {
                         html += '<select id="prov-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">' +
                             '<option value="">3rd party company</option>';
@@ -360,10 +366,7 @@
             }
             renderThirdParty(j);
             const tpSec = document.getElementById('thirdPartySection');
-            if (tpSec) {
-                if (j.main_type === 'Tanker') tpSec.classList.remove('hidden');
-                else tpSec.classList.add('hidden');
-            }
+            if (tpSec) tpSec.classList.remove('hidden');
 
             renderParts(j);
             const act = document.getElementById('activityView');
@@ -600,6 +603,9 @@
                     {service: "Roadworthy", providers: ["East Rand Testing Station"]},
                     {service: "Auto Electrical", providers: ["MAN Auto (Scotty)"]}
                 ];
+            }
+            if (currentJob && currentJob.main_type !== 'Tanker') {
+                window.tpServices = window.tpServices.filter(function(s) { return s.service === 'Roadworthy'; });
             }
             const svc = document.getElementById('tpService');
             if (svc) {

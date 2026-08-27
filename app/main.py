@@ -849,6 +849,16 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
             job.ready_sales = False
             job.ready_workshop = False
             msg = f"PDI FAIL on {job.stock_number}: {item.check_item} — {note} (by {inspector})"
+            db.add(models.JobTask(
+                job_card_id=job.id,
+                task_name="PDI Fail: " + (item.check_item or "Item")[:80],
+                description=note + " (inspection by " + inspector + ")",
+                is_custom=True,
+                needs_approval=False,
+                status="Not Started",
+                notes=note,
+                last_updated_by_name=inspector
+            ))
             db.add(models.JobUpdate(
                 job_card_id=job.id,
                 category="pdi",
@@ -1413,6 +1423,18 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
         created_by_name=job.current_activity_by,
         created_by=body.get("user_id")
     ))
+    if job.current_activity:
+        db.add(models.JobTask(
+            job_card_id=job.id,
+            task_name="Activity: " + job.current_activity[:80],
+            description=job.current_activity_notes,
+            is_custom=True,
+            needs_approval=False,
+            status="In Progress",
+            task_location=job.current_location,
+            notes=job.current_activity_notes,
+            last_updated_by_name=job.current_activity_by
+        ))
     db.commit()
     return {"success": True}
 

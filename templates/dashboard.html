@@ -133,7 +133,6 @@
         }
         
         loadLocationBoard();
-        document.getElementById('pdiFailBox').classList.remove('hidden');
         loadPdiFails();
     }
 
@@ -167,8 +166,13 @@
             const res = await fetch('/api/pdi-fails', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             const data = await res.json();
             const rows = data.jobs || [];
+            const wrap = document.getElementById('pdiFailBox');
             const box = document.getElementById('pdiFailList');
-            if (!rows.length) { box.innerHTML = '<p class="text-red-400">No failed PDIs</p>'; return; }
+            if (!rows.length) {
+                wrap.classList.add('hidden');
+                return;
+            }
+            wrap.classList.remove('hidden');
             box.innerHTML = rows.map(function(j) {
                 const fails = (j.fails || []).map(function(f) {
                     return '<div class="text-xs">• ' + f.item + ' — ' + (f.notes || '') + (f.by ? ' (' + f.by + ')' : '') + '</div>';
