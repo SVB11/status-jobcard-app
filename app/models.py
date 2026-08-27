@@ -62,6 +62,8 @@ class JobCard(Base):
     year = Column(String, nullable=False)
     main_type = Column(String, nullable=False)  # Tanker, Truck Tractor, Trailer, Tipper, Other
     sub_type = Column(String, nullable=False)
+    vin_number = Column(String, nullable=True)
+    registration_number = Column(String, nullable=True)
 
     # Client & Sales
     client_name = Column(String, nullable=False)
@@ -77,6 +79,10 @@ class JobCard(Base):
     quotation_invoice_number = Column(String, nullable=True)
     estimated_workshop_hours = Column(Float, nullable=True)
     other_instructions = Column(Text, nullable=True)
+    third_party_place = Column(String, nullable=True)
+    third_party_date = Column(String, nullable=True)
+    parts_to_order = Column(Text, nullable=True)
+    workshop_entered_at = Column(DateTime(timezone=True), nullable=True)
 
     # Status & Tracking
     status = Column(String, default="Submitted to Workshop")
@@ -106,6 +112,7 @@ class JobCard(Base):
     tasks = relationship("JobTask", back_populates="job_card", cascade="all, delete-orphan")
     pdi_items = relationship("PDIItem", back_populates="job_card", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="job_card")
+    updates = relationship("JobUpdate", back_populates="job_card", cascade="all, delete-orphan")
 
 class JobTask(Base):
     __tablename__ = "job_tasks"
@@ -150,6 +157,21 @@ class AuditLog(Base):
 
     user = relationship("User", back_populates="audit_logs")
     job_card = relationship("JobCard", back_populates="audit_logs")
+
+class JobUpdate(Base):
+    """Permanent workshop/sales updates. Cannot be deleted once submitted."""
+    __tablename__ = "job_updates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    category = Column(String, nullable=False)  # extra_work, activity, parts, third_party, location, progress
+    description = Column(String, nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    job_card = relationship("JobCard", back_populates="updates")
 
 class Notification(Base):
     __tablename__ = "notifications"

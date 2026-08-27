@@ -12,9 +12,12 @@ from .database import engine, get_db, Base
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
+from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS
+from .migrate import migrate_schema
 
 # Create tables and seed
 Base.metadata.create_all(bind=engine)
+migrate_schema()
 seed_database()
 
 app = FastAPI(title="Status Truck Sales - Job Card System")
@@ -145,16 +148,19 @@ async def api_create_job(
         main_type=body["main_type"],
         sub_type=body["sub_type"].strip(),
         client_name=body["client_name"].strip(),
-        customer_order_ref=body.get("customer_order_ref") or None,
         salesman_name=body["salesman_name"],
         created_by=created_by_id,
         priority=body.get("priority", "Normal"),
         target_delivery_date=body.get("target_delivery_date"),
-        current_location=body.get("current_location") or None,
+        current_location=body.get("current_location") or "Yard",
         internal_notes=body.get("internal_notes") or None,
         quotation_invoice_number=body.get("quotation_invoice_number") or None,
-        estimated_workshop_hours=body.get("estimated_workshop_hours") or None,
         other_instructions=body.get("other_instructions") or None,
+        vin_number=(body.get("vin_number") or "").strip() or None,
+        registration_number=(body.get("registration_number") or "").strip().upper() or None,
+        third_party_place=(body.get("third_party_place") or "").strip() or None,
+        third_party_date=body.get("third_party_date") or None,
+        parts_to_order=(body.get("parts_to_order") or "").strip() or None,
         status="Submitted to Workshop"
     )
     db.add(job)
@@ -210,6 +216,7 @@ async def api_list_jobs(status: str = None, db: Session = Depends(get_db)):
             "priority": j.priority,
             "target_delivery_date": j.target_delivery_date,
             "status": j.status,
+            "current_location": j.current_location,
             "created_at": j.created_at.isoformat() if j.created_at else None
         })
     return {"jobs": result}
@@ -277,6 +284,22 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "completed_at": t.completed_at.isoformat() if t.completed_at else None
         })
 
+    updates = []
+    for u in sorted(job.updates, key=lambda x: x.created_at or datetime.min, reverse=True):
+        updates.append({
+            "id": u.id,
+            "category": u.category,
+            "description": u.description,
+            "notes": u.notes,
+            "created_by_name": u.created_by_name,
+            "created_at": u.created_at.isoformat() if u.created_at else None
+        })
+
+    workshop_hours = None
+    if job.workshop_entered_at:
+        delta = datetime.utcnow() - job.workshop_entered_at.replace(tzinfo=None)
+        workshop_hours = round(delta.total_seconds() / 3600, 1)
+
     return {
         "id": job.id,
         "job_number": job.job_number,
@@ -285,18 +308,27 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "year": job.year,
         "main_type": job.main_type,
         "sub_type": job.sub_type,
+        "vin_number": getattr(job, "vin_number", None),
+        "registration_number": getattr(job, "registration_number", None),
         "client_name": job.client_name,
-        "customer_order_ref": job.customer_order_ref,
         "salesman_name": job.salesman_name,
         "priority": job.priority,
         "target_delivery_date": job.target_delivery_date,
         "current_location": job.current_location,
         "internal_notes": job.internal_notes,
         "other_instructions": job.other_instructions,
+        "third_party_place": getattr(job, "third_party_place", None),
+        "third_party_date": getattr(job, "third_party_date", None),
+        "parts_to_order": getattr(job, "parts_to_order", None),
+        "workshop_entered_at": job.workshop_entered_at.isoformat() if getattr(job, "workshop_entered_at", None) else None,
+        "workshop_hours": workshop_hours,
+        "pdi_signed_workshop": job.pdi_signed_workshop,
+        "pdi_signed_sales": job.pdi_signed_sales,
         "status": job.status,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "accepted_at": job.accepted_at.isoformat() if job.accepted_at else None,
-        "tasks": tasks
+        "tasks": tasks,
+        "updates": updates
     }
 
 # ---------- TASK UPDATES ----------
@@ -656,6 +688,10 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    job_lock = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if job_lock and job_lock.pdi_signed_workshop and job_lock.pdi_signed_sales:
+        raise HTTPException(status_code=400, detail="PDI is locked after dual sign-off")
+
     item = db.query(models.PDIItem).filter(
         models.PDIItem.id == item_id,
         models.PDIItem.job_card_id == job_id
@@ -744,3 +780,109 @@ async def api_delete_job(job_id: int, request: Request, db: Session = Depends(ge
         log_audit(db, user_id, "Deleted Job Card", None, f"Deleted job {job_number}")
 
     return {"success": True, "message": f"Job {job_number} deleted"}
+
+# ---------- LISTS & LOCATION DASHBOARD ----------
+
+@app.get("/api/lists")
+async def api_lists():
+    return {
+        "locations": LOCATIONS,
+        "activity_types": ACTIVITY_TYPES,
+        "extra_work_presets": EXTRA_WORK_PRESETS
+    }
+
+@app.get("/api/locations-board")
+async def api_locations_board(db: Session = Depends(get_db)):
+    jobs = db.query(models.JobCard).filter(
+        models.JobCard.status != "Delivered / Closed"
+    ).all()
+    board = {loc: [] for loc in LOCATIONS}
+    board["Unspecified"] = []
+    for j in jobs:
+        loc = j.current_location if j.current_location in board else "Unspecified"
+        board[loc].append({
+            "id": j.id,
+            "job_number": j.job_number,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "status": j.status,
+            "priority": j.priority
+        })
+    return {"board": board}
+
+@app.post("/api/jobs/{job_id}/location")
+async def api_update_location(job_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    location = body.get("location")
+    if location not in LOCATIONS:
+        raise HTTPException(status_code=400, detail="Invalid location")
+    old = job.current_location
+    job.current_location = location
+    if location in WORKSHOP_BAYS and not job.workshop_entered_at:
+        job.workshop_entered_at = datetime.utcnow()
+    user_id = body.get("user_id")
+    name = body.get("full_name") or "Staff"
+    update = models.JobUpdate(
+        job_card_id=job.id,
+        category="location",
+        description=f"Location changed: {old or '—'} → {location}",
+        notes=body.get("notes"),
+        created_by_name=name,
+        created_by=user_id
+    )
+    db.add(update)
+    db.commit()
+    if user_id:
+        log_audit(db, user_id, "Changed Location", job.id, update.description)
+    return {"success": True, "current_location": job.current_location}
+
+@app.post("/api/jobs/{job_id}/updates")
+async def api_add_update(job_id: int, request: Request, db: Session = Depends(get_db)):
+    """Permanent update. Cannot be deleted."""
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    category = body.get("category") or "progress"
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="Description is required")
+    user_id = body.get("user_id")
+    name = body.get("full_name") or "Staff"
+    update = models.JobUpdate(
+        job_card_id=job.id,
+        category=category,
+        description=description,
+        notes=(body.get("notes") or "").strip() or None,
+        created_by_name=name,
+        created_by=user_id
+    )
+    db.add(update)
+    # Also persist latest 3rd party / parts onto the job card when provided
+    if category == "third_party":
+        if body.get("third_party_place"):
+            job.third_party_place = body.get("third_party_place")
+        if body.get("third_party_date"):
+            job.third_party_date = body.get("third_party_date")
+    if category == "parts" and body.get("parts_to_order"):
+        existing = job.parts_to_order or ""
+        addition = body.get("parts_to_order")
+        job.parts_to_order = (existing + "\n" + addition).strip() if existing else addition
+    db.commit()
+    if user_id:
+        log_audit(db, user_id, "Added Update", job.id, f"{category}: {description}")
+    return {"success": True, "id": update.id}
+
+@app.get("/jobs/{job_id}/print", response_class=HTMLResponse)
+async def print_job_page(request: Request, job_id: int):
+    return render_template("print_job.html", request=request, job_id=job_id)
+

@@ -29,6 +29,8 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Stock No</dt><dd id="stockNumber" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Type</dt><dd id="typeLine" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Year</dt><dd id="year" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">VIN</dt><dd id="vinNumber" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Reg No</dt><dd id="regNumber" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
             </dl>
@@ -40,6 +42,7 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Priority</dt><dd id="priority" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Target Date</dt><dd id="targetDate" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Location</dt><dd id="location" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Time in workshop</dt><dd id="workshopHours" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Created</dt><dd id="createdAt" class="font-medium"></dd></div>
             </dl>
         </div>
@@ -61,6 +64,35 @@
         </div>
 
         <div id="otherInstructions" class="mt-4 text-sm text-gray-600 hidden"></div>
+    </div>
+
+    <div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-3">Workshop extras & updates</h2>
+        <p class="text-xs text-gray-500 mb-3">Once submitted, updates cannot be deleted.</p>
+        <div id="extrasForm" class="hidden space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium mb-1">Change location</label>
+                    <select id="newLocation" class="w-full px-2 py-2 border rounded text-sm"></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium mb-1">Add extra work / activity</label>
+                    <select id="extraPreset" class="w-full px-2 py-2 border rounded text-sm"></select>
+                </div>
+            </div>
+            <input type="text" id="extraCustom" placeholder="Or type your own description..." class="w-full px-3 py-2 border rounded text-sm">
+            <textarea id="extraNotes" rows="2" placeholder="Notes (parts, 3rd party, delay...)" class="w-full px-3 py-2 border rounded text-sm"></textarea>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" onclick="saveLocation()" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Update location</button>
+                <button type="button" onclick="saveExtra('extra_work')" class="px-3 py-2 bg-gray-800 text-white text-sm rounded">Add extra work</button>
+                <button type="button" onclick="saveExtra('activity')" class="px-3 py-2 bg-gray-800 text-white text-sm rounded">Log activity</button>
+                <button type="button" onclick="saveExtra('parts')" class="px-3 py-2 bg-orange-600 text-white text-sm rounded">Parts update</button>
+                <button type="button" onclick="saveExtra('third_party')" class="px-3 py-2 bg-orange-600 text-white text-sm rounded">3rd party update</button>
+                <button type="button" onclick="saveExtra('progress')" class="px-3 py-2 bg-teal-700 text-white text-sm rounded">Progress note</button>
+            </div>
+        </div>
+        <div id="updatesList" class="space-y-2 text-sm"></div>
+        <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
     </div>
 </div>
 {% endblock %}
@@ -167,13 +199,21 @@
             document.getElementById('stockNumber').textContent = j.stock_number;
             document.getElementById('typeLine').textContent = j.main_type + (j.sub_type ? ' / ' + j.sub_type : '');
             document.getElementById('year').textContent = j.year || '—';
+            document.getElementById('vinNumber').textContent = j.vin_number || '—';
+            document.getElementById('regNumber').textContent = j.registration_number || '—';
             document.getElementById('clientName').textContent = j.client_name;
             document.getElementById('salesman').textContent = j.salesman_name;
             document.getElementById('status').textContent = j.status;
             document.getElementById('priority').textContent = j.priority;
             document.getElementById('targetDate').textContent = j.target_delivery_date || '—';
             document.getElementById('location').textContent = j.current_location || '—';
+            document.getElementById('workshopHours').textContent = j.workshop_hours != null ? j.workshop_hours + ' hrs' : '—';
             document.getElementById('createdAt').textContent = j.created_at ? j.created_at.replace('T', ' ').substring(0, 16) : '—';
+            renderUpdates(j);
+            if (role === 'workshop' || role === 'admin') {
+                document.getElementById('extrasForm').classList.remove('hidden');
+                loadLists();
+            }
 
             renderTasks(j.tasks);
 
@@ -209,6 +249,7 @@
             if (role === 'admin') {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
+            buttons += '<a href="/jobs/' + jobId + '/print" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print Job + PDI</a>';
             document.getElementById('actionButtons').innerHTML = buttons;
 
         } catch (err) {
@@ -356,6 +397,90 @@
         } catch (err) { alert('Connection error'); }
     }
 
+
+    async function loadLists() {
+        try {
+            const res = await fetch('/api/lists');
+            const data = await res.json();
+            const loc = document.getElementById('newLocation');
+            const preset = document.getElementById('extraPreset');
+            loc.innerHTML = '';
+            (data.locations || []).forEach(function(l) {
+                loc.innerHTML += '<option value="' + l + '"' + (currentJob && currentJob.current_location === l ? ' selected' : '') + '>' + l + '</option>';
+            });
+            preset.innerHTML = '<option value="">Select extra / activity...</option>';
+            (data.extra_work_presets || []).forEach(function(p) {
+                preset.innerHTML += '<option value="' + p + '">' + p + '</option>';
+            });
+        } catch (err) {}
+    }
+
+    function renderUpdates(j) {
+        const list = document.getElementById('updatesList');
+        const extra = document.getElementById('partsThirdParty');
+        extra.innerHTML = (j.parts_to_order ? '<div><strong>Parts:</strong> ' + j.parts_to_order + '</div>' : '') +
+            (j.third_party_place ? '<div><strong>3rd party:</strong> ' + j.third_party_place + (j.third_party_date ? ' on ' + j.third_party_date : '') + '</div>' : '');
+        const updates = j.updates || [];
+        if (!updates.length) {
+            list.innerHTML = '<p class="text-gray-400 text-sm">No extras or updates yet</p>';
+            return;
+        }
+        let html = '';
+        updates.forEach(function(u) {
+            html += '<div class="p-2 bg-gray-50 rounded border"><div class="font-medium">' + u.description +
+                ' <span class="text-xs text-gray-400">(' + u.category + ')</span></div>' +
+                (u.notes ? '<div class="text-xs text-gray-600">' + u.notes + '</div>' : '') +
+                '<div class="text-xs text-gray-400">' + (u.created_by_name || '') + ' — ' +
+                (u.created_at ? u.created_at.replace('T',' ').substring(0,16) : '') + '</div></div>';
+        });
+        list.innerHTML = html;
+    }
+
+    function extraDescription() {
+        const custom = (document.getElementById('extraCustom').value || '').trim();
+        const preset = document.getElementById('extraPreset').value;
+        return custom || preset;
+    }
+
+    async function saveLocation() {
+        const location = document.getElementById('newLocation').value;
+        const notes = document.getElementById('extraNotes').value;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/location', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ location: location, notes: notes, user_id: userId ? parseInt(userId) : null, full_name: fullName })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+    async function saveExtra(category) {
+        const description = extraDescription();
+        if (!description) { alert('Select a preset or type a description'); return; }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/updates', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    category: category,
+                    description: description,
+                    notes: document.getElementById('extraNotes').value,
+                    parts_to_order: category === 'parts' ? description : null,
+                    third_party_place: category === 'third_party' ? description : null,
+                    user_id: userId ? parseInt(userId) : null,
+                    full_name: fullName
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            document.getElementById('extraCustom').value = '';
+            document.getElementById('extraNotes').value = '';
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
 
     async function deleteJob() {
         if (!confirm('Permanently delete this job card? This cannot be undone.')) return;

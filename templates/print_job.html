@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Print Job Card</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 13px; color: #111; margin: 24px; }
+        h1,h2 { margin: 0 0 8px; color: #025daa; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #025daa; padding-bottom: 10px; margin-bottom: 16px; }
+        .logo { height: 48px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+        th { background: #f3f4f6; }
+        .muted { color: #555; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom:12px;">
+        <button onclick="window.print()">Print</button>
+        <a href="/jobs/{{ job_id }}">Back to job</a>
+    </div>
+    <div class="header">
+        <div>
+            <img src="/static/images/status_logo.svg" class="logo" alt="Status Truck Sales">
+            <div class="muted">Job Card & PDI</div>
+        </div>
+        <div id="title"></div>
+    </div>
+    <div id="content">Loading...</div>
+<script>
+    const jobId = {{ job_id }};
+    async function load() {
+        const jobRes = await fetch('/api/jobs/' + jobId);
+        const pdiRes = await fetch('/api/jobs/' + jobId + '/pdi');
+        const j = await jobRes.json();
+        const p = await pdiRes.json();
+        document.getElementById('title').innerHTML = '<strong>' + j.job_number + '</strong><div class="muted">' + j.status + '</div>';
+        let html = '<h2>Vehicle</h2><table>';
+        const rows = [
+            ['Stock', j.stock_number], ['Description', j.vehicle_description],
+            ['Year', j.year], ['Type', j.main_type + ' / ' + j.sub_type],
+            ['VIN', j.vin_number || '—'], ['Reg', j.registration_number || '—'],
+            ['Client', j.client_name], ['Salesman', j.salesman_name],
+            ['Priority', j.priority], ['Target date', j.target_delivery_date || '—'],
+            ['Location', j.current_location || '—'],
+            ['3rd party', (j.third_party_place || '—') + (j.third_party_date ? ' (' + j.third_party_date + ')' : '')],
+            ['Parts', j.parts_to_order || '—']
+        ];
+        rows.forEach(function(r) { html += '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>'; });
+        html += '</table><h2>Tasks</h2><table><tr><th>Task</th><th>Status</th><th>Notes</th></tr>';
+        (j.tasks || []).forEach(function(t) {
+            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + (t.notes || '') + '</td></tr>';
+        });
+        html += '</table>';
+        if (j.updates && j.updates.length) {
+            html += '<h2>Updates (permanent)</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>By</th></tr>';
+            j.updates.forEach(function(u) {
+                html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + u.category + '</td><td>' + u.description + (u.notes ? ' — ' + u.notes : '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
+            });
+            html += '</table>';
+        }
+        html += '<h2>PDI</h2><table><tr><th>#</th><th>Item</th><th>Result</th><th>Notes</th></tr>';
+        (p.items || []).forEach(function(it) {
+            html += '<tr><td>' + (it.item_number || '') + '</td><td>' + it.check_item + '</td><td>' + (it.status || '') + '</td><td>' + (it.notes || '') + '</td></tr>';
+        });
+        html += '</table>';
+        html += '<p class="muted">Workshop signed: ' + (p.job.pdi_signed_workshop ? 'Yes' : 'No') +
+            ' &nbsp;|&nbsp; Sales signed: ' + (p.job.pdi_signed_sales ? 'Yes' : 'No') + '</p>';
+        document.getElementById('content').innerHTML = html;
+    }
+    load();
+</script>
+</body>
+</html>

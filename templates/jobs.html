@@ -100,7 +100,8 @@
                     '</div>' +
                     '<div class="text-sm text-gray-700 mt-1">' + j.stock_number + ' &mdash; ' + j.vehicle_description + '</div>' +
                     '<div class="text-xs text-gray-500 mt-1">Client: ' + j.client_name + ' | Sales: ' + j.salesman_name +
-                    (j.target_delivery_date ? ' | Target: ' + j.target_delivery_date : '') + '</div>' +
+                    (j.target_delivery_date ? ' | Target: ' + j.target_delivery_date : '') +
+                    (j.current_location ? ' | Loc: ' + j.current_location : '') + '</div>' +
                     '</div>' +
                     '<div class="flex gap-2">' +
                     '<a href="/jobs/' + j.id + '" class="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg">View</a>';

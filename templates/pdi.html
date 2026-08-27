@@ -85,6 +85,7 @@
             const data = await res.json();
             const job = data.job;
             const items = data.items;
+            const locked = !!(job.pdi_signed_workshop && job.pdi_signed_sales);
 
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('content').classList.remove('hidden');
@@ -112,13 +113,15 @@
                         (it.acceptance_criteria ? '<div class="text-xs text-gray-500 mt-0.5">' + it.acceptance_criteria + '</div>' : '') +
                         '</div>' +
                         '<div class="flex gap-1 flex-shrink-0">' +
+                        (locked ? ('<span class="px-2 py-1 text-xs rounded ' + (it.status === 'Pass' ? 'bg-green-100 text-green-700' : it.status === 'Fail' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600') + '">' + (it.status || '—') + '</span>') :
                         statusBtn(it.id, it.status, 'Pass', 'Pass') +
                         statusBtn(it.id, it.status, 'Fail', 'Fail') +
-                        statusBtn(it.id, it.status, 'N/A', 'N/A') +
+                        statusBtn(it.id, it.status, 'N/A', 'N/A')) +
                         '</div></div>' +
+                        (locked ? (it.notes ? '<div class="mt-1 text-xs text-gray-500">Notes: ' + it.notes + '</div>' : '') :
                         '<input type="text" id="note-' + it.id + '" value="' + (it.notes || '').replace(/"/g, '&quot;') + '" placeholder="Notes / defects..." ' +
                         'class="mt-2 w-full text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-status-blue" ' +
-                        'onchange="saveNote(' + it.id + ')">' +
+                        'onchange="saveNote(' + it.id + ')">') +
                         '</div>';
                 });
                 html += '</div></div>';

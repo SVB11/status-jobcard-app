@@ -41,23 +41,20 @@
     </a>
 </div>
 
-<div class="bg-white rounded-xl shadow p-6">
+<div class="bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">Vehicle Locations</h2>
+    <p class="text-sm text-gray-500 mb-4">Where every active vehicle is right now</p>
+    <div id="locationBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <p class="text-sm text-gray-400">Loading locations...</p>
+    </div>
+</div>
+
+<div id="systemStatusBox" class="hidden bg-white rounded-xl shadow p-6">
     <h2 class="font-bold text-lg mb-3">System Status</h2>
     <ul class="text-sm text-gray-600 space-y-1">
         <li>✅ Login system active</li>
-        <li>✅ Company logo loaded</li>
-        <li>✅ Database ready</li>
-        <li>✅ Create Job Card (full save + task rules)</li>
-        <li>✅ Job List + Accept Job</li>
-        <li>✅ Job Detail view</li>
-        <li>✅ Task status updating (In Progress / Completed / Blocked)</li>
-        <li>✅ Add extra tasks + notes</li>
-        <li>✅ Admin User Management</li>
-        <li>✅ Ready for Delivery (dual confirm)</li>
-        <li>✅ Close Job (Salesman)</li>
-        <li>✅ Full digital PDI forms (Pass/Fail/N/A + dual sign)</li>
-        <li>✅ Admin can delete jobs</li>
-        <li>✅ PDI viewable after delivery</li>
+        <li>✅ Digital PDI + dual sign-off</li>
+        <li>✅ Workshop extras, location board, permanent updates</li>
     </ul>
 </div>
 {% endblock %}
@@ -75,12 +72,44 @@
         if (role === 'admin') {
             const card = document.getElementById('adminCard');
             if (card) card.classList.remove('hidden');
+            const sys = document.getElementById('systemStatusBox');
+            if (sys) sys.classList.remove('hidden');
         }
+        loadLocationBoard();
     }
 
     function logout() {
         localStorage.clear();
         window.location.href = '/login';
+    }
+
+    async function loadLocationBoard() {
+        try {
+            const res = await fetch('/api/locations-board', {
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+            });
+            const data = await res.json();
+            const board = data.board || {};
+            let html = '';
+            Object.keys(board).forEach(function(loc) {
+                const items = board[loc] || [];
+                if (loc === 'Unspecified' && items.length === 0) return;
+                html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2">' + loc +
+                    ' <span class="text-gray-400">(' + items.length + ')</span></div>';
+                if (items.length === 0) {
+                    html += '<div class="text-xs text-gray-400">Empty</div>';
+                } else {
+                    items.forEach(function(j) {
+                        html += '<a href="/jobs/' + j.id + '" class="block text-xs py-1 hover:underline">' +
+                            j.stock_number + ' — ' + j.vehicle_description + '</a>';
+                    });
+                }
+                html += '</div>';
+            });
+            document.getElementById('locationBoard').innerHTML = html;
+        } catch (err) {
+            document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
+        }
     }
 </script>
 {% endblock %}
