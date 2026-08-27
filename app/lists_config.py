@@ -31,6 +31,7 @@ ACTIVITY_TYPES = [
     "Spray / paint",
     "Engine service",
     "Computer / diagnostics (3rd party)",
+    "Auto electrical — MAN Auto (Scotty)",
     "Roadworthy preparation",
     "Calibration",
     "Pressure / barrel test",
@@ -38,11 +39,21 @@ ACTIVITY_TYPES = [
     "Other",
 ]
 
+
+THIRD_PARTY_SERVICES = [
+    {"service": "Barrel Test", "providers": ["STT", "ITL"]},
+    {"service": "Pressure Test", "providers": ["PFT", "FK"]},
+    {"service": "Calibration Test", "providers": ["Liquid Flow"]},
+    {"service": "Roadworthy", "providers": ["East Rand Testing Station"]},
+    {"service": "Auto Electrical", "providers": ["MAN Auto (Scotty)"]},
+]
+
 EXTRA_WORK_PRESETS = [
     "Brakes service",
     "Spray / paint / touch-up",
     "Engine service",
     "Diagnostics / computer",
+    "Auto electrical — MAN Auto (Scotty)",
     "Roadworthy items",
     "Calibration",
     "Pressure / barrel test",
@@ -52,3 +63,6 @@ EXTRA_WORK_PRESETS = [
     "Test pit",
     "Other",
 ]
+
+
+BARREL_INTERVALS = ["3 year", "6 year", "3 and 6 year", "15 year"]

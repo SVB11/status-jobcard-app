@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Print Completed Work</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 13px; color: #111; margin: 24px; }
+        h1,h2 { margin: 0 0 8px; color: #025daa; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #025daa; padding-bottom: 10px; margin-bottom: 16px; }
+        .logo { height: 48px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #f3f4f6; }
+        .muted { color: #555; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom:12px;">
+        <button onclick="window.print()">Print completed work</button>
+        <a href="/jobs/{{ job_id }}">Back to job</a>
+    </div>
+    <div class="header">
+        <div>
+            <img src="/static/images/status_logo.svg" class="logo" alt="Status Truck Sales">
+            <div class="muted">Completed work, tasks, parts & notes</div>
+        </div>
+        <div id="title"></div>
+    </div>
+    <div id="content">Loading...</div>
+<script>
+    const jobId = {{ job_id }};
+    async function load() {
+        const j = await (await fetch('/api/jobs/' + jobId)).json();
+        document.getElementById('title').innerHTML = '<strong>' + j.job_number + '</strong><div class="muted">' + j.stock_number + ' — ' + j.status + '</div>';
+        let html = '<table>';
+        [['Stock', j.stock_number], ['Vehicle', j.vehicle_description],
+         ['VIN', j.vin_number || '—'], ['Reg', j.registration_number || '—'],
+         ['Client', j.client_name], ['Salesman', j.salesman_name],
+         ['Location', j.current_location || '—']].forEach(function(r) {
+            html += '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>';
+        });
+        html += '</table>';
+
+        const tasks = j.tasks || [];
+        const completed = tasks.filter(function(t) { return t.status === 'Completed'; });
+        const other = tasks.filter(function(t) { return t.status !== 'Completed'; });
+
+        html += '<h2>Completed tasks</h2><table><tr><th>Task</th><th>Notes</th><th>Completed</th></tr>';
+        if (!completed.length) html += '<tr><td colspan="3">None completed yet</td></tr>';
+        completed.forEach(function(t) {
+            html += '<tr><td>' + t.task_name + '</td><td>' + (t.notes || t.description || '') + '</td><td>' + (t.completed_at ? t.completed_at.replace('T',' ').substring(0,16) : '') + '</td></tr>';
+        });
+        html += '</table>';
+
+        html += '<h2>Other tasks (not completed)</h2><table><tr><th>Task</th><th>Status</th><th>Notes</th></tr>';
+        if (!other.length) html += '<tr><td colspan="3">None</td></tr>';
+        other.forEach(function(t) {
+            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + (t.notes || t.description || '') + '</td></tr>';
+        });
+        html += '</table>';
+
+        html += '<h2>Parts (order number created by Chantelle)</h2><table><tr><th>Part</th><th>Order number</th></tr>';
+        const parts = j.parts || [];
+        if (!parts.length) html += '<tr><td colspan="2">' + (j.parts_to_order || 'No parts listed') + '</td></tr>';
+        parts.forEach(function(pt) {
+            html += '<tr><td>' + pt.description + '</td><td>' + (pt.order_number || 'MISSING') + '</td></tr>';
+        });
+        html += '</table>';
+
+        html += '<h2>3rd party bookings</h2><table><tr><th>Service</th><th>Company</th><th>Date</th><th>Notes</th></tr>';
+        const bks = j.third_party_bookings || [];
+        if (!bks.length) html += '<tr><td colspan="4">None</td></tr>';
+        bks.forEach(function(b) {
+            html += '<tr><td>' + b.service + '</td><td>' + b.provider + '</td><td>' + (b.booked_date || '') + '</td><td>' + (b.notes || '') + '</td></tr>';
+        });
+        html += '</table>';
+
+        html += '<h2>All notes & updates</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>Notes</th><th>By</th></tr>';
+        const ups = j.updates || [];
+        if (!ups.length) html += '<tr><td colspan="5">None</td></tr>';
+        ups.forEach(function(u) {
+            html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + u.category + '</td><td>' + u.description + '</td><td>' + (u.notes || '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
+        });
+        html += '</table>';
+        document.getElementById('content').innerHTML = html;
+    }
+    load();
+</script>
+</body>
+</html>

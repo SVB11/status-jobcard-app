@@ -113,6 +113,8 @@ class JobCard(Base):
     pdi_items = relationship("PDIItem", back_populates="job_card", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="job_card")
     updates = relationship("JobUpdate", back_populates="job_card", cascade="all, delete-orphan")
+    third_party_bookings = relationship("ThirdPartyBooking", back_populates="job_card", cascade="all, delete-orphan")
+    parts = relationship("PartItem", back_populates="job_card", cascade="all, delete-orphan")
 
 class JobTask(Base):
     __tablename__ = "job_tasks"
@@ -157,6 +159,36 @@ class AuditLog(Base):
 
     user = relationship("User", back_populates="audit_logs")
     job_card = relationship("JobCard", back_populates="audit_logs")
+
+
+class ThirdPartyBooking(Base):
+    __tablename__ = "third_party_bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    service = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    booked_date = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    job_card = relationship("JobCard", back_populates="third_party_bookings")
+
+
+class PartItem(Base):
+    __tablename__ = "part_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    description = Column(String, nullable=False)
+    order_number = Column(String, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    job_card = relationship("JobCard", back_populates="parts")
 
 class JobUpdate(Base):
     """Permanent workshop/sales updates. Cannot be deleted once submitted."""

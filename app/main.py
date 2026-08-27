@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Body
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from .database import engine, get_db, Base
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
-from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS
+from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS
 from .migrate import migrate_schema
 
 # Create tables and seed
@@ -65,6 +65,10 @@ def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, d
     )
     db.add(entry)
     db.commit()
+
+def parts_missing_order_numbers(db: Session, job_id: int):
+    parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).all()
+    return [p for p in parts if not (p.order_number or "").strip()]
 
 # ---------- AUTH ROUTES ----------
 
@@ -198,11 +202,15 @@ async def api_create_job(
 # ---------- LIST JOBS (basic) ----------
 
 @app.get("/api/jobs")
-async def api_list_jobs(status: str = None, db: Session = Depends(get_db)):
+async def api_list_jobs(status: str = None, salesman: str = None, created_by: int = None, db: Session = Depends(get_db)):
     query = db.query(models.JobCard).order_by(models.JobCard.created_at.desc())
     if status:
         query = query.filter(models.JobCard.status == status)
-    jobs = query.limit(50).all()
+    if salesman:
+        query = query.filter(models.JobCard.salesman_name == salesman)
+    if created_by:
+        query = query.filter(models.JobCard.created_by == created_by)
+    jobs = query.limit(100).all()
     result = []
     for j in jobs:
         result.append({
@@ -217,6 +225,8 @@ async def api_list_jobs(status: str = None, db: Session = Depends(get_db)):
             "target_delivery_date": j.target_delivery_date,
             "status": j.status,
             "current_location": j.current_location,
+            "year": j.year,
+            "created_by": j.created_by,
             "created_at": j.created_at.isoformat() if j.created_at else None
         })
     return {"jobs": result}
@@ -295,6 +305,28 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "created_at": u.created_at.isoformat() if u.created_at else None
         })
 
+    part_items = []
+    for p in getattr(job, "parts", []) or []:
+        part_items.append({
+            "id": p.id,
+            "description": p.description,
+            "order_number": p.order_number,
+            "created_by_name": p.created_by_name,
+            "created_at": p.created_at.isoformat() if p.created_at else None
+        })
+
+    bookings = []
+    for b in getattr(job, "third_party_bookings", []) or []:
+        bookings.append({
+            "id": b.id,
+            "service": b.service,
+            "provider": b.provider,
+            "booked_date": b.booked_date,
+            "notes": b.notes,
+            "created_by_name": b.created_by_name,
+            "created_at": b.created_at.isoformat() if b.created_at else None
+        })
+
     workshop_hours = None
     if job.workshop_entered_at:
         delta = datetime.utcnow() - job.workshop_entered_at.replace(tzinfo=None)
@@ -328,7 +360,10 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "accepted_at": job.accepted_at.isoformat() if job.accepted_at else None,
         "tasks": tasks,
-        "updates": updates
+        "updates": updates,
+        "third_party_bookings": bookings,
+        "parts": part_items,
+        "parts_missing_order": any(not (p.get("order_number") or "").strip() for p in part_items)
     }
 
 # ---------- TASK UPDATES ----------
@@ -565,6 +600,13 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     user_id = body.get("user_id")
     party = body.get("party")  # "sales" or "workshop"
 
+    missing = parts_missing_order_numbers(db, job_id)
+    if missing and party == "workshop":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot close / mark ready. Add Chantelle order numbers for: " + ", ".join(p.description for p in missing)
+        )
+
     if party == "sales":
         job.ready_sales = True
         job.ready_for_delivery_sales_at = datetime.utcnow()
@@ -602,6 +644,12 @@ async def api_close_job(job_id: int, request: Request, db: Session = Depends(get
 
     if job.status != "Ready for Delivery":
         raise HTTPException(status_code=400, detail="Job must be Ready for Delivery before closing")
+    missing = parts_missing_order_numbers(db, job_id)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot close job. Parts without order numbers: " + ", ".join(p.description for p in missing) + ". Order number to be created by Chantelle."
+        )
 
     user_id = body.get("user_id")
     job.status = "Delivered / Closed"
@@ -788,7 +836,9 @@ async def api_lists():
     return {
         "locations": LOCATIONS,
         "activity_types": ACTIVITY_TYPES,
-        "extra_work_presets": EXTRA_WORK_PRESETS
+        "extra_work_presets": EXTRA_WORK_PRESETS,
+        "third_party_services": THIRD_PARTY_SERVICES,
+        "barrel_intervals": BARREL_INTERVALS
     }
 
 @app.get("/api/locations-board")
@@ -805,6 +855,8 @@ async def api_locations_board(db: Session = Depends(get_db)):
             "job_number": j.job_number,
             "stock_number": j.stock_number,
             "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "label": f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip(),
             "status": j.status,
             "priority": j.priority
         })
@@ -867,6 +919,22 @@ async def api_add_update(job_id: int, request: Request, db: Session = Depends(ge
         created_by=user_id
     )
     db.add(update)
+    # Also add to Work / Prep Tasks so workshop can mark completed + notes
+    if category in ("extra_work", "activity", "parts", "third_party"):
+        prefix = {
+            "extra_work": "Extra",
+            "activity": "Activity",
+            "parts": "Parts",
+            "third_party": "3rd party",
+        }.get(category, "Extra")
+        db.add(models.JobTask(
+            job_card_id=job.id,
+            task_name=f"{prefix}: {description}",
+            description=body.get("notes") or None,
+            is_custom=True,
+            status="Not Started",
+            notes=body.get("notes") or None
+        ))
     # Also persist latest 3rd party / parts onto the job card when provided
     if category == "third_party":
         if body.get("third_party_place"):
@@ -886,3 +954,210 @@ async def api_add_update(job_id: int, request: Request, db: Session = Depends(ge
 async def print_job_page(request: Request, job_id: int):
     return render_template("print_job.html", request=request, job_id=job_id)
 
+
+@app.post("/api/jobs/{job_id}/third-party")
+async def api_add_third_party(job_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    service = (body.get("service") or "").strip()
+    provider = (body.get("provider") or "").strip()
+    booked_date = body.get("booked_date") or None
+    interval = (body.get("interval") or "").strip()
+    if not service or not provider:
+        raise HTTPException(status_code=400, detail="Service and provider are required")
+    allowed = {s["service"]: s["providers"] for s in THIRD_PARTY_SERVICES}
+    if service not in allowed or provider not in allowed[service]:
+        raise HTTPException(status_code=400, detail="Invalid service or provider")
+    if service == "Barrel Test":
+        if interval not in BARREL_INTERVALS:
+            raise HTTPException(status_code=400, detail="Select barrel test interval: 3 year, 6 year, 3 and 6 year, or 15 year")
+        service = f"Barrel Test ({interval})"
+    user_id = body.get("user_id")
+    name = body.get("full_name") or "Staff"
+    booking = models.ThirdPartyBooking(
+        job_card_id=job.id,
+        service=service,
+        provider=provider,
+        booked_date=booked_date,
+        notes=(body.get("notes") or "").strip() or None,
+        created_by_name=name,
+        created_by=user_id
+    )
+    db.add(booking)
+    desc = f"{service} — {provider}" + (f" on {booked_date}" if booked_date else "")
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="third_party",
+        description=desc,
+        notes=body.get("notes"),
+        created_by_name=name,
+        created_by=user_id
+    ))
+    db.add(models.JobTask(
+        job_card_id=job.id,
+        task_name=f"3rd party: {desc}",
+        description=body.get("notes"),
+        is_custom=True,
+        status="Not Started",
+        notes=body.get("notes")
+    ))
+    job.third_party_place = f"{service} - {provider}"
+    job.third_party_date = booked_date
+    db.commit()
+    if user_id:
+        log_audit(db, user_id, "3rd Party Booked", job.id, desc)
+    return {"success": True, "id": booking.id}
+
+@app.get("/jobs/{job_id}/print-pdi", response_class=HTMLResponse)
+async def print_pdi_page(request: Request, job_id: int):
+    return render_template("print_pdi.html", request=request, job_id=job_id)
+
+@app.get("/jobs/{job_id}/print-work", response_class=HTMLResponse)
+async def print_work_page(request: Request, job_id: int):
+    return render_template("print_work.html", request=request, job_id=job_id)
+
+@app.post("/api/jobs/{job_id}/parts")
+async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    desc = (body.get("description") or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Part description is required")
+    user_id = body.get("user_id")
+    name = body.get("full_name") or "Staff"
+    part = models.PartItem(
+        job_card_id=job.id,
+        description=desc,
+        order_number=(body.get("order_number") or "").strip() or None,
+        created_by_name=name,
+        created_by=user_id
+    )
+    db.add(part)
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="parts",
+        description="Part added: " + desc,
+        notes=part.order_number,
+        created_by_name=name,
+        created_by=user_id
+    ))
+    db.add(models.JobTask(
+        job_card_id=job.id,
+        task_name="Parts: " + desc,
+        is_custom=True,
+        status="Not Started"
+    ))
+    db.commit()
+    return {"success": True, "id": part.id}
+
+@app.post("/api/jobs/{job_id}/parts/{part_id}/order-number")
+async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    order_number = (body.get("order_number") or "").strip()
+    if not order_number:
+        raise HTTPException(status_code=400, detail="Order number is required")
+    part.order_number = order_number
+    db.add(models.JobUpdate(
+        job_card_id=job_id,
+        category="parts",
+        description=f"Order number added for {part.description}: {order_number}",
+        created_by_name=body.get("full_name") or "Staff",
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/admin/export/extras.csv")
+async def export_extras_csv(db: Session = Depends(get_db)):
+    import csv
+    from io import StringIO
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "Job Number", "Stock Number", "Year", "Vehicle", "Category", "Description", "Notes", "Added By"])
+    rows = db.query(models.JobUpdate).order_by(models.JobUpdate.created_at.desc()).all()
+    for u in rows:
+        job = db.query(models.JobCard).filter(models.JobCard.id == u.job_card_id).first()
+        writer.writerow([
+            u.created_at.isoformat() if u.created_at else "",
+            job.job_number if job else "",
+            job.stock_number if job else "",
+            job.year if job else "",
+            job.vehicle_description if job else "",
+            u.category,
+            u.description,
+            u.notes or "",
+            u.created_by_name or "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=workshop_extras.csv"}
+    )
+
+@app.get("/api/admin/export/parts.csv")
+async def export_parts_csv(db: Session = Depends(get_db)):
+    import csv
+    from io import StringIO
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "Job Number", "Stock Number", "Year", "Vehicle", "Part Description", "Order Number", "Added By"])
+    parts = db.query(models.PartItem).order_by(models.PartItem.created_at.desc()).all()
+    for p in parts:
+        job = db.query(models.JobCard).filter(models.JobCard.id == p.job_card_id).first()
+        writer.writerow([
+            p.created_at.isoformat() if p.created_at else "",
+            job.job_number if job else "",
+            job.stock_number if job else "",
+            job.year if job else "",
+            job.vehicle_description if job else "",
+            p.description,
+            p.order_number or "",
+            p.created_by_name or "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=parts.csv"}
+    )
+
+@app.get("/api/admin/export/custom-tasks.csv")
+async def export_custom_tasks_csv(db: Session = Depends(get_db)):
+    import csv
+    from io import StringIO
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "Job Number", "Stock Number", "Year", "Vehicle", "Task", "Status", "Notes"])
+    tasks = db.query(models.JobTask).filter(models.JobTask.is_custom == True).order_by(models.JobTask.created_at.desc()).all()
+    for t in tasks:
+        job = db.query(models.JobCard).filter(models.JobCard.id == t.job_card_id).first()
+        writer.writerow([
+            t.created_at.isoformat() if t.created_at else "",
+            job.job_number if job else "",
+            job.stock_number if job else "",
+            job.year if job else "",
+            job.vehicle_description if job else "",
+            t.task_name,
+            t.status,
+            t.notes or "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=manual_tasks.csv"}
+    )

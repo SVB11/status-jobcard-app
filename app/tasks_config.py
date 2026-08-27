@@ -21,16 +21,17 @@ def get_tasks_for_vehicle(main_type: str, year: str = None) -> list:
     if main_type == "Tanker":
         tasks.extend([
             {"task_name": "Pressure test (SLP)", "description": None},
-            {"task_name": "Barrel test - 3 year", "description": "Always required"},
-            {"task_name": "Barrel test - 6 year", "description": "Always required"},
+            {"task_name": "Barrel test - 3 year", "description": "Select one barrel interval"},
+            {"task_name": "Barrel test - 6 year", "description": "Select one barrel interval"},
+            {"task_name": "Barrel test - 3 and 6 year", "description": "Select one barrel interval"},
         ])
 
-        # 15 year only if vehicle is 15+ years old
+        # 15 year auto-included if vehicle is 15+ years old
         try:
             vehicle_year = int(year) if year else 0
             current_year = 2026
-            if current_year - vehicle_year >= 15:
-                tasks.append({"task_name": "Barrel test - 15 year", "description": "Only applicable if tanker is 15 years or older"})
+            if vehicle_year and current_year - vehicle_year >= 15:
+                tasks.append({"task_name": "Barrel test - 15 year", "description": "Auto-selected: tanker is 15 years or older"})
         except (ValueError, TypeError):
             pass
 

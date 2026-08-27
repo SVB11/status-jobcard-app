@@ -16,29 +16,34 @@
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-    <!-- Create Job Card Card -->
-    <a href="/jobs/create" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-status-blue">
+    <a href="/jobs/create" id="createCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-status-blue">
         <div class="text-status-blue font-bold text-lg mb-1">Create Job Card</div>
         <p class="text-sm text-gray-500">Start a new preparation job for a sold vehicle</p>
     </a>
-
-    <!-- Open Jobs -->
     <a href="/jobs" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-yellow-500">
-        <div class="text-yellow-600 font-bold text-lg mb-1">Open Jobs</div>
-        <p class="text-sm text-gray-500">View and manage active job cards</p>
+        <div class="text-yellow-600 font-bold text-lg mb-1">All Job Cards</div>
+        <p class="text-sm text-gray-500">View all job cards (info). Workshop updates the work.</p>
     </a>
-
-    <!-- Workshop / Jobs -->
-    <a href="/jobs" class="bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-green-500">
-        <div class="text-green-600 font-bold text-lg mb-1">Workshop & Jobs</div>
-        <p class="text-sm text-gray-500">Accept jobs and update task progress</p>
+    <a href="/jobs" id="workshopCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-green-500">
+        <div class="text-green-600 font-bold text-lg mb-1">Workshop jobs</div>
+        <p class="text-sm text-gray-500">Accept jobs and update tasks, parts and 3rd party</p>
     </a>
-
-    <!-- Admin -->
     <a href="/admin/users" id="adminCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-purple-500">
         <div class="text-purple-600 font-bold text-lg mb-1">User Management</div>
         <p class="text-sm text-gray-500">Add staff and assign roles (Admin only)</p>
     </a>
+</div>
+
+<div id="myJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">My job cards</h2>
+    <p class="text-sm text-gray-500 mb-4">Jobs you created. View activity here. After creation only Workshop updates the work. You complete and sign the PDI.</p>
+    <div id="myJobsList" class="space-y-2 text-sm">Loading...</div>
+</div>
+
+<div id="allJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">All job cards</h2>
+    <p class="text-sm text-gray-500 mb-4">Quick view of every job. Open a card for full info and PDI.</p>
+    <div id="allJobsList" class="space-y-2 text-sm">Loading...</div>
 </div>
 
 <div class="bg-white rounded-xl shadow p-6 mb-8">
@@ -51,11 +56,18 @@
 
 <div id="systemStatusBox" class="hidden bg-white rounded-xl shadow p-6">
     <h2 class="font-bold text-lg mb-3">System Status</h2>
-    <ul class="text-sm text-gray-600 space-y-1">
+    <ul class="text-sm text-gray-600 space-y-1 mb-4">
         <li>✅ Login system active</li>
         <li>✅ Digital PDI + dual sign-off</li>
         <li>✅ Workshop extras, location board, permanent updates</li>
     </ul>
+    <h3 class="font-semibold text-sm mb-2">Download data (CSV)</h3>
+    <p class="text-xs text-gray-500 mb-2">Use these files to collect extras and parts for later dropdown lists.</p>
+    <div class="flex flex-wrap gap-2">
+        <a href="/api/admin/export/extras.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Workshop extras CSV</a>
+        <a href="/api/admin/export/parts.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</a>
+        <a href="/api/admin/export/custom-tasks.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</a>
+    </div>
 </div>
 {% endblock %}
 
@@ -70,10 +82,27 @@
         const role = localStorage.getItem('role') || '';
         document.getElementById('userInfo').textContent = `${name} (${role})`;
         if (role === 'admin') {
-            const card = document.getElementById('adminCard');
-            if (card) card.classList.remove('hidden');
-            const sys = document.getElementById('systemStatusBox');
-            if (sys) sys.classList.remove('hidden');
+            document.getElementById('adminCard').classList.remove('hidden');
+            document.getElementById('systemStatusBox').classList.remove('hidden');
+            document.getElementById('workshopCard').classList.remove('hidden');
+            document.getElementById('createCard').classList.remove('hidden');
+            document.getElementById('allJobsBox').classList.remove('hidden');
+            loadJobList('/api/jobs', 'allJobsList');
+        }
+        if (role === 'sales') {
+            document.getElementById('createCard').classList.remove('hidden');
+            document.getElementById('myJobsBox').classList.remove('hidden');
+            document.getElementById('allJobsBox').classList.remove('hidden');
+            loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
+            loadJobList('/api/jobs', 'allJobsList');
+        }
+        if (role === 'workshop') {
+            document.getElementById('workshopCard').classList.remove('hidden');
+            document.getElementById('createCard').classList.remove('hidden');
+        }
+        if (role === 'accounts') {
+            document.getElementById('allJobsBox').classList.remove('hidden');
+            loadJobList('/api/jobs', 'allJobsList');
         }
         loadLocationBoard();
     }
@@ -81,6 +110,26 @@
     function logout() {
         localStorage.clear();
         window.location.href = '/login';
+    }
+
+    function jobRow(j) {
+        return '<a href="/jobs/' + j.id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
+            '<div class="font-medium">' + j.job_number + ' — ' + j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || '') + '</div>' +
+            '<div class="text-xs text-gray-500">' + j.status + (j.current_location ? ' | ' + j.current_location : '') +
+            ' | Sales: ' + j.salesman_name + '</div></a>';
+    }
+
+    async function loadJobList(url, targetId) {
+        const box = document.getElementById(targetId);
+        try {
+            const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const jobs = data.jobs || [];
+            if (!jobs.length) { box.innerHTML = '<p class="text-gray-400">No jobs yet</p>'; return; }
+            box.innerHTML = jobs.map(jobRow).join('');
+        } catch (err) {
+            box.innerHTML = '<p class="text-red-500">Could not load jobs</p>';
+        }
     }
 
     async function loadLocationBoard() {
@@ -101,7 +150,7 @@
                 } else {
                     items.forEach(function(j) {
                         html += '<a href="/jobs/' + j.id + '" class="block text-xs py-1 hover:underline">' +
-                            j.stock_number + ' — ' + j.vehicle_description + '</a>';
+                            (j.label || (j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || ''))) + '</a>';
                     });
                 }
                 html += '</div>';

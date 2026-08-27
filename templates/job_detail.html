@@ -12,6 +12,7 @@
 {% endblock %}
 
 {% block content %}
+<div id="salesViewNote" class="hidden mb-4 p-3 bg-blue-50 text-blue-800 text-sm rounded-lg">View only for work updates. You can complete and sign the PDI. Workshop updates location, parts, 3rd party and extras.</div>
 <div id="loading" class="text-gray-400">Loading job...</div>
 <div id="content" class="hidden space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -66,7 +67,54 @@
         <div id="otherInstructions" class="mt-4 text-sm text-gray-600 hidden"></div>
     </div>
 
-    <div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
+    
+    
+    <div id="partsSection" class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-1">Parts</h2>
+        <p class="text-sm text-gray-600 mb-3">Order number to be created by Chantelle. Workshop must add the order number for each part. The job cannot be closed until every part has an order number.</p>
+        <div id="partsLockNote" class="hidden mb-3 p-2 bg-red-50 text-red-700 text-sm rounded">Parts are locked for closing — add missing order numbers.</div>
+        <div id="partsList" class="space-y-2 mb-3 text-sm"></div>
+        <div id="partsForm" class="hidden space-y-2 p-3 bg-gray-50 rounded-lg">
+            <input type="text" id="partDesc" placeholder="Part description" class="w-full px-3 py-2 border rounded text-sm">
+            <input type="text" id="partOrder" placeholder="Order number (from Chantelle) — can add later" class="w-full px-3 py-2 border rounded text-sm">
+            <button type="button" onclick="savePart()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Add part</button>
+        </div>
+    </div>
+
+<div id="thirdPartySection" class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-3">3rd Party Bookings</h2>
+        <div id="tpList" class="space-y-2 mb-4 text-sm"></div>
+        <div id="tpForm" class="hidden space-y-3 p-3 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                    <label class="block text-xs font-medium mb-1">Service</label>
+                    <select id="tpService" class="w-full px-2 py-2 border rounded text-sm"></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium mb-1">Company</label>
+                    <select id="tpProvider" class="w-full px-2 py-2 border rounded text-sm"></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium mb-1">Date booked</label>
+                    <input type="date" id="tpDate" class="w-full px-2 py-2 border rounded text-sm">
+                </div>
+                <div id="tpIntervalWrap" class="hidden md:col-span-3">
+                    <label class="block text-xs font-medium mb-1">Barrel test interval</label>
+                    <select id="tpInterval" class="w-full px-2 py-2 border rounded text-sm">
+                        <option value="3 year">3 year</option>
+                        <option value="6 year">6 year</option>
+                        <option value="3 and 6 year">3 and 6 year</option>
+                        <option value="15 year">15 year</option>
+                    </select>
+                    <p id="tp15note" class="hidden text-xs text-orange-600 mt-1">Vehicle is 15 years or older — 15 year is auto-selected. You can still also book 3 / 6 year.</p>
+                </div>
+            </div>
+            <input type="text" id="tpNotes" placeholder="Notes (optional)" class="w-full px-3 py-2 border rounded text-sm">
+            <button type="button" onclick="saveThirdParty()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Add 3rd party booking</button>
+        </div>
+    </div>
+
+<div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
         <h2 class="font-semibold text-status-blue mb-3">Workshop extras & updates</h2>
         <p class="text-xs text-gray-500 mb-3">Once submitted, updates cannot be deleted.</p>
         <div id="extrasForm" class="hidden space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
@@ -212,8 +260,12 @@
             renderUpdates(j);
             if (role === 'workshop' || role === 'admin') {
                 document.getElementById('extrasForm').classList.remove('hidden');
+                document.getElementById('tpForm').classList.remove('hidden');
+                document.getElementById('partsForm').classList.remove('hidden');
                 loadLists();
             }
+            renderThirdParty(j);
+            renderParts(j);
 
             renderTasks(j.tasks);
 
@@ -249,7 +301,8 @@
             if (role === 'admin') {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
-            buttons += '<a href="/jobs/' + jobId + '/print" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print Job + PDI</a>';
+            buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
+            buttons += '<a href="/jobs/' + jobId + '/print-work" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print completed work</a>';
             document.getElementById('actionButtons').innerHTML = buttons;
 
         } catch (err) {
@@ -412,7 +465,139 @@
             (data.extra_work_presets || []).forEach(function(p) {
                 preset.innerHTML += '<option value="' + p + '">' + p + '</option>';
             });
+            window.tpServices = data.third_party_services || [];
+            const svc = document.getElementById('tpService');
+            if (svc) {
+                svc.innerHTML = '<option value="">Select service...</option>';
+                window.tpServices.forEach(function(s) {
+                    svc.innerHTML += '<option value="' + s.service + '">' + s.service + '</option>';
+                });
+                svc.onchange = function() { fillProviders(); };
+                fillProviders();
+            }
         } catch (err) {}
+    }
+
+    function fillProviders() {
+        const svcName = document.getElementById('tpService').value;
+        const sel = document.getElementById('tpProvider');
+        sel.innerHTML = '';
+        const found = (window.tpServices || []).find(function(s) { return s.service === svcName; });
+        const providers = found ? found.providers : [];
+        if (!providers.length) sel.innerHTML = '<option value="">Select service first</option>';
+        providers.forEach(function(p) { sel.innerHTML += '<option value="' + p + '">' + p + '</option>'; });
+        const wrap = document.getElementById('tpIntervalWrap');
+        const note = document.getElementById('tp15note');
+        const interval = document.getElementById('tpInterval');
+        if (svcName === 'Barrel Test') {
+            wrap.classList.remove('hidden');
+            const yr = currentJob && currentJob.year ? parseInt(currentJob.year, 10) : 0;
+            const age = yr ? (new Date().getFullYear() - yr) : 0;
+            if (age >= 15) {
+                interval.value = '15 year';
+                note.classList.remove('hidden');
+            } else {
+                interval.value = '3 and 6 year';
+                note.classList.add('hidden');
+            }
+        } else {
+            wrap.classList.add('hidden');
+            if (note) note.classList.add('hidden');
+        }
+    }
+
+
+    function renderParts(j) {
+        const box = document.getElementById('partsList');
+        const lock = document.getElementById('partsLockNote');
+        const parts = j.parts || [];
+        if (j.parts_missing_order) lock.classList.remove('hidden');
+        else lock.classList.add('hidden');
+        if (!parts.length) {
+            box.innerHTML = '<p class="text-gray-400 text-sm">No parts added</p>';
+            return;
+        }
+        let html = '';
+        parts.forEach(function(p) {
+            const has = (p.order_number || '').trim();
+            html += '<div class="p-2 bg-gray-50 rounded border">' +
+                '<div class="font-medium">' + p.description + '</div>' +
+                '<div class="text-xs ' + (has ? 'text-green-700' : 'text-red-600') + '">Order no: ' + (has || 'MISSING — add Chantelle order number') + '</div>';
+            if ((role === 'workshop' || role === 'admin') && !has) {
+                html += '<div class="flex gap-2 mt-2"><input type="text" id="ord-' + p.id + '" placeholder="Order number" class="flex-1 px-2 py-1 border rounded text-xs">' +
+                    '<button type="button" onclick="savePartOrder(' + p.id + ')" class="px-2 py-1 bg-gray-800 text-white text-xs rounded">Save order no</button></div>';
+            }
+            html += '</div>';
+        });
+        box.innerHTML = html;
+    }
+
+    async function savePart() {
+        const desc = (document.getElementById('partDesc').value || '').trim();
+        if (!desc) { alert('Enter part description'); return; }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/parts', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: desc, order_number: document.getElementById('partOrder').value, user_id: userId ? parseInt(userId) : null, full_name: fullName })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            document.getElementById('partDesc').value = '';
+            document.getElementById('partOrder').value = '';
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+    async function savePartOrder(partId) {
+        const order_number = (document.getElementById('ord-' + partId).value || '').trim();
+        if (!order_number) { alert('Enter the order number from Chantelle'); return; }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/parts/' + partId + '/order-number', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_number: order_number, user_id: userId ? parseInt(userId) : null, full_name: fullName })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            loadJob();
+        } catch (err) { alert('Connection error'); }
+    }
+
+    function renderThirdParty(j) {
+        const box = document.getElementById('tpList');
+        const items = j.third_party_bookings || [];
+        if (!items.length) {
+            box.innerHTML = '<p class="text-gray-400 text-sm">No 3rd party bookings yet</p>';
+            return;
+        }
+        let html = '';
+        items.forEach(function(b) {
+            html += '<div class="p-2 bg-gray-50 rounded border"><div class="font-medium">' + b.service + ' — ' + b.provider + '</div>' +
+                '<div class="text-xs text-gray-600">Booked: ' + (b.booked_date || 'no date') + (b.notes ? ' | ' + b.notes : '') + '</div>' +
+                '<div class="text-xs text-gray-400">' + (b.created_by_name || '') + '</div></div>';
+        });
+        box.innerHTML = html;
+    }
+
+    async function saveThirdParty() {
+        const service = document.getElementById('tpService').value;
+        const provider = document.getElementById('tpProvider').value;
+        const booked_date = document.getElementById('tpDate').value;
+        const notes = document.getElementById('tpNotes').value;
+        if (!service || !provider) { alert('Select service and company'); return; }
+        if (!booked_date) { alert('Select the booked date'); return; }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/third-party', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ service: service, provider: provider, booked_date: booked_date, notes: notes, interval: (document.getElementById('tpInterval') ? document.getElementById('tpInterval').value : null), user_id: userId ? parseInt(userId) : null, full_name: fullName })
+            });
+            const data = await res.json();
+            if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            document.getElementById('tpNotes').value = '';
+            loadJob();
+        } catch (err) { alert('Connection error'); }
     }
 
     function renderUpdates(j) {

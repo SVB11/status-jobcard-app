@@ -84,8 +84,8 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Salesman Name</label>
-                    <input type="text" name="salesman_name" id="salesman_name" readonly
-                           class="w-full px-3 py-2 border rounded-lg bg-gray-50">
+                    <input type="text" name="salesman_name" id="salesman_name" required
+                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
                 </div>
             </div>
         </div>
@@ -130,21 +130,6 @@
                     <input type="text" name="quotation_invoice_number"
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">3rd Party Booking Place</label>
-                    <input type="text" name="third_party_place" placeholder="e.g. DEKRA / FuelSpec"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">3rd Party Booking Date</label>
-                    <input type="date" name="third_party_date"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
-                </div>
-            </div>
-            <div class="mt-4">
-                <label class="block text-sm font-medium text-gray-700 mb-1">Parts to be ordered</label>
-                <textarea name="parts_to_order" rows="2" placeholder="List parts needed..."
-                          class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none"></textarea>
             </div>
             <div class="mt-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Internal Notes</label>
@@ -186,13 +171,18 @@
 <script>
     const token = localStorage.getItem('token');
     const fullName = localStorage.getItem('full_name') || '';
+    const role = localStorage.getItem('role') || '';
     const userId = localStorage.getItem('user_id') || null;
 
     if (!token) {
         window.location.href = '/login';
     } else {
-        document.getElementById('userInfo').textContent = fullName;
-        document.getElementById('salesman_name').value = fullName;
+        document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+        if (role === 'sales') {
+            document.getElementById('salesman_name').value = fullName;
+            document.getElementById('salesman_name').readOnly = true;
+            document.getElementById('salesman_name').classList.add('bg-gray-50');
+        }
     }
 
     function logout() {
@@ -224,8 +214,11 @@
 
             let html = '';
             tasks.forEach(function(t) {
+                const isBarrelChoice = t.task_name.indexOf('Barrel test - 3') === 0 || t.task_name.indexOf('Barrel test - 6') === 0 || t.task_name.indexOf('Barrel test - 3 and') === 0;
+                const is15 = t.task_name.indexOf('15 year') !== -1;
+                const checked = is15 || !isBarrelChoice ? ' checked' : '';
                 html += '<label class="flex items-start gap-3 p-2 hover:bg-white rounded cursor-pointer">' +
-                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '" checked>' +
+                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '"' + checked + '>' +
                     '<div><div class="text-sm font-medium text-gray-800">' + t.task_name + '</div>' +
                     (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
                     '</div></label>';
@@ -274,9 +267,6 @@
             quotation_invoice_number: formData.get('quotation_invoice_number'),
             vin_number: formData.get('vin_number'),
             registration_number: formData.get('registration_number'),
-            third_party_place: formData.get('third_party_place'),
-            third_party_date: formData.get('third_party_date'),
-            parts_to_order: formData.get('parts_to_order'),
             other_instructions: formData.get('other_instructions'),
             selected_tasks: selected,
             user_id: userId ? parseInt(userId) : null
