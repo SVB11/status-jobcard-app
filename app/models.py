@@ -129,6 +129,8 @@ class JobTask(Base):
     task_name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     is_custom = Column(Boolean, default=False)  # True if added by workshop or free-text
+    needs_approval = Column(Boolean, default=False)
+    approved_by_name = Column(String, nullable=True)
     status = Column(String, default="Not Started")
     notes = Column(Text, nullable=True)
     last_updated_by_name = Column(String, nullable=True)
@@ -193,6 +195,9 @@ class PartItem(Base):
     job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
     description = Column(String, nullable=False)
     order_number = Column(String, nullable=True)
+    quantity = Column(String, nullable=True)
+    price = Column(String, nullable=True)
+    supplier_invoice = Column(String, nullable=True)
     part_progress = Column(String, default="To be ordered")
     ordered_date = Column(String, nullable=True)
     follow_up = Column(Boolean, default=False)

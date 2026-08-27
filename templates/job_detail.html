@@ -22,6 +22,12 @@
         </div>
         <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
     </div>
+    <div class="flex gap-2 overflow-x-auto pb-1 text-sm">
+        <a href="#tasksList" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Work / Prep Tasks</a>
+        <a href="#partsSection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Parts</a>
+        <a href="#thirdPartySection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">3rd Party Bookings</a>
+        <a href="#workshopExtras" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Current activity</a>
+    </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white rounded-xl shadow p-5">
@@ -74,21 +80,16 @@
     
     <div id="partsSection" class="bg-white rounded-xl shadow p-5">
         <h2 class="font-semibold text-status-blue mb-1">Parts</h2>
-        <p class="text-sm text-gray-600 mb-3">Order number to be created by Chantelle. Workshop must add the order number for each part. The job cannot be closed until every part has an order number.</p>
+        <p class="text-sm text-gray-600 mb-3">Submit a part here. The form resets so you can add the next one. Change part status (Ordered / Waiting / Delivered) under Work / Prep Tasks. Order number is created by Chantelle.</p>
         <div id="partsLockNote" class="hidden mb-3 p-2 bg-red-50 text-red-700 text-sm rounded">Parts are locked for closing — add missing order numbers.</div>
         <div id="partsList" class="space-y-2 mb-3 text-sm"></div>
         <div id="partsForm" class="hidden space-y-2 p-3 bg-gray-50 rounded-lg">
             <p class="text-xs font-medium text-gray-700">Add a part</p>
             <input type="text" id="partDesc" placeholder="Part description *" class="w-full px-3 py-2 border rounded text-sm">
-            <input type="text" id="partOrder" placeholder="Order number (from Chantelle) — can add later" class="w-full px-3 py-2 border rounded text-sm">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select id="partProgressNew" class="px-3 py-2 border rounded text-sm">
-                    <option>To be ordered</option>
-                    <option>Ordered</option>
-                    <option>Waiting for delivery</option>
-                    <option>Delivered</option>
-                </select>
-                <input type="date" id="partDateNew" class="px-3 py-2 border rounded text-sm">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input type="number" min="1" id="partQty" placeholder="Qty *" value="1" class="px-3 py-2 border rounded text-sm">
+                <input type="text" id="partPrice" placeholder="Price (optional)" class="px-3 py-2 border rounded text-sm">
+                <input type="text" id="partOrder" placeholder="Chantelle order no" class="px-3 py-2 border rounded text-sm">
             </div>
             <button type="button" onclick="savePart()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Submit part</button>
         </div>
@@ -101,7 +102,7 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                     <label class="block text-xs font-medium mb-1">Service</label>
-                    <select id="tpService" class="w-full px-2 py-2 border rounded text-sm"></select>
+                    <select id="tpService" class="w-full px-2 py-2 border rounded text-sm" onchange="fillProviders()"></select>
                 </div>
                 <div>
                     <label class="block text-xs font-medium mb-1">Company</label>
@@ -219,6 +220,30 @@
         loadJob();
     }
 
+
+    function partStatusControls(t) {
+        if (!t.task_name || t.task_name.indexOf('Parts:') !== 0) return '';
+        const parts = (currentJob && currentJob.parts) ? currentJob.parts : [];
+        const desc = t.task_name.replace(/^Parts:\s*/, '');
+        const part = parts.find(function(p) { return p.description === desc; });
+        if (!part) return '<div class="text-xs text-gray-400 mt-1">Part status: ' + (t.status || '') + '</div>';
+        const prog = part.part_progress || 'To be ordered';
+        if (!canEditTasks()) {
+            return '<div class="text-xs text-gray-600 mt-1">Part: ' + prog + (part.ordered_date ? ' | ' + part.ordered_date : '') + '</div>';
+        }
+        const showInv = (prog === 'Ordered' || prog === 'Waiting for delivery' || prog === 'Delivered');
+        return '<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">' +
+            '<select id="prog-' + part.id + '" class="text-xs border rounded px-2 py-1" onchange="togglePartInvoice(' + part.id + ')">' +
+            ['To be ordered','Ordered','Waiting for delivery','Delivered'].map(function(s){
+                return '<option' + (prog===s?' selected':'') + '>' + s + '</option>';
+            }).join('') + '</select>' +
+            '<input type="date" id="pdate-' + part.id + '" value="' + (part.ordered_date || '') + '" class="text-xs border rounded px-2 py-1">' +
+            '<input type="text" id="inv-' + part.id + '" value="' + (part.supplier_invoice || '') + '" placeholder="Supplier invoice no (required on received)" class="text-xs border rounded px-2 py-1 ' + (showInv ? '' : 'hidden') + '">' +
+            '<input type="text" id="price-' + part.id + '" value="' + (part.price || '') + '" placeholder="Price optional" class="text-xs border rounded px-2 py-1">' +
+            '<button type="button" onclick="savePartProgress(' + part.id + ')" class="text-xs px-2 py-1 bg-gray-800 text-white rounded">Save part status</button>' +
+            '</div>';
+    }
+
     function renderTasks(tasks) {
         const canEdit = canEditTasks() && currentJob && 
             !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
@@ -235,9 +260,10 @@
                     '<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
                     '<div class="flex-1">' +
                     '<div class="text-sm font-medium">' + t.task_name + 
-                    (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + '</div>' +
+                    (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + (t.needs_approval ? ' <span class="text-xs text-red-600">(awaiting admin approval)</span>' : '') + '</div>' +
                     (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
-                    (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') +
+                    (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') + (t.needs_approval && isAdmin ? '<div class="mt-1"><button type="button" onclick="approveTask(' + t.id + ')" class="text-xs px-2 py-1 bg-purple-700 text-white rounded">Approve extra task</button></div>' : '') +
+                    partStatusControls(t) +
                     '</div>';
 
                 if (canEdit) {
@@ -266,7 +292,7 @@
                     html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">' +
                         '<select id="loc-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskLocation(' + t.id + ')">' +
                         locationOptions(t) + '</select>';
-                    const providers = t.providers || [];
+                    const providers = (currentJob && currentJob.main_type === 'Tanker') ? (t.providers || []) : [];
                     if (providers.length) {
                         html += '<select id="prov-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">' +
                             '<option value="">3rd party company</option>';
@@ -326,13 +352,19 @@
             document.getElementById('createdAt').textContent = j.created_at ? j.created_at.replace('T', ' ').substring(0, 16) : '—';
             document.getElementById('acceptedBy').textContent = j.accepted_by_name ? (j.accepted_by_name + (j.accepted_at ? ' — ' + j.accepted_at.replace('T',' ').substring(0,16) : '')) : 'Not accepted yet';
             renderUpdates(j);
+            loadLists();
             if (isWorkshop) {
                 document.getElementById('extrasForm').classList.remove('hidden');
                 document.getElementById('tpForm').classList.remove('hidden');
                 document.getElementById('partsForm').classList.remove('hidden');
-                loadLists();
             }
             renderThirdParty(j);
+            const tpSec = document.getElementById('thirdPartySection');
+            if (tpSec) {
+                if (j.main_type === 'Tanker') tpSec.classList.remove('hidden');
+                else tpSec.classList.add('hidden');
+            }
+
             renderParts(j);
             const act = document.getElementById('activityView');
             if (act) {
@@ -444,6 +476,15 @@
         }
     }
 
+    async function approveTask(taskId) {
+        await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/approve', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId ? parseInt(userId) : null, full_name: fullName })
+        });
+        loadJob();
+    }
+
     async function addTask() {
         const input = document.getElementById('newTaskName');
         const name = (input.value || '').trim();
@@ -461,6 +502,8 @@
                 body: JSON.stringify({
                     task_name: name,
                     task_location: document.getElementById('newTaskLocation') ? document.getElementById('newTaskLocation').value : '',
+                    is_admin: isAdmin,
+                    full_name: fullName,
                     user_id: userId ? parseInt(userId) : null
                 })
             });
@@ -536,22 +579,28 @@
             const res = await fetch('/api/lists');
             const data = await res.json();
             const loc = document.getElementById('newLocation');
-            const preset = document.getElementById('extraPreset');
-            loc.innerHTML = '';
             window.jobLocations = data.locations || window.jobLocations;
             const extraLoc = document.getElementById('newTaskLocation');
             if (extraLoc) {
                 extraLoc.innerHTML = '<option value="">Location / bay</option>';
                 window.jobLocations.forEach(function(l) { extraLoc.innerHTML += '<option value="' + l + '">' + l + '</option>'; });
             }
-            (data.locations || []).forEach(function(l) {
-                loc.innerHTML += '<option value="' + l + '"' + (currentJob && currentJob.current_location === l ? ' selected' : '') + '>' + l + '</option>';
-            });
-            preset.innerHTML = '<option value="">Select extra / activity...</option>';
-            (data.extra_work_presets || []).forEach(function(p) {
-                preset.innerHTML += '<option value="' + p + '">' + p + '</option>';
-            });
+            if (loc) {
+                loc.innerHTML = '';
+                (data.locations || []).forEach(function(l) {
+                    loc.innerHTML += '<option value="' + l + '"' + (currentJob && currentJob.current_location === l ? ' selected' : '') + '>' + l + '</option>';
+                });
+            }
             window.tpServices = data.third_party_services || [];
+            if (!window.tpServices.length) {
+                window.tpServices = [
+                    {service: "Barrel Test", providers: ["STT", "ITL"]},
+                    {service: "Pressure Test", providers: ["PFT", "FK"]},
+                    {service: "Calibration Test", providers: ["Liquid Flow"]},
+                    {service: "Roadworthy", providers: ["East Rand Testing Station"]},
+                    {service: "Auto Electrical", providers: ["MAN Auto (Scotty)"]}
+                ];
+            }
             const svc = document.getElementById('tpService');
             if (svc) {
                 svc.innerHTML = '<option value="">Select service...</option>';
@@ -561,7 +610,23 @@
                 svc.onchange = function() { fillProviders(); };
                 fillProviders();
             }
-        } catch (err) {}
+        } catch (err) {
+            window.tpServices = [
+                {service: "Barrel Test", providers: ["STT", "ITL"]},
+                {service: "Pressure Test", providers: ["PFT", "FK"]},
+                {service: "Calibration Test", providers: ["Liquid Flow"]},
+                {service: "Roadworthy", providers: ["East Rand Testing Station"]},
+                {service: "Auto Electrical", providers: ["MAN Auto (Scotty)"]}
+            ];
+            const svc = document.getElementById('tpService');
+            if (svc) {
+                svc.innerHTML = '<option value="">Select service...</option>';
+                window.tpServices.forEach(function(s) {
+                    svc.innerHTML += '<option value="' + s.service + '">' + s.service + '</option>';
+                });
+                svc.onchange = function() { fillProviders(); };
+            }
+        }
     }
 
     function fillProviders() {
@@ -607,25 +672,13 @@
         parts.forEach(function(p) {
             const has = (p.order_number || '').trim();
             html += '<div class="p-2 bg-gray-50 rounded border">' +
-                '<div class="font-medium">' + p.description + '</div>' +
+                '<div class="font-medium">' + p.description + ' × ' + (p.quantity || '1') + (p.price ? ' @ ' + p.price : '') + '</div>' +
                 '<div class="text-xs ' + (has ? 'text-green-700' : 'text-red-600') + '">Order no: ' + (has || 'MISSING — add Chantelle order number') + (p.order_number_by ? ' (by ' + p.order_number_by + ')' : '') + '</div>' +'<div class="text-xs text-gray-400">Added by ' + (p.created_by_name || '—') + '</div>';
             if (isWorkshop && !has) {
                 html += '<div class="flex gap-2 mt-2"><input type="text" id="ord-' + p.id + '" placeholder="Order number" class="flex-1 px-2 py-1 border rounded text-xs">' +
                     '<button type="button" onclick="savePartOrder(' + p.id + ')" class="px-2 py-1 bg-gray-800 text-white text-xs rounded">Save order no</button></div>';
             }
-            if (isWorkshop) {
-                const prog = p.part_progress || 'To be ordered';
-                html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">' +
-                    '<select id="prog-' + p.id + '" class="text-xs border rounded px-2 py-1">' +
-                    ['To be ordered','Ordered','Waiting for delivery','Delivered'].map(function(s){
-                        return '<option' + (prog===s?' selected':'') + '>' + s + '</option>';
-                    }).join('') + '</select>' +
-                    '<input type="date" id="pdate-' + p.id + '" value="' + (p.ordered_date || '') + '" class="text-xs border rounded px-2 py-1">' +
-                    '<button type="button" onclick="savePartProgress(' + p.id + ')" class="text-xs px-2 py-1 bg-gray-800 text-white rounded">Save status</button>' +
-                    '</div>';
-            } else {
-                html += '<div class="text-xs text-gray-600 mt-1">' + (p.part_progress || 'To be ordered') + (p.ordered_date ? ' | Ordered: ' + p.ordered_date : '') + '</div>';
-            }
+            html += '<div class="text-xs text-gray-600 mt-1">Status is updated under Work / Prep Tasks</div>';
             if (isAdmin) {
                 html += '<button type="button" onclick="requestFollowUp(' + p.id + ')" class="mt-2 px-2 py-1 text-xs bg-amber-600 text-white rounded">Follow up</button>';
                 if (p.follow_up) html += '<span class="ml-2 text-xs text-amber-700">Follow-up sent' + (p.follow_up_note ? ': ' + p.follow_up_note : '') + '</span>';
@@ -647,8 +700,9 @@
                 body: JSON.stringify({
                     description: desc,
                     order_number: document.getElementById('partOrder').value,
-                    part_progress: document.getElementById('partProgressNew').value,
-                    ordered_date: document.getElementById('partDateNew').value,
+                    quantity: document.getElementById('partQty').value || '1',
+                    price: document.getElementById('partPrice').value,
+                    part_progress: 'To be ordered',
                     user_id: userId ? parseInt(userId) : null,
                     full_name: fullName
                 })
@@ -657,8 +711,8 @@
             if (!res.ok) { alert(data.detail || 'Failed'); return; }
             document.getElementById('partDesc').value = '';
             document.getElementById('partOrder').value = '';
-            document.getElementById('partProgressNew').value = 'To be ordered';
-            document.getElementById('partDateNew').value = '';
+            document.getElementById('partQty').value = '1';
+            document.getElementById('partPrice').value = '';
             loadJob();
         } catch (err) { alert('Connection error'); }
     }
@@ -800,12 +854,30 @@
         } catch (err) { alert('Connection error'); }
     }
 
+    function togglePartInvoice(partId) {
+        const prog = document.getElementById('prog-' + partId).value;
+        const inv = document.getElementById('inv-' + partId);
+        if (inv) {
+            if (prog === 'Ordered' || prog === 'Waiting for delivery' || prog === 'Delivered') inv.classList.remove('hidden');
+            else inv.classList.add('hidden');
+        }
+    }
+
     async function savePartProgress(partId, progress, orderedDate) {
         const dateEl = document.getElementById('pdate-' + partId);
         const progEl = document.getElementById('prog-' + partId);
+        const invEl = document.getElementById('inv-' + partId);
+        const priceEl = document.getElementById('price-' + partId);
+        const chosen = progress || (progEl ? progEl.value : 'To be ordered');
+        if (chosen === 'Delivered' && invEl && !(invEl.value || '').trim()) {
+            alert('Supplier invoice number is required when the part is received.');
+            return;
+        }
         const payload = {
-            part_progress: progress || (progEl ? progEl.value : 'To be ordered'),
+            part_progress: chosen,
             ordered_date: orderedDate || (dateEl ? dateEl.value : ''),
+            supplier_invoice: invEl ? invEl.value : '',
+            price: priceEl ? priceEl.value : '',
             user_id: userId ? parseInt(userId) : null,
             full_name: fullName
         };

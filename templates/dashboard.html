@@ -46,6 +46,11 @@
     <div id="allJobsList" class="space-y-2 text-sm">Loading...</div>
 </div>
 
+<div id="pdiFailBox" class="hidden bg-red-50 border border-red-300 rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg text-red-700 mb-1">PDI failed — back to workshop</h2>
+    <p class="text-sm text-red-600 mb-4">Fix these items, then retick Pass and sign PDI again.</p>
+    <div id="pdiFailList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
@@ -128,6 +133,8 @@
         }
         
         loadLocationBoard();
+        document.getElementById('pdiFailBox').classList.remove('hidden');
+        loadPdiFails();
     }
 
     function logout() {
@@ -152,6 +159,26 @@
             box.innerHTML = jobs.map(jobRow).join('');
         } catch (err) {
             box.innerHTML = '<p class="text-red-500">Could not load jobs</p>';
+        }
+    }
+
+    async function loadPdiFails() {
+        try {
+            const res = await fetch('/api/pdi-fails', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.jobs || [];
+            const box = document.getElementById('pdiFailList');
+            if (!rows.length) { box.innerHTML = '<p class="text-red-400">No failed PDIs</p>'; return; }
+            box.innerHTML = rows.map(function(j) {
+                const fails = (j.fails || []).map(function(f) {
+                    return '<div class="text-xs">• ' + f.item + ' — ' + (f.notes || '') + (f.by ? ' (' + f.by + ')' : '') + '</div>';
+                }).join('');
+                return '<a href="/jobs/' + j.id + '/pdi" class="block p-3 bg-white border border-red-200 rounded-lg hover:bg-red-50">' +
+                    '<div class="font-medium text-red-800">' + j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || '') + '</div>' +
+                    fails + '</a>';
+            }).join('');
+        } catch (err) {
+            document.getElementById('pdiFailList').innerHTML = '<p class="text-red-500">Could not load fails</p>';
         }
     }
 

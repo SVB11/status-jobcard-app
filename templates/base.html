@@ -14,6 +14,13 @@
         .text-status-blue { color: #025daa; }
         .border-status-blue { border-color: #025daa; }
         .hover\:bg-status-blue:hover { background-color: #024a8a; }
+        input, select, textarea, button { font-size: 16px; }
+        input, select, textarea { min-height: 44px; }
+        button, a.btn, .tap { min-height: 44px; }
+        #tasksList, #partsSection, #thirdPartySection, #workshopExtras { scroll-margin-top: 80px; }
+        @media (max-width: 640px) {
+            header .nav-text { display: none; }
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -28,7 +35,10 @@
                     <div class="text-xs text-gray-500">Job Card & Workshop System</div>
                 </div>
             </div>
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-3 flex-wrap justify-end">
+                <a href="/dashboard" class="text-sm text-status-blue font-medium">Dashboard</a>
+                <a href="/jobs" class="text-sm text-status-blue font-medium">Jobs</a>
+                <a href="/jobs/create" class="text-sm text-white bg-status-blue px-3 py-2 rounded-lg">Create</a>
                 {% block header_right %}{% endblock %}
             </div>
         </div>

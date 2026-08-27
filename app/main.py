@@ -140,7 +140,7 @@ async def api_create_job(
     # Required fields
     required = ["stock_number", "vehicle_description", "year", "main_type", "sub_type",
                 "client_name", "salesman_name", "priority", "target_delivery_date",
-                "vin_number"]
+                "vin_number", "registration_number"]
     for field in required:
         if not body.get(field):
             raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
@@ -188,6 +188,17 @@ async def api_create_job(
             status="Not Started"
         )
         db.add(task)
+
+    other_text = (body.get("other_instructions") or "").strip()
+    if other_text:
+        db.add(models.JobTask(
+            job_card_id=job.id,
+            task_name="Other: " + other_text[:80],
+            description=other_text,
+            is_custom=True,
+            needs_approval=True,
+            status="Not Started"
+        ))
 
     # Free-text other instructions already stored on job
 
@@ -306,6 +317,8 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "status": t.status,
             "notes": t.notes,
             "is_custom": t.is_custom,
+            "needs_approval": bool(getattr(t, "needs_approval", False)),
+            "approved_by_name": getattr(t, "approved_by_name", None),
             "last_updated_by_name": getattr(t, "last_updated_by_name", None),
             "task_location": getattr(t, "task_location", None),
             "third_party_provider": getattr(t, "third_party_provider", None),
@@ -331,6 +344,9 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
             "id": p.id,
             "description": p.description,
             "order_number": p.order_number,
+            "quantity": getattr(p, "quantity", None) or "1",
+            "price": getattr(p, "price", None),
+            "supplier_invoice": getattr(p, "supplier_invoice", None),
             "part_progress": getattr(p, "part_progress", None) or "To be ordered",
             "ordered_date": getattr(p, "ordered_date", None),
             "follow_up": bool(getattr(p, "follow_up", False)),
@@ -529,7 +545,9 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
         is_custom=True,
         status="Not Started",
         notes=body.get("notes") or None,
-        task_location=body.get("task_location") or None
+        task_location=body.get("task_location") or None,
+        needs_approval=not body.get("is_admin", False),
+        last_updated_by_name=body.get("full_name")
     )
     db.add(task)
     db.commit()
@@ -808,14 +826,45 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
     if not item:
         raise HTTPException(status_code=404, detail="PDI item not found")
 
-    if "status" in body:
-        if body["status"] not in ("Pass", "Fail", "N/A", None, ""):
-            raise HTTPException(status_code=400, detail="Status must be Pass, Fail or N/A")
-        item.status = body["status"] if body["status"] else None
     if "notes" in body:
         item.notes = body["notes"]
     if "initials" in body:
         item.initials = body["initials"]
+
+    if "status" in body:
+        if body["status"] not in ("Pass", "Fail", "N/A", None, ""):
+            raise HTTPException(status_code=400, detail="Status must be Pass, Fail or N/A")
+        item.status = body["status"] if body["status"] else None
+        if item.status == "Fail":
+            note = (item.notes or body.get("notes") or "").strip()
+            if not note:
+                raise HTTPException(status_code=400, detail="A fail note is required: describe what failed")
+            item.notes = note
+            inspector = body.get("full_name") or "Inspector"
+            item.initials = inspector
+            job = job_lock
+            job.status = "PDI Failed - Returned to Workshop"
+            job.pdi_signed_workshop = False
+            job.pdi_signed_sales = False
+            job.ready_sales = False
+            job.ready_workshop = False
+            msg = f"PDI FAIL on {job.stock_number}: {item.check_item} — {note} (by {inspector})"
+            db.add(models.JobUpdate(
+                job_card_id=job.id,
+                category="pdi",
+                description=msg,
+                notes=note,
+                created_by_name=inspector,
+                created_by=body.get("user_id")
+            ))
+            notify_role(db, "workshop", msg, job.id)
+            notify_role(db, "admin", msg, job.id)
+            notify_role(db, "accounts", msg, job.id)
+            if job.created_by:
+                db.add(models.Notification(user_id=job.created_by, job_card_id=job.id, message=msg))
+            sales_users = db.query(models.User).filter(models.User.role == "sales", models.User.full_name == job.salesman_name).all()
+            for su in sales_users:
+                db.add(models.Notification(user_id=su.id, job_card_id=job.id, message=msg))
 
     db.commit()
     return {"success": True}
@@ -830,6 +879,10 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    fails = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id, models.PDIItem.status == "Fail").count()
+    if fails:
+        raise HTTPException(status_code=400, detail="Cannot sign PDI while items are marked Fail. Send back to workshop to fix first.")
 
     party = body.get("party")  # "workshop" or "sales"
     user_id = body.get("user_id")
@@ -1126,6 +1179,9 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
         job_card_id=job.id,
         description=desc,
         order_number=(body.get("order_number") or "").strip() or None,
+        quantity=(body.get("quantity") or "").strip() or "1",
+        price=(body.get("price") or "").strip() or None,
+        supplier_invoice=(body.get("supplier_invoice") or "").strip() or None,
         part_progress=body.get("part_progress") or "To be ordered",
         ordered_date=body.get("ordered_date") or None,
         created_by_name=name,
@@ -1289,6 +1345,14 @@ async def api_part_progress(job_id: int, part_id: int, request: Request, db: Ses
     progress = body.get("part_progress") or "To be ordered"
     if progress not in ("To be ordered", "Ordered", "Waiting for delivery", "Delivered"):
         raise HTTPException(status_code=400, detail="Invalid progress")
+    if "supplier_invoice" in body:
+        part.supplier_invoice = (body.get("supplier_invoice") or "").strip() or None
+    if "price" in body:
+        part.price = (body.get("price") or "").strip() or None
+    if "quantity" in body:
+        part.quantity = (body.get("quantity") or "").strip() or part.quantity
+    if progress == "Delivered" and not (part.supplier_invoice or "").strip():
+        raise HTTPException(status_code=400, detail="Supplier invoice number is required when the part is received / delivered")
     part.part_progress = progress
     if body.get("ordered_date"):
         part.ordered_date = body.get("ordered_date")
@@ -1365,6 +1429,9 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
             "job_id": p.job_card_id,
             "description": p.description,
             "order_number": p.order_number,
+            "quantity": getattr(p, "quantity", None) or "1",
+            "price": getattr(p, "price", None),
+            "supplier_invoice": getattr(p, "supplier_invoice", None),
             "part_progress": getattr(p, "part_progress", None) or "To be ordered",
             "ordered_date": getattr(p, "ordered_date", None),
             "follow_up": bool(getattr(p, "follow_up", False)),
@@ -1385,3 +1452,42 @@ async def api_notifications(user_id: int, db: Session = Depends(get_db)):
         "is_read": n.is_read,
         "created_at": n.created_at.isoformat() if n.created_at else None
     } for n in rows]}
+
+@app.post("/api/jobs/{job_id}/tasks/{task_id}/approve")
+async def api_approve_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db)):
+    body = {}
+    try:
+        body = await request.json()
+    except:
+        pass
+    task = db.query(models.JobTask).filter(models.JobTask.id == task_id, models.JobTask.job_card_id == job_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task.needs_approval = False
+    task.approved_by_name = body.get("full_name") or "Admin"
+    db.add(models.JobUpdate(
+        job_card_id=job_id,
+        category="progress",
+        description=f"Admin approved extra task: {task.task_name}",
+        created_by_name=task.approved_by_name,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/pdi-fails")
+async def api_pdi_fails(db: Session = Depends(get_db)):
+    jobs = db.query(models.JobCard).filter(models.JobCard.status == "PDI Failed - Returned to Workshop").order_by(models.JobCard.created_at.desc()).all()
+    out = []
+    for j in jobs:
+        fails = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == j.id, models.PDIItem.status == "Fail").all()
+        out.append({
+            "id": j.id,
+            "job_number": j.job_number,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "salesman_name": j.salesman_name,
+            "fails": [{"item": f.check_item, "notes": f.notes, "by": f.initials} for f in fails]
+        })
+    return {"jobs": out}

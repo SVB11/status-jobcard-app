@@ -154,12 +154,23 @@
     }
 
     async function setStatus(itemId, status) {
+        let notes = '';
+        if (status === 'Fail') {
+            notes = prompt('What failed? Give workshop the instruction to fix:') || '';
+            if (!notes.trim()) {
+                alert('A fail note is required so workshop knows what to fix.');
+                return;
+            }
+        }
         try {
-            await fetch('/api/jobs/' + jobId + '/pdi/items/' + itemId, {
+            const res = await fetch('/api/jobs/' + jobId + '/pdi/items/' + itemId, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: status })
+                body: JSON.stringify({ status: status, notes: notes, full_name: fullName, user_id: userId ? parseInt(userId) : null })
             });
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) { alert(data.detail || 'Failed to update'); return; }
+            if (status === 'Fail') alert('Marked Fail and sent back to workshop.');
             loadPDI();
         } catch (err) {
             alert('Failed to update');

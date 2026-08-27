@@ -1,72 +1,70 @@
 """
-Work / Prep Task rules based on vehicle type.
-Locked according to business requirements.
+Sales-facing Work / Prep instructions.
+These are the company pre-approved options a salesman ticks on create.
 """
 
 def get_tasks_for_vehicle(main_type: str, year: str = None) -> list:
-    """
-    Return the list of standard tasks for a given vehicle main_type.
-    Each task is a dict: {"task_name": str, "description": str or None}
-    """
     main_type = (main_type or "").strip()
 
-    tasks = []
-
-    # ----- Common to most vehicles -----
     common = [
-        {"task_name": "Roadworthy", "description": None},
-        {"task_name": "Brake tests", "description": None},
+        {"task_name": "Roadworthy", "description": "Prepare and take the vehicle for roadworthy"},
+        {"task_name": "Brake tests", "description": "Brake test to be done before delivery"},
+        {"task_name": "Wash / clean for delivery", "description": "Wash and present the vehicle for handover"},
+        {"task_name": "Touch-ups", "description": "Paint / body touch-ups as needed"},
+        {"task_name": "Polish", "description": "Polish cab / body for delivery"},
+        {"task_name": "Spray rims", "description": "Spray or refurbish rims"},
     ]
 
-    if main_type == "Tanker":
-        tasks.extend([
-            {"task_name": "Pressure test (SLP)", "description": None},
-            {"task_name": "Barrel test - 3 year", "description": "Select one barrel interval"},
-            {"task_name": "Barrel test - 6 year", "description": "Select one barrel interval"},
-            {"task_name": "Barrel test - 3 and 6 year", "description": "Select one barrel interval"},
-        ])
+    tanker = [
+        {"task_name": "Pressure test (SLP)", "description": "Book SLP pressure test before delivery"},
+        {"task_name": "Barrel test - 3 year", "description": "3-year barrel test required"},
+        {"task_name": "Barrel test - 6 year", "description": "6-year barrel test required"},
+        {"task_name": "Barrel test - 3 and 6 year", "description": "Both 3-year and 6-year barrel tests"},
+        {"task_name": "Calibration (if fitted with meters)", "description": "Calibrate meters if fitted"},
+        {"task_name": "DEKRA spec", "description": "Prepare to DEKRA spec (normal for fuel tankers)"},
+    ]
 
-        # 15 year auto-included if vehicle is 15+ years old
+    truck = [
+        {"task_name": "Fuel Spec", "description": "Prepare truck tractor to fuel spec"},
+        {"task_name": "DEKRA Spec", "description": "Prepare truck tractor to DEKRA spec"},
+        {"task_name": "Full refurbishment", "description": "Full workshop refurbishment before delivery"},
+        {"task_name": "Already refurbished", "description": "Refurbishment already done — no further refurb work"},
+        {"task_name": "Service before delivery", "description": "Workshop service before handover"},
+    ]
+
+    trailer = [
+        {"task_name": "Full refurbishment", "description": "Full workshop refurbishment before delivery"},
+        {"task_name": "Already refurbished", "description": "Refurbishment already done — no further refurb work"},
+        {"task_name": "Tautliner / sail work", "description": "Sails, belts and ratchets to be checked or repaired"},
+        {"task_name": "Tipper bin / hydraulics check", "description": "Tipper cylinder, pipes and bin condition"},
+        {"task_name": "Side tipper tarps", "description": "Side tipper tarps to be fitted, repaired or checked"},
+        {"task_name": "Crack repairs", "description": "Crack repairs on bin / body / chassis as required"},
+    ]
+
+    as_is = [
+        {"task_name": "As Is – with Roadworthy only", "description": "Sell as is. Only roadworthy to be done"},
+        {"task_name": "As Is – without Roadworthy", "description": "Sell as is. No roadworthy"},
+    ]
+
+    tasks = []
+    if main_type == "Tanker":
+        tasks.extend(tanker)
         try:
             vehicle_year = int(year) if year else 0
-            current_year = 2026
-            if vehicle_year and current_year - vehicle_year >= 15:
-                tasks.append({"task_name": "Barrel test - 15 year", "description": "Auto-selected: tanker is 15 years or older"})
+            if vehicle_year and 2026 - vehicle_year >= 15:
+                tasks.append({"task_name": "Barrel test - 15 year", "description": "Vehicle is 15 years or older — 15-year barrel test applies"})
         except (ValueError, TypeError):
             pass
-
-        tasks.append({"task_name": "Calibration (if fitted with meters)", "description": None})
         tasks.extend(common)
-        tasks.append({"task_name": "DEKRA Spec", "description": "Standard for fuel tankers"})
-
     elif main_type == "Truck Tractor":
         tasks.extend(common)
-        tasks.extend([
-            {"task_name": "Fuel Spec", "description": "Optional"},
-            {"task_name": "DEKRA Spec", "description": "Optional"},
-            {"task_name": "Spray rims", "description": None},
-            {"task_name": "Touch-ups", "description": None},
-            {"task_name": "Polish", "description": None},
-            {"task_name": "Full refurbishment", "description": None},
-            {"task_name": "Already refurbished", "description": "No further refurbishment needed"},
-        ])
-
+        tasks.extend(truck)
     elif main_type in ("Trailer", "Tipper"):
         tasks.extend(common)
-        tasks.extend([
-            {"task_name": "Spray rims", "description": None},
-            {"task_name": "Touch-ups", "description": None},
-            {"task_name": "Polish", "description": None},
-            {"task_name": "Full refurbishment", "description": None},
-            {"task_name": "Already refurbished", "description": "No further refurbishment needed"},
-        ])
-
-    else:  # Other
+        tasks.extend(trailer)
+    else:
         tasks.extend(common)
+        tasks.extend(truck)
 
-    # Special options available on relevant types
-    if main_type in ("Tanker", "Truck Tractor", "Trailer", "Tipper", "Other"):
-        tasks.append({"task_name": "As Is – with Roadworthy only", "description": None})
-        tasks.append({"task_name": "As Is – without Roadworthy", "description": None})
-
+    tasks.extend(as_is)
     return tasks

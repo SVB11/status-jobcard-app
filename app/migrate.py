@@ -16,6 +16,9 @@ NEW_COLUMNS = {
         "current_activity_by": "VARCHAR",
     },
     "part_items": {
+        "quantity": "VARCHAR",
+        "price": "VARCHAR",
+        "supplier_invoice": "VARCHAR",
         "part_progress": "VARCHAR",
         "ordered_date": "VARCHAR",
         "follow_up": "BOOLEAN",
@@ -27,6 +30,8 @@ NEW_COLUMNS = {
         "third_party_provider": "VARCHAR",
         "booked_date": "VARCHAR",
         "last_updated_by_name": "VARCHAR",
+        "needs_approval": "BOOLEAN",
+        "approved_by_name": "VARCHAR",
     },
 }
 

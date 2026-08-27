@@ -67,8 +67,8 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Registration Number</label>
-                    <input type="text" name="registration_number" placeholder="e.g. GP 123 AB"
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Registration Number *</label>
+                    <input type="text" name="registration_number" required placeholder="e.g. GP 123 AB"
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none uppercase">
                 </div>
             </div>
@@ -179,11 +179,9 @@
         window.location.href = '/login';
     } else {
         document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
-        if (role === 'sales') {
-            document.getElementById('salesman_name').value = fullName;
-            document.getElementById('salesman_name').readOnly = true;
-            document.getElementById('salesman_name').classList.add('bg-gray-50');
-        }
+        document.getElementById('salesman_name').value = fullName;
+        document.getElementById('salesman_name').readOnly = true;
+        document.getElementById('salesman_name').classList.add('bg-gray-50');
     }
 
     function logout() {
@@ -215,11 +213,8 @@
 
             let html = '';
             tasks.forEach(function(t) {
-                const isBarrelChoice = t.task_name.indexOf('Barrel test - 3') === 0 || t.task_name.indexOf('Barrel test - 6') === 0 || t.task_name.indexOf('Barrel test - 3 and') === 0;
-                const is15 = t.task_name.indexOf('15 year') !== -1;
-                const checked = is15 || !isBarrelChoice ? ' checked' : '';
                 html += '<label class="flex items-start gap-3 p-2 hover:bg-white rounded cursor-pointer">' +
-                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '"' + checked + '>' +
+                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '">' +
                     '<div><div class="text-sm font-medium text-gray-800">' + t.task_name + '</div>' +
                     (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
                     '</div></label>';
