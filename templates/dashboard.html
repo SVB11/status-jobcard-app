@@ -32,6 +32,16 @@
         <div class="text-purple-600 font-bold text-lg mb-1">User Management</div>
         <p class="text-sm text-gray-500">Add staff and assign roles (Admin only)</p>
     </a>
+    <a href="/admin/third-parties" id="adminTpCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-orange-500">
+        <div class="text-orange-600 font-bold text-lg mb-1">3rd Party list</div>
+        <p class="text-sm text-gray-500">Add companies and their test category</p>
+    </a>
+</div>
+
+<div id="pendingExtrasBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg text-amber-800 mb-1">Extra work waiting for approval</h2>
+    <p class="text-sm text-amber-700 mb-4">Approve here without opening each job card.</p>
+    <div id="pendingExtrasList" class="space-y-2 text-sm">Loading...</div>
 </div>
 
 <div id="myJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
@@ -51,6 +61,16 @@
     <p class="text-sm text-red-600 mb-4">Fix these items, then retick Pass and sign PDI again.</p>
     <div id="pdiFailList" class="space-y-2 text-sm">Loading...</div>
 </div>
+<div id="jobBookingsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+        <div>
+            <h2 class="font-bold text-lg">Parts and extras by job</h2>
+            <p class="text-sm text-gray-500">All parts and extra work booked, grouped by job number.</p>
+        </div>
+        <a href="/admin/print-bookings" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Print this list</a>
+    </div>
+    <div id="jobBookingsList" class="space-y-3 text-sm">Loading...</div>
+</div>
 <div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
@@ -62,7 +82,7 @@
 </div>
 <div id="bookingsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">3rd party bookings diary</h2>
-    <p class="text-sm text-gray-500 mb-4">Where and when each vehicle is booked (WS, make, year).</p>
+    <p class="text-sm text-gray-500 mb-4">Filled from Work / Prep Tasks (Pressure, Barrel, Calibration, Roadworthy, As Is). You do not need to type it again under 3rd Party Bookings.</p>
     <div id="bookingsList" class="space-y-2 text-sm">Loading...</div>
 </div>
 
@@ -115,6 +135,13 @@
         document.getElementById('userInfo').textContent = `${name} (${role})`;
         if (isAdmin) {
             document.getElementById('adminCard').classList.remove('hidden');
+            document.getElementById('adminTpCard').classList.remove('hidden');
+            document.getElementById('pendingExtrasBox').classList.remove('hidden');
+            loadPendingExtras();
+            document.getElementById('jobBookingsBox').classList.remove('hidden');
+            document.getElementById('partsDashBox').classList.remove('hidden');
+            loadJobBookings();
+            loadPartsDash();
             document.getElementById('systemStatusBox').classList.remove('hidden');
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
@@ -125,8 +152,12 @@
             document.getElementById('createCard').classList.remove('hidden');
             document.getElementById('myJobsBox').classList.remove('hidden');
             document.getElementById('allJobsBox').classList.remove('hidden');
+            document.getElementById('bookingsBox').classList.remove('hidden');
+            document.getElementById('notifyBox').classList.remove('hidden');
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
+            loadBookings();
+            loadNotifications();
         }
         if (role === 'workshop') {
             document.getElementById('workshopCard').classList.remove('hidden');
@@ -148,6 +179,59 @@
         }
         loadLocationBoard();
         loadPdiFails();
+    }
+
+    async function loadJobBookings() {
+        try {
+            const res = await fetch('/api/admin/job-bookings', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const jobs = data.jobs || [];
+            const box = document.getElementById('jobBookingsList');
+            if (!jobs.length) { box.innerHTML = '<p class="text-gray-400">No parts or extras on open jobs</p>'; return; }
+            box.innerHTML = jobs.map(function(j) {
+                const parts = (j.parts || []).map(function(p) {
+                    return '<div class="text-xs">• ' + p.description + ' × ' + (p.quantity || '1') + ' — ' + (p.part_progress || '') + (p.order_number ? ' (PO ' + p.order_number + ')' : '') + '</div>';
+                }).join('') || '<div class="text-xs text-gray-400">No parts</div>';
+                const extras = (j.extras || []).map(function(e) {
+                    return '<div class="text-xs">• ' + e.task_name + ' — ' + e.status + (e.needs_approval ? ' (waiting approval)' : '') + '</div>';
+                }).join('') || '<div class="text-xs text-gray-400">No extras</div>';
+                return '<div class="p-3 bg-gray-50 rounded-lg border">' +
+                    '<a href="/jobs/' + j.id + '" class="font-medium text-status-blue">' + j.job_number + ' — ' + j.stock_number + ' ' + (j.vehicle_description || '') + '</a>' +
+                    '<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2"><div><div class="text-xs font-semibold">Parts</div>' + parts + '</div><div><div class="text-xs font-semibold">Extras</div>' + extras + '</div></div></div>';
+            }).join('');
+        } catch (err) {
+            document.getElementById('jobBookingsList').innerHTML = '<p class="text-red-600">Could not load list</p>';
+        }
+    }
+
+    async function loadPendingExtras() {
+        try {
+            const res = await fetch('/api/admin/pending-extras', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.tasks || [];
+            const box = document.getElementById('pendingExtrasList');
+            if (!rows.length) { box.innerHTML = '<p class="text-amber-600">No extras waiting</p>'; return; }
+            box.innerHTML = rows.map(function(t) {
+                return '<div class="p-3 bg-white border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
+                    '<div><div class="font-medium">' + t.stock_number + ' ' + (t.vehicle_description || '') + ' ' + (t.year || '') + '</div>' +
+                    '<div class="text-xs text-gray-600">' + t.task_name + (t.description ? ' — ' + t.description : '') + (t.last_updated_by_name ? ' (' + t.last_updated_by_name + ')' : '') + '</div></div>' +
+                    '<div class="flex gap-2">' +
+                    '<button type="button" onclick="approveExtra(' + t.job_id + ',' + t.task_id + ')" class="px-3 py-2 bg-purple-700 text-white text-xs rounded">Approve</button>' +
+                    '<a href="/jobs/' + t.job_id + '" class="px-3 py-2 border text-xs rounded">Open job</a>' +
+                    '</div></div>';
+            }).join('');
+        } catch (err) {
+            document.getElementById('pendingExtrasList').innerHTML = '<p class="text-red-600">Could not load extras</p>';
+        }
+    }
+
+    async function approveExtra(jobId, taskId) {
+        await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/approve', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: parseInt(localStorage.getItem('user_id')), full_name: localStorage.getItem('full_name') })
+        });
+        loadPendingExtras();
     }
 
     async function changeMyPassword() {
@@ -270,9 +354,10 @@
             const box = document.getElementById('bookingsList');
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No bookings yet</p>'; return; }
             box.innerHTML = rows.map(function(b) {
+                const extra = (b.status ? ' | ' + b.status : '') + (b.test_result ? ' | Test ' + b.test_result : '');
                 return '<a href="/jobs/' + b.job_id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
-                    '<div class="font-medium">' + (b.booked_date || 'No date') + ' — ' + b.service + ' at ' + b.provider + '</div>' +
-                    '<div class="text-xs text-gray-500">' + b.label + '</div></a>';
+                    '<div class="font-medium">' + (b.booked_date || 'Date not set') + ' — ' + b.service + ' at ' + (b.provider || '—') + '</div>' +
+                    '<div class="text-xs text-gray-500">' + b.label + extra + '</div></a>';
             }).join('');
         } catch (err) {
             document.getElementById('bookingsList').innerHTML = '<p class="text-red-500">Could not load bookings</p>';

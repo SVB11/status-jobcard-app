@@ -139,6 +139,8 @@ class JobTask(Base):
     task_location = Column(String, nullable=True)
     third_party_provider = Column(String, nullable=True)
     booked_date = Column(String, nullable=True)
+    test_result = Column(String, nullable=True)
+    fail_list = Column(Text, nullable=True)
     completed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -225,6 +227,16 @@ class JobUpdate(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     job_card = relationship("JobCard", back_populates="updates")
+
+class ThirdPartyCompany(Base):
+    __tablename__ = "third_party_companies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False)  # Barrel Test, Pressure Test, etc.
+    name = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class Notification(Base):
     __tablename__ = "notifications"

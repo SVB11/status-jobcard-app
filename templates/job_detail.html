@@ -42,6 +42,17 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
             </dl>
+            <div id="editVehicleBox" class="hidden mt-4 pt-3 border-t">
+                <p class="text-xs text-gray-500 mb-2">Correct a mistake. Workshop work stays the same.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    <input id="editStock" class="border rounded px-2 py-1" placeholder="WS number">
+                    <input id="editYear" class="border rounded px-2 py-1" placeholder="Year">
+                    <input id="editDesc" class="sm:col-span-2 border rounded px-2 py-1" placeholder="Vehicle description">
+                    <input id="editVin" class="border rounded px-2 py-1" placeholder="VIN">
+                    <input id="editReg" class="border rounded px-2 py-1" placeholder="Reg no">
+                </div>
+                <button type="button" onclick="saveVehicle()" class="mt-2 px-3 py-2 bg-status-blue text-white text-xs rounded">Save vehicle details</button>
+            </div>
         </div>
         <div class="bg-white rounded-xl shadow p-5">
             <h2 class="font-semibold text-status-blue mb-3">Job Info</h2>
@@ -173,6 +184,25 @@
         window.location.href = '/login';
     }
 
+    async function saveVehicle() {
+        const res = await fetch('/api/jobs/' + jobId + '/vehicle', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stock_number: document.getElementById('editStock').value,
+                vehicle_description: document.getElementById('editDesc').value,
+                year: document.getElementById('editYear').value,
+                vin_number: document.getElementById('editVin').value,
+                registration_number: document.getElementById('editReg').value,
+                user_id: userId ? parseInt(userId) : null,
+                full_name: fullName
+            })
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Could not save'); return; }
+        loadJob();
+    }
+
     function canEditTasks() {
         if (currentJob && currentJob.status === 'Delivered / Closed' && !isAdmin) return false;
         return isWorkshop;
@@ -183,7 +213,8 @@
             'Not Started': 'bg-gray-100 text-gray-600',
             'In Progress': 'bg-blue-100 text-blue-700',
             'Completed': 'bg-green-100 text-green-700',
-            'Blocked': 'bg-red-100 text-red-700'
+            'Blocked': 'bg-red-100 text-red-700',
+            'Failed test - back to workshop': 'bg-red-100 text-red-700'
         };
         return map[s] || 'bg-gray-100 text-gray-600';
     }
@@ -246,6 +277,83 @@
             '</div>';
     }
 
+    function parseFailList(t) {
+        if (!t.fail_list) return [];
+        try { const v = JSON.parse(t.fail_list); return Array.isArray(v) ? v : []; } catch(e) { return t.fail_list ? [t.fail_list] : []; }
+    }
+
+    function roadworthyBlock(t, canEdit) {
+        const fails = parseFailList(t);
+        let html = '<div class="mt-3 p-3 bg-white border rounded">';
+        html += '<div class="text-xs font-semibold text-gray-700 mb-2">Testing station result (same Roadworthy task)</div>';
+        if (t.test_result === 'Pass') html += '<div class="text-xs text-green-700 font-medium mb-2">Passed — Roadworthy completed</div>';
+        if (t.test_result === 'Fail') html += '<div class="text-xs text-red-700 font-medium mb-2">Failed — back in workshop to fix. Do not open a new task.</div>';
+        if (canEdit) {
+            html += '<div class="flex gap-2 mb-2">' +
+                '<button type="button" onclick="setRoadworthyResult(' + t.id + ',\'Pass\')" class="px-3 py-1 text-xs rounded bg-green-700 text-white">Pass test</button>' +
+                '<button type="button" onclick="showFailBox(' + t.id + ')" class="px-3 py-1 text-xs rounded bg-red-700 text-white">Fail test</button>' +
+                '</div>';
+            html += '<div id="failbox-' + t.id + '" class="' + (t.test_result === 'Fail' ? '' : 'hidden') + '">' +
+                '<p class="text-xs text-gray-600 mb-1">List of failures to fix to pass:</p>' +
+                '<div id="faillist-' + t.id + '">';
+            fails.forEach(function(item, i) {
+                html += '<div class="text-xs py-1">• ' + item + '</div>';
+            });
+            html += '</div>' +
+                '<div class="flex gap-2 mt-2">' +
+                '<input type="text" id="failnew-' + t.id + '" placeholder="Add a failure / fix needed" class="flex-1 text-xs border rounded px-2 py-1">' +
+                '<button type="button" onclick="addFailItem(' + t.id + ')" class="text-xs px-2 py-1 bg-gray-800 text-white rounded">Add to list</button>' +
+                '</div></div>';
+        } else if (fails.length) {
+            html += fails.map(function(item){ return '<div class="text-xs">• ' + item + '</div>'; }).join('');
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function showFailBox(taskId) {
+        const box = document.getElementById('failbox-' + taskId);
+        if (box) box.classList.remove('hidden');
+        setRoadworthyResult(taskId, 'Fail');
+    }
+
+    async function setRoadworthyResult(taskId, result) {
+        const t = (currentJob.tasks || []).find(function(x){ return x.id === taskId; }) || {};
+        const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test_result: result,
+                fail_list: t.fail_list || '[]',
+                user_id: userId ? parseInt(userId) : null,
+                full_name: fullName
+            })
+        });
+        if (!res.ok) { const d = await res.json().catch(function(){return {};}); alert(d.detail || 'Could not save'); return; }
+        loadJob();
+    }
+
+    async function addFailItem(taskId) {
+        const inp = document.getElementById('failnew-' + taskId);
+        const text = (inp.value || '').trim();
+        if (!text) { inp.focus(); return; }
+        const t = (currentJob.tasks || []).find(function(x){ return x.id === taskId; }) || {};
+        const list = parseFailList(t);
+        list.push(text);
+        const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test_result: 'Fail',
+                fail_list: JSON.stringify(list),
+                user_id: userId ? parseInt(userId) : null,
+                full_name: fullName
+            })
+        });
+        if (!res.ok) { const d = await res.json().catch(function(){return {};}); alert(d.detail || 'Could not save'); return; }
+        loadJob();
+    }
+
     function renderTasks(tasks) {
         const canEdit = canEditTasks() && currentJob && 
             !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
@@ -274,6 +382,7 @@
                         '<option value="In Progress"' + (t.status === 'In Progress' ? ' selected' : '') + '>In Progress</option>' +
                         '<option value="Completed"' + (t.status === 'Completed' ? ' selected' : '') + '>Completed</option>' +
                         '<option value="Blocked"' + (t.status === 'Blocked' ? ' selected' : '') + '>Blocked</option>' +
+                        ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1 ? '<option value="Failed test - back to workshop"' + (t.status === 'Failed test - back to workshop' ? ' selected' : '') + '>Failed test - back to workshop</option>' : '') +
                         '</select>';
                 } else {
                     html += '<span class="px-2 py-0.5 text-xs rounded-full ' + statusColour(t.status) + '">' + t.status + '</span>';
@@ -318,6 +427,9 @@
                         (t.third_party_provider ? ' | ' + t.third_party_provider : '') +
                         (t.booked_date ? ' | ' + t.booked_date : '') + '</div>';
                 }
+                if ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1) {
+                    html += roadworthyBlock(t, canEdit);
+                }
                 html += '</div>';
             });
         }
@@ -345,6 +457,17 @@
             document.getElementById('jobNumber').textContent = j.job_number;
             document.getElementById('vehicleLine').textContent = j.stock_number + ' — ' + j.vehicle_description;
             document.getElementById('stockNumber').textContent = j.stock_number;
+            const canFixVehicle = isAdmin || (userId && String(j.created_by) === String(userId));
+            if (canFixVehicle && !(j.status === 'Delivered / Closed' && !isAdmin)) {
+                document.getElementById('editVehicleBox').classList.remove('hidden');
+                document.getElementById('editStock').value = j.stock_number || '';
+                document.getElementById('editYear').value = j.year || '';
+                document.getElementById('editDesc').value = j.vehicle_description || '';
+                document.getElementById('editVin').value = j.vin_number || '';
+                document.getElementById('editReg').value = j.registration_number || '';
+            } else {
+                document.getElementById('editVehicleBox').classList.add('hidden');
+            }
             document.getElementById('typeLine').textContent = j.main_type + (j.sub_type ? ' / ' + j.sub_type : '');
             document.getElementById('year').textContent = j.year || '—';
             document.getElementById('vinNumber').textContent = j.vin_number || '—';

@@ -36,6 +36,8 @@ NEW_COLUMNS = {
         "last_updated_by_name": "VARCHAR",
         "needs_approval": "BOOLEAN",
         "approved_by_name": "VARCHAR",
+        "test_result": "VARCHAR",
+        "fail_list": "TEXT",
     },
 }
 

@@ -13,7 +13,12 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres"):
     engine = create_engine(SQLALCHEMY_DATABASE_URL)
 else:
     # Local / simple hosting – SQLite
-    db_path = os.getenv("SQLITE_PATH", "status_jobcard.db")
+    db_path = os.getenv("SQLITE_PATH")
+    if not db_path:
+        if os.path.isdir("/data"):
+            db_path = "/data/status_jobcard.db"
+        else:
+            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "status_jobcard.db")
     SQLALCHEMY_DATABASE_URL = f"sqlite:///{db_path}"
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

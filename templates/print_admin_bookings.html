@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Parts and extras by job</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 13px; color: #111; margin: 24px; }
+        h1,h2 { margin: 0 0 8px; color: #025daa; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #025daa; padding-bottom: 10px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        th, td { border: 1px solid #ccc; padding: 5px 7px; text-align: left; }
+        th { background: #f3f4f6; }
+        .job { page-break-inside: avoid; margin-bottom: 18px; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom:12px;">
+        <button onclick="window.print()">Print this list</button>
+        <a href="/dashboard">Back to dashboard</a>
+    </div>
+    <div class="header">
+        <div>
+            <img src="/static/images/status_logo.svg" alt="Status" style="height:48px">
+            <div>Parts and extras booked — by job number</div>
+        </div>
+        <div id="when"></div>
+    </div>
+    <div id="content">Loading...</div>
+<script>
+    document.getElementById('when').textContent = new Date().toLocaleString();
+    (async function() {
+        const res = await fetch('/api/admin/job-bookings', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') } });
+        const data = await res.json();
+        const jobs = data.jobs || [];
+        if (!jobs.length) { document.getElementById('content').textContent = 'No open parts or extras'; return; }
+        let html = '';
+        jobs.forEach(function(j) {
+            html += '<div class="job"><h2>' + j.job_number + ' — ' + j.stock_number + ' ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</h2>';
+            html += '<div style="margin-bottom:6px;color:#555">Status: ' + j.status + ' | Sales: ' + (j.salesman_name || '') + '</div>';
+            html += '<h3>Parts</h3><table><tr><th>Part</th><th>Qty</th><th>Price</th><th>Order no</th><th>Status</th><th>Invoice</th></tr>';
+            if (!(j.parts || []).length) html += '<tr><td colspan="6">None</td></tr>';
+            (j.parts || []).forEach(function(p) {
+                html += '<tr><td>' + p.description + '</td><td>' + (p.quantity || '1') + '</td><td>' + (p.price || '') + '</td><td>' + (p.order_number || '') + '</td><td>' + (p.part_progress || '') + '</td><td>' + (p.supplier_invoice || '') + '</td></tr>';
+            });
+            html += '</table><h3>Extras</h3><table><tr><th>Extra</th><th>Notes</th><th>Status</th><th>Approval</th></tr>';
+            if (!(j.extras || []).length) html += '<tr><td colspan="4">None</td></tr>';
+            (j.extras || []).forEach(function(e) {
+                html += '<tr><td>' + e.task_name + '</td><td>' + (e.description || '') + '</td><td>' + e.status + '</td><td>' + (e.needs_approval ? 'Waiting' : 'Approved') + '</td></tr>';
+            });
+            html += '</table></div>';
+        });
+        document.getElementById('content').innerHTML = html;
+        document.title = 'Parts and extras by job';
+    })();
+</script>
+</body>
+</html>

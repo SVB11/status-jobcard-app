@@ -31,8 +31,6 @@ def seed_database():
     for username, full_name, role, password in STAFF:
         exists = db.query(models.User).filter(models.User.username == username).first()
         if exists:
-            if not getattr(exists, "password_plain", None):
-                exists.password_plain = password
             continue
         db.add(models.User(
             username=username,
@@ -48,6 +46,15 @@ def seed_database():
         print("Added users:", ", ".join(added))
     else:
         print("All staff users already exist.")
+
+    from .lists_config import THIRD_PARTY_SERVICES
+    existing_tp = db.query(models.ThirdPartyCompany).count()
+    if existing_tp == 0:
+        for svc in THIRD_PARTY_SERVICES:
+            for name in svc["providers"]:
+                db.add(models.ThirdPartyCompany(category=svc["service"], name=name, is_active=True))
+        db.commit()
+        print("Seeded default 3rd party companies")
     db.close()
 
 if __name__ == "__main__":
