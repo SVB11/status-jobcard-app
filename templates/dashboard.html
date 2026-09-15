@@ -71,6 +71,11 @@
     </div>
     <div id="jobBookingsList" class="space-y-3 text-sm">Loading...</div>
 </div>
+<div id="suppliesDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1">HOSES / COUPLERS / SUZI</h2>
+    <p class="text-sm text-gray-500 mb-4">Booked and completed supply items on open job cards.</p>
+    <div id="suppliesDashList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
@@ -147,8 +152,10 @@
             loadPendingExtras();
             document.getElementById('jobBookingsBox').classList.remove('hidden');
             document.getElementById('partsDashBox').classList.remove('hidden');
+            document.getElementById('suppliesDashBox').classList.remove('hidden');
             loadJobBookings();
             loadPartsDash();
+            loadSuppliesDash();
             document.getElementById('systemStatusBox').classList.remove('hidden');
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
@@ -171,9 +178,11 @@
             document.getElementById('createCard').classList.remove('hidden');
             document.getElementById('bookingsBox').classList.remove('hidden');
             document.getElementById('partsDashBox').classList.remove('hidden');
+            document.getElementById('suppliesDashBox').classList.remove('hidden');
             document.getElementById('notifyBox').classList.remove('hidden');
             loadBookings();
             loadPartsDash();
+            loadSuppliesDash();
             loadNotifications();
         }
         if (isAdmin) {
@@ -326,6 +335,22 @@
         } catch (err) {
             document.getElementById('pdiFailList').innerHTML = '<p class="text-red-500">Could not load fails</p>';
         }
+    }
+
+    async function loadSuppliesDash() {
+        try {
+            const res = await fetch('/api/supplies', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.supplies || [];
+            const box = document.getElementById('suppliesDashList');
+            if (!box) return;
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No hoses, couplers or suzi booked</p>'; return; }
+            box.innerHTML = rows.map(function(s) {
+                return '<a href="/jobs/' + s.job_id + '" class="block p-3 bg-gray-50 rounded-lg">' +
+                    '<div class="font-medium">' + s.stock_number + ' — ' + s.category + ' — ' + s.item_type + ' × ' + (s.quantity || '1') + '</div>' +
+                    '<div class="text-xs text-gray-500">' + (s.vehicle_description || '') + ' | ' + s.status + '</div></a>';
+            }).join('');
+        } catch (err) {}
     }
 
     async function loadPartsDash() {

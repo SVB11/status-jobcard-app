@@ -82,3 +82,35 @@ def providers_for_task(task_name: str):
         if key.lower() in name:
             return providers
     return []
+
+SUPPLY_CATEGORIES = {
+    "Delivery hose": [
+        "Fuel delivery hose 3\"",
+        "Fuel delivery hose 4\"",
+        "Fuel delivery hose 6\"",
+        "Aviation / JET A1 hose",
+        "LPG hose",
+        "HFO hose",
+        "Bitumen hose",
+        "Chemical hose",
+        "Other hose",
+    ],
+    "Coupler": [
+        "Camlock male 3\"",
+        "Camlock female 3\"",
+        "Camlock male 4\"",
+        "Camlock female 4\"",
+        "Camlock 6\"",
+        "Dry-break coupler",
+        "API adaptor",
+        "BSP adaptor",
+        "Other coupler",
+    ],
+    "Suzi cable": [
+        "7-pin suzi",
+        "15-pin suzi",
+        "ABS / EBS suzi",
+        "Dual 7 + 15 pin",
+        "Other suzi cable",
+    ],
+}

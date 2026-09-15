@@ -12,7 +12,7 @@ from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
-from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task
+from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES
 from .migrate import migrate_schema
 
 # Create tables and seed
@@ -470,7 +470,19 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "updates": updates,
         "third_party_bookings": bookings,
         "parts": part_items,
-        "parts_missing_order": any(not (p.get("order_number") or "").strip() for p in part_items)
+        "parts_missing_order": any(not (p.get("order_number") or "").strip() for p in part_items),
+        "supplies": [{
+            "id": s.id,
+            "category": s.category,
+            "item_type": s.item_type,
+            "quantity": s.quantity,
+            "notes": s.notes,
+            "status": s.status,
+            "created_by_name": s.created_by_name,
+            "completed_by_name": s.completed_by_name,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "completed_at": s.completed_at.isoformat() if s.completed_at else None
+        } for s in (db.query(models.SupplyItem).filter(models.SupplyItem.job_card_id == job.id).all() if hasattr(models, "SupplyItem") else [])]
     }
 
 @app.post("/api/jobs/{job_id}/vehicle")
@@ -1204,7 +1216,8 @@ async def api_lists(db: Session = Depends(get_db)):
         "extra_work_presets": EXTRA_WORK_PRESETS,
         "third_party_services": grouped_third_parties(db),
         "barrel_intervals": BARREL_INTERVALS,
-        "third_party_categories": ["Barrel Test", "Pressure Test", "Calibration Test", "Roadworthy", "Auto Electrical", "Other"]
+        "third_party_categories": ["Barrel Test", "Pressure Test", "Calibration Test", "Roadworthy", "Auto Electrical", "Other"],
+        "supply_categories": SUPPLY_CATEGORIES
     }
 
 @app.get("/api/locations-board")
@@ -1461,6 +1474,87 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
     notify_role(db, "workshop", f"Part to be ordered: {desc} on {job.stock_number}", job.id)
     db.commit()
     return {"success": True, "id": part.id}
+
+@app.post("/api/jobs/{job_id}/supplies")
+async def api_add_supply(job_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    assert_editable(db, job, body.get("user_id"))
+    cat = (body.get("category") or "").strip()
+    typ = (body.get("item_type") or "").strip()
+    if not cat or not typ:
+        raise HTTPException(status_code=400, detail="Category and type are required")
+    row = models.SupplyItem(
+        job_card_id=job.id,
+        category=cat,
+        item_type=typ,
+        quantity=(body.get("quantity") or "1").strip() or "1",
+        notes=(body.get("notes") or "").strip() or None,
+        status="Booked",
+        created_by_name=body.get("full_name") or user_name(db, body.get("user_id"))
+    )
+    db.add(row)
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="parts",
+        description=f"Supply booked: {cat} — {typ} x{row.quantity}",
+        notes=row.notes,
+        created_by_name=row.created_by_name,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/jobs/{job_id}/supplies/{item_id}/status")
+async def api_supply_status(job_id: int, item_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    assert_editable(db, job, body.get("user_id"))
+    row = db.query(models.SupplyItem).filter(models.SupplyItem.id == item_id, models.SupplyItem.job_card_id == job_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Supply not found")
+    status = body.get("status") or "Booked"
+    if status not in ("Booked", "Supplied", "Completed"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    row.status = status
+    changer = body.get("full_name") or user_name(db, body.get("user_id"))
+    if status == "Completed":
+        row.completed_at = datetime.utcnow()
+        row.completed_by_name = changer
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="parts",
+        description=f"Supply {status}: {row.category} — {row.item_type}",
+        created_by_name=changer,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/supplies")
+async def api_all_supplies(db: Session = Depends(get_db)):
+    rows = db.query(models.SupplyItem).order_by(models.SupplyItem.id.desc()).all()
+    out = []
+    for s in rows:
+        job = db.query(models.JobCard).filter(models.JobCard.id == s.job_card_id).first()
+        if job and job.status == "Delivered / Closed":
+            continue
+        out.append({
+            "id": s.id,
+            "job_id": s.job_card_id,
+            "stock_number": job.stock_number if job else "",
+            "vehicle_description": job.vehicle_description if job else "",
+            "category": s.category,
+            "item_type": s.item_type,
+            "quantity": s.quantity,
+            "status": s.status,
+            "created_by_name": s.created_by_name
+        })
+    return {"supplies": out}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/order-number")
 async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):

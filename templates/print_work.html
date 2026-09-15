@@ -69,6 +69,14 @@
         });
         html += '</table>';
 
+        html += '<h2>Hoses / couplers / suzi cables</h2><table><tr><th>Category</th><th>Type</th><th>Qty</th><th>Status</th><th>Notes</th></tr>';
+        const supplies = j.supplies || [];
+        if (!supplies.length) html += '<tr><td colspan="5">None</td></tr>';
+        supplies.forEach(function(s) {
+            html += '<tr><td>' + s.category + '</td><td>' + s.item_type + '</td><td>' + (s.quantity || '1') + '</td><td>' + s.status + '</td><td>' + (s.notes || '') + '</td></tr>';
+        });
+        html += '</table>';
+
         html += '<h2>3rd party bookings</h2><table><tr><th>Service</th><th>Company</th><th>Date</th><th>Notes</th></tr>';
         const bks = j.third_party_bookings || [];
         if (!bks.length) html += '<tr><td colspan="4">None</td></tr>';

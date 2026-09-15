@@ -25,6 +25,7 @@
     <div class="flex gap-2 overflow-x-auto pb-1 text-sm">
         <a href="#tasksList" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Work / Prep Tasks</a>
         <a href="#partsSection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Parts</a>
+        <a href="#suppliesSection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Hoses / Couplers / Suzi</a>
         <a href="#thirdPartySection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">3rd Party Bookings</a>
         <a href="#workshopExtras" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Current activity</a>
     </div>
@@ -104,6 +105,28 @@
                 <input type="text" id="partOrder" placeholder="Chantelle order no" class="px-3 py-2 border rounded text-sm">
             </div>
             <button type="button" onclick="savePart()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Submit part</button>
+        </div>
+    </div>
+
+    <div id="suppliesSection" class="bg-white rounded-xl shadow p-5">
+        <h2 class="font-semibold text-status-blue mb-1">DELIVERY HOSE / COUPLERS / SUZI CABLES</h2>
+        <p class="text-sm text-gray-500 mb-3">Book the item onto this job card. When it is supplied, mark Completed so it goes onto the completed list and print.</p>
+        <div id="suppliesBooked" class="space-y-2 text-sm mb-3"></div>
+        <div id="suppliesCompleted" class="space-y-2 text-sm mb-3"></div>
+        <div id="suppliesForm" class="hidden space-y-2 p-3 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select id="supCat" class="px-3 py-2 border rounded text-sm" onchange="fillSupplyTypes()">
+                    <option value="Delivery hose">Delivery hose</option>
+                    <option value="Coupler">Coupler</option>
+                    <option value="Suzi cable">Suzi cable</option>
+                    <option value="Other">Other (type it in)</option>
+                </select>
+                <select id="supType" class="px-3 py-2 border rounded text-sm"></select>
+                <input type="number" min="1" id="supQty" value="1" class="px-3 py-2 border rounded text-sm" placeholder="Qty">
+            </div>
+            <input type="text" id="supCustom" class="w-full px-3 py-2 border rounded text-sm" placeholder="Type any other item here if it is not in the list">
+            <input type="text" id="supNotes" class="w-full px-3 py-2 border rounded text-sm" placeholder="Notes (optional)">
+            <button type="button" onclick="saveSupply()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Book onto job card</button>
         </div>
     </div>
 
@@ -500,6 +523,7 @@
             if (tpSec) tpSec.classList.remove('hidden');
 
             renderParts(j);
+            renderSupplies(j);
             const act = document.getElementById('activityView');
             if (act) {
                 act.innerHTML = (j.current_location ? '<div><strong>Location:</strong> ' + j.current_location + '</div>' : '') +
@@ -793,6 +817,71 @@
         }
     }
 
+
+    window.supplyCats = {
+        "Delivery hose": ["Fuel delivery hose 3\"","Fuel delivery hose 4\"","Fuel delivery hose 6\"","Aviation / JET A1 hose","LPG hose","HFO hose","Bitumen hose","Chemical hose","Other hose"],
+        "Coupler": ["Camlock male 3\"","Camlock female 3\"","Camlock male 4\"","Camlock female 4\"","Camlock 6\"","Dry-break coupler","API adaptor","BSP adaptor","Other coupler"],
+        "Suzi cable": ["7-pin suzi","15-pin suzi","ABS / EBS suzi","Dual 7 + 15 pin","Other suzi cable"],
+        "Other": ["Type in the box below"]
+    };
+
+    function fillSupplyTypes() {
+        const cat = document.getElementById('supCat').value;
+        const sel = document.getElementById('supType');
+        const list = window.supplyCats[cat] || [];
+        sel.innerHTML = list.map(function(t){ return '<option>' + t + '</option>'; }).join('');
+    }
+
+    function renderSupplies(j) {
+        const booked = document.getElementById('suppliesBooked');
+        const done = document.getElementById('suppliesCompleted');
+        const form = document.getElementById('suppliesForm');
+        const rows = j.supplies || [];
+        const open = rows.filter(function(s){ return s.status !== 'Completed'; });
+        const closed = rows.filter(function(s){ return s.status === 'Completed'; });
+        const can = canEditTasks() && j.status !== 'Delivered / Closed';
+        if (form) form.classList.toggle('hidden', !can);
+        fillSupplyTypes();
+        booked.innerHTML = '<div class="text-xs font-semibold uppercase mb-1">Booked / to supply</div>' + (open.length ? open.map(function(s){
+            return '<div class="p-2 bg-gray-50 rounded border">' + s.category + ' — ' + s.item_type + ' × ' + (s.quantity || '1') +
+                (s.notes ? ' (' + s.notes + ')' : '') +
+                (can ? ' <select onchange="setSupplyStatus(' + s.id + ', this.value)" class="text-xs border rounded ml-2"><option' + (s.status==='Booked'?' selected':'') + '>Booked</option><option' + (s.status==='Supplied'?' selected':'') + '>Supplied</option><option' + (s.status==='Completed'?' selected':'') + '>Completed</option></select>' : ' — ' + s.status) +
+                '</div>';
+        }).join('') : '<p class="text-xs text-gray-400">None booked</p>');
+        done.innerHTML = '<div class="text-xs font-semibold uppercase mb-1">Completed list (on this job card)</div>' + (closed.length ? closed.map(function(s){
+            return '<div class="p-2 bg-green-50 rounded border text-green-800">' + s.category + ' — ' + s.item_type + ' × ' + (s.quantity || '1') +
+                (s.completed_by_name ? ' — ' + s.completed_by_name : '') + '</div>';
+        }).join('') : '<p class="text-xs text-gray-400">Nothing completed yet</p>');
+    }
+
+    async function saveSupply() {
+        const res = await fetch('/api/jobs/' + jobId + '/supplies', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: document.getElementById('supCat').value,
+                item_type: (document.getElementById('supCustom').value || document.getElementById('supType').value),
+                quantity: document.getElementById('supQty').value,
+                notes: document.getElementById('supNotes').value,
+                user_id: userId ? parseInt(userId) : null,
+                full_name: fullName
+            })
+        });
+        const data = await res.json().catch(function(){return {};});
+        if (!res.ok) { alert(data.detail || 'Could not book'); return; }
+        document.getElementById('supNotes').value = '';
+        document.getElementById('supCustom').value = '';
+        loadJob();
+    }
+
+    async function setSupplyStatus(id, status) {
+        await fetch('/api/jobs/' + jobId + '/supplies/' + id + '/status', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: status, user_id: userId ? parseInt(userId) : null, full_name: fullName })
+        });
+        loadJob();
+    }
 
     function renderParts(j) {
         const box = document.getElementById('partsList');

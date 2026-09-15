@@ -122,6 +122,7 @@ class JobCard(Base):
     updates = relationship("JobUpdate", back_populates="job_card", cascade="all, delete-orphan")
     third_party_bookings = relationship("ThirdPartyBooking", back_populates="job_card", cascade="all, delete-orphan")
     parts = relationship("PartItem", back_populates="job_card", cascade="all, delete-orphan")
+    supplies = relationship("SupplyItem", back_populates="job_card", cascade="all, delete-orphan")
 
 class JobTask(Base):
     __tablename__ = "job_tasks"
@@ -212,6 +213,24 @@ class PartItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     job_card = relationship("JobCard", back_populates="parts")
+
+class SupplyItem(Base):
+    __tablename__ = "supply_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    category = Column(String, nullable=False)
+    item_type = Column(String, nullable=False)
+    quantity = Column(String, default="1")
+    notes = Column(Text, nullable=True)
+    status = Column(String, default="Booked")
+    created_by_name = Column(String, nullable=True)
+    completed_by_name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    job_card = relationship("JobCard", back_populates="supplies")
+
 
 class JobUpdate(Base):
     """Permanent workshop/sales updates. Cannot be deleted once submitted."""
