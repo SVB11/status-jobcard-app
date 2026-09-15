@@ -5,18 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Status Truck Sales{% endblock %} – Job Card System</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --status-blue: #025daa;
-            --status-dark: #040b0a;
+            --status-blue: #1a8cff;
+            --status-blue-dark: #025daa;
+            --bg: #07090c;
+            --panel: #12161c;
+            --panel-2: #1a2028;
+            --line: #2a3340;
+            --text: #e8edf3;
+            --muted: #9aa6b4;
         }
+        html, body { background: var(--bg); color: var(--text); font-family: 'Barlow', Arial, sans-serif; }
         .bg-status-blue { background-color: #025daa; }
-        .text-status-blue { color: #025daa; }
+        .text-status-blue { color: #5eb0ff; }
         .border-status-blue { border-color: #025daa; }
         .hover\:bg-status-blue:hover { background-color: #024a8a; }
         input, select, textarea, button { font-size: 16px; }
         input, select, textarea { min-height: 44px; }
         button, a.btn, .tap { min-height: 44px; }
+        h1, h2, h3, header a, .brand-title {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .bg-white { background-color: var(--panel) !important; color: var(--text); }
+        .bg-gray-50, .bg-gray-100 { background-color: var(--panel-2) !important; }
+        .text-gray-800, .text-gray-700, .text-gray-600 { color: var(--text) !important; }
+        .text-gray-500, .text-gray-400 { color: var(--muted) !important; }
+        .border, .border-b, .border-t { border-color: var(--line) !important; }
+        input, select, textarea {
+            background: #0d1116 !important;
+            color: var(--text) !important;
+            border-color: var(--line) !important;
+        }
+        .shadow, .shadow-md, .shadow-lg { box-shadow: 0 10px 30px rgba(0,0,0,0.35) !important; }
+        a { color: #7ec2ff; }
+        .bg-blue-50, .bg-amber-50, .bg-red-50, .bg-green-50 { background-color: #161b22 !important; }
         #tasksList, #partsSection, #thirdPartySection, #workshopExtras { scroll-margin-top: 80px; }
         @media (max-width: 640px) {
             header .nav-text { display: none; }
@@ -24,34 +50,31 @@
     </style>
     {% block head %}{% endblock %}
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <!-- Header -->
-    <header class="bg-white shadow-md border-b-4 border-status-blue">
+<body class="min-h-screen">
+    <header class="bg-[#0c1015] border-b-2 border-[#025daa]">
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <img src="/static/images/status_logo.svg" alt="Status Truck Sales" class="h-12 w-auto">
+                <img src="/static/images/status_logo_white.png" alt="Status Truck Sales" class="h-12 w-auto">
                 <div class="hidden sm:block">
-                    <div class="font-bold text-lg text-status-blue leading-tight">Status Truck Sales</div>
-                    <div class="text-xs text-gray-500">Job Card & Workshop System</div>
+                    <div class="text-xs text-[#9aa6b4] uppercase tracking-widest">Job Card System</div>
                 </div>
             </div>
-            <div class="flex items-center gap-3 flex-wrap justify-end">
-                <a href="/dashboard" class="text-sm text-status-blue font-medium">Dashboard</a>
-                <a href="/jobs" class="text-sm text-status-blue font-medium">Jobs</a>
-                <a href="/jobs/create" class="text-sm text-white bg-status-blue px-3 py-2 rounded-lg">Create</a>
+            <div class="flex items-center gap-3 flex-wrap justify-end uppercase text-xs tracking-wider">
+                <a href="/dashboard" class="text-[#7ec2ff] font-semibold">Dashboard</a>
+                <a href="/jobs" class="text-[#7ec2ff] font-semibold">Jobs</a>
+                <a href="/jobs/create" class="text-white bg-status-blue px-3 py-2 rounded-lg font-semibold">Create</a>
                 {% block header_right %}{% endblock %}
             </div>
         </div>
     </header>
 
-    <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
-    <footer class="text-center text-xs text-gray-400 py-6">
-        Status Truck Sales &bull; Boksburg, Gauteng &bull; Internal Use Only
+    <footer class="text-center py-8">
+        <img src="/static/images/slogan_quality.png" alt="Quality, Reliability." class="h-7 mx-auto mb-3">
+        <div class="text-xs text-[#6b7683] uppercase tracking-widest">Status Truck Sales &bull; Boksburg &bull; Internal Use Only</div>
     </footer>
 
     {% block scripts %}{% endblock %}

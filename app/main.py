@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Body
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -8,7 +8,7 @@ from typing import Optional, List
 import os
 import json
 
-from .database import engine, get_db, Base
+from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
@@ -1487,6 +1487,54 @@ async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Se
     ))
     db.commit()
     return {"success": True}
+
+@app.get("/api/admin/backup.db")
+async def api_admin_backup_db(current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    path = SQLITE_FILE or "status_jobcard.db"
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+    stamp = datetime.utcnow().strftime("%Y%m%d")
+    return FileResponse(path, filename=f"status_jobcard_backup_{stamp}.db", media_type="application/octet-stream")
+
+@app.get("/api/admin/backup-pack.zip")
+async def api_admin_backup_pack(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    import csv, io, zipfile, tempfile
+    stamp = datetime.utcnow().strftime("%Y%m%d")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp.close()
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+        path = SQLITE_FILE or "status_jobcard.db"
+        if path and os.path.exists(path):
+            zf.write(path, f"status_jobcard_backup_{stamp}.db")
+        jobs = db.query(models.JobCard).order_by(models.JobCard.id.desc()).all()
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
+        for j in jobs:
+            w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type}/{j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.created_at])
+        zf.writestr("jobcards.csv", buf.getvalue())
+        parts = db.query(models.PartItem).all()
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["job_id", "description", "qty", "order_number", "progress", "price", "invoice"])
+        for p in parts:
+            w.writerow([p.job_card_id, p.description, getattr(p, "quantity", ""), p.order_number, getattr(p, "part_progress", ""), getattr(p, "price", ""), getattr(p, "supplier_invoice", "")])
+        zf.writestr("parts.csv", buf.getvalue())
+    return FileResponse(tmp.name, filename=f"sts_jobcards_backup_{stamp}.zip", media_type="application/zip")
+
+@app.get("/api/admin/export/jobs.csv")
+async def api_admin_export_jobs(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    import csv, io
+    jobs = db.query(models.JobCard).order_by(models.JobCard.id.desc()).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
+    for j in jobs:
+        w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type} / {j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.created_at])
+    return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=jobcards_backup.csv"})
 
 @app.get("/api/admin/export/extras.csv")
 async def export_extras_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):

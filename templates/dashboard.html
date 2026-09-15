@@ -112,6 +112,13 @@
         <li>✅ Digital PDI + dual sign-off</li>
         <li>✅ Workshop extras, location board, permanent updates</li>
     </ul>
+    <h3 class="font-semibold text-sm mb-2">Backup</h3>
+    <p class="text-xs text-gray-500 mb-2">Download these to the office PC every week. Keep the .db file safe. That file is the job cards and logins.</p>
+    <div class="flex flex-wrap gap-2 mb-4">
+        <button type="button" onclick="downloadBackup('/api/admin/backup-pack.zip', 'sts_jobcards_backup.zip')" class="px-3 py-2 bg-green-700 text-white text-sm rounded">DOWNLOAD FULL BACKUP (ZIP)</button>
+        <button type="button" onclick="downloadBackup('/api/admin/backup.db', 'status_jobcard_backup.db')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download database (.db)</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/jobs.csv', 'jobcards_backup.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download job list (CSV)</button>
+    </div>
     <h3 class="font-semibold text-sm mb-2">Download data (CSV)</h3>
     <p class="text-xs text-gray-500 mb-2">Use these files to collect extras and parts for later dropdown lists.</p>
     <div class="flex flex-wrap gap-2">
@@ -202,6 +209,16 @@
         } catch (err) {
             document.getElementById('jobBookingsList').innerHTML = '<p class="text-red-600">Could not load list</p>';
         }
+    }
+
+    async function downloadBackup(url, filename) {
+        const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+        if (!res.ok) { alert('Could not download backup. Log in as Admin.'); return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
     }
 
     async function loadPendingExtras() {
@@ -375,7 +392,9 @@
             Object.keys(board).forEach(function(loc) {
                 const items = board[loc] || [];
                 if (loc === 'Unspecified' && items.length === 0) return;
-                html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2">' + loc +
+                const icon = (loc || '').toLowerCase().indexOf('wash') !== -1 ? '🚿'
+                    : ((loc || '').toLowerCase().indexOf('test pit') !== -1 ? '🛠️' : '🚛');
+                html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2 uppercase tracking-wide">' + icon + ' ' + loc +
                     ' <span class="text-gray-400">(' + items.length + ')</span></div>';
                 if (items.length === 0) {
                     html += '<div class="text-xs text-gray-400">Empty</div>';
