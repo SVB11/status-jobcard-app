@@ -18,6 +18,9 @@ NEW_COLUMNS = {
         "current_activity_notes": "TEXT",
         "current_activity_at": "DATETIME",
         "current_activity_by": "VARCHAR",
+        "update_requested_at": "DATETIME",
+        "update_requested_by": "VARCHAR",
+        "update_request_note": "TEXT",
     },
     "part_items": {
         "quantity": "VARCHAR",

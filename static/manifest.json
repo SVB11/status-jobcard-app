@@ -1,0 +1,12 @@
+{
+  "name": "Status Job Cards",
+  "short_name": "Job Cards",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#07090c",
+  "theme_color": "#025daa",
+  "icons": [
+    { "src": "/static/images/app_icon_192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/images/app_icon_512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

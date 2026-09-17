@@ -64,6 +64,16 @@ def require_admin(user: models.User):
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
+@app.get("/sw.js")
+async def service_worker():
+    path = os.path.join(BASE_DIR, "static", "js", "sw.js")
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+@app.get("/manifest.json")
+async def manifest():
+    path = os.path.join(BASE_DIR, "static", "manifest.json")
+    return FileResponse(path, media_type="application/manifest+json")
+
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 jinja_env = Environment(
@@ -122,6 +132,35 @@ def parts_missing_order_numbers(db: Session, job_id: int):
     return [p for p in parts if not (p.order_number or "").strip()]
 
 # ---------- AUTH ROUTES ----------
+
+@app.get("/api/push/public-key")
+async def api_push_public_key():
+    from .vapid import VAPID_PUBLIC_KEY
+    return {"key": VAPID_PUBLIC_KEY}
+
+@app.post("/api/push/subscribe")
+async def api_push_subscribe(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    user_id = body.get("user_id")
+    sub = body.get("subscription") or {}
+    endpoint = (sub.get("endpoint") or "").strip()
+    keys = sub.get("keys") or {}
+    if not user_id or not endpoint or not keys.get("p256dh") or not keys.get("auth"):
+        raise HTTPException(status_code=400, detail="Invalid subscription")
+    existing = db.query(models.PushSubscription).filter(models.PushSubscription.endpoint == endpoint).first()
+    if existing:
+        existing.user_id = user_id
+        existing.p256dh = keys["p256dh"]
+        existing.auth = keys["auth"]
+    else:
+        db.add(models.PushSubscription(
+            user_id=user_id,
+            endpoint=endpoint,
+            p256dh=keys["p256dh"],
+            auth=keys["auth"]
+        ))
+    db.commit()
+    return {"success": True}
 
 @app.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -454,6 +493,9 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "current_activity_notes": getattr(job, "current_activity_notes", None),
         "current_activity_at": job.current_activity_at.isoformat() if getattr(job, "current_activity_at", None) else None,
         "current_activity_by": getattr(job, "current_activity_by", None),
+        "update_requested_at": job.update_requested_at.isoformat() if getattr(job, "update_requested_at", None) else None,
+        "update_requested_by": getattr(job, "update_requested_by", None),
+        "update_request_note": getattr(job, "update_request_note", None),
         "pdi_signed_workshop": job.pdi_signed_workshop,
         "pdi_signed_sales": job.pdi_signed_sales,
         "pdi_signed_workshop_by_name": user_name(db, job.pdi_signed_workshop_by),
@@ -1792,10 +1834,100 @@ async def api_workshop_bookings(db: Session = Depends(get_db)):
     out.sort(key=lambda x: (x.get("booked_date") or "9999", x.get("stock_number") or ""))
     return {"bookings": out}
 
+def send_web_push(db, user_ids, title, body, url="/dashboard"):
+    if not user_ids:
+        return
+    try:
+        from pywebpush import webpush, WebPushException
+        from .vapid import VAPID_PRIVATE_KEY, VAPID_EMAIL
+    except Exception:
+        return
+    subs = db.query(models.PushSubscription).filter(models.PushSubscription.user_id.in_(list(set(user_ids)))).all()
+    payload = json.dumps({"title": title, "body": body, "url": url})
+    for s in subs:
+        try:
+            webpush(
+                subscription_info={"endpoint": s.endpoint, "keys": {"p256dh": s.p256dh, "auth": s.auth}},
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_EMAIL},
+            )
+        except Exception:
+            try:
+                db.delete(s)
+            except Exception:
+                pass
+
 def notify_role(db, role, message, job_id=None):
     users = db.query(models.User).filter(models.User.role == role, models.User.is_active == True).all()
+    ids = []
     for u in users:
         db.add(models.Notification(user_id=u.id, job_card_id=job_id, message=message))
+        ids.append(u.id)
+    send_web_push(db, ids, "Status Job Cards", message, f"/jobs/{job_id}" if job_id else "/dashboard")
+
+@app.post("/api/jobs/{job_id}/request-update")
+async def api_request_update(job_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "Delivered / Closed":
+        raise HTTPException(status_code=400, detail="Job is already delivered")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Sales"
+    note = (body.get("note") or "").strip()
+    job.update_requested_at = datetime.utcnow()
+    job.update_requested_by = who
+    job.update_request_note = note or None
+    msg = f"UPDATE REQUEST: {job.stock_number} {job.vehicle_description} — {who} needs a workshop update"
+    if note:
+        msg += f" ({note})"
+    notify_role(db, "workshop", msg, job.id)
+    notify_role(db, "admin", msg, job.id)
+    notify_role(db, "accounts", msg, job.id)
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Sales requested an update" + (f": {note}" if note else ""),
+        created_by_name=who,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/jobs/{job_id}/clear-update-request")
+async def api_clear_update_request(job_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Workshop"
+    job.update_requested_at = None
+    job.update_requested_by = None
+    job.update_request_note = None
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description="Workshop responded to sales update request",
+        created_by_name=who,
+        created_by=body.get("user_id")
+    ))
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/update-requests")
+async def api_update_requests(db: Session = Depends(get_db)):
+    jobs = db.query(models.JobCard).filter(models.JobCard.update_requested_at != None).order_by(models.JobCard.update_requested_at.desc()).all()
+    return {"requests": [{
+        "id": j.id,
+        "stock_number": j.stock_number,
+        "vehicle_description": j.vehicle_description,
+        "year": j.year,
+        "status": j.status,
+        "requested_by": j.update_requested_by,
+        "requested_at": j.update_requested_at.isoformat() if j.update_requested_at else None,
+        "note": j.update_request_note
+    } for j in jobs if j.status != "Delivered / Closed"]}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/progress")
 async def api_part_progress(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
@@ -1894,6 +2026,12 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
             notes=job.current_activity_notes,
             last_updated_by_name=job.current_activity_by
         ))
+    msg = f"Update on {job.stock_number}: {job.current_location or ''} {job.current_activity or ''}".strip()
+    sales = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True, models.User.full_name == job.salesman_name).all()
+    for u in sales:
+        db.add(models.Notification(user_id=u.id, job_card_id=job.id, message=msg))
+    send_web_push(db, [u.id for u in sales], "Status Job Cards", msg, f"/jobs/{job.id}")
+    notify_role(db, "admin", msg, job.id)
     db.commit()
     return {"success": True}
 

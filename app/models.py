@@ -90,6 +90,9 @@ class JobCard(Base):
     current_activity_notes = Column(Text, nullable=True)
     current_activity_at = Column(DateTime(timezone=True), nullable=True)
     current_activity_by = Column(String, nullable=True)
+    update_requested_at = Column(DateTime(timezone=True), nullable=True)
+    update_requested_by = Column(String, nullable=True)
+    update_request_note = Column(Text, nullable=True)
 
     # Status & Tracking
     status = Column(String, default="Submitted to Workshop")
@@ -265,4 +268,14 @@ class Notification(Base):
     job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=True)
     message = Column(String, nullable=False)
     is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    endpoint = Column(String, nullable=False, unique=True)
+    p256dh = Column(String, nullable=False)
+    auth = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

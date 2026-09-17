@@ -81,6 +81,11 @@
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
     <div id="partsDashList" class="space-y-2 text-sm">Loading...</div>
 </div>
+<div id="updateReqBox" class="hidden bg-white rounded-xl shadow p-6 mb-8 border-2 border-orange-500">
+    <h2 class="font-bold text-lg mb-1 text-orange-500">SALES UPDATE REQUESTS</h2>
+    <p class="text-sm text-gray-500 mb-4">Sales asked for an update because the job feels slow. Open the job and post current activity, then clear the request.</p>
+    <div id="updateReqList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="notifyBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Notifications</h2>
     <div id="notifyList" class="space-y-2 text-sm">Loading...</div>
@@ -127,9 +132,9 @@
     <h3 class="font-semibold text-sm mb-2">Download data (CSV)</h3>
     <p class="text-xs text-gray-500 mb-2">Use these files to collect extras and parts for later dropdown lists.</p>
     <div class="flex flex-wrap gap-2">
-        <a href="/api/admin/export/extras.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Workshop extras CSV</a>
-        <a href="/api/admin/export/parts.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</a>
-        <a href="/api/admin/export/custom-tasks.csv" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</a>
+        <button type="button" onclick="downloadBackup('/api/admin/export/extras.csv', 'workshop_extras.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Workshop extras CSV</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/parts.csv', 'parts.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/custom-tasks.csv', 'manual_tasks.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</button>
     </div>
 </div>
 {% endblock %}
@@ -160,6 +165,10 @@
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
             document.getElementById('allJobsBox').classList.remove('hidden');
+            document.getElementById('updateReqBox').classList.remove('hidden');
+            document.getElementById('notifyBox').classList.remove('hidden');
+            loadUpdateRequests();
+            loadNotifications();
             loadJobList('/api/jobs', 'allJobsList');
         }
         if (role === 'sales') {
@@ -168,6 +177,8 @@
             document.getElementById('allJobsBox').classList.remove('hidden');
             document.getElementById('bookingsBox').classList.remove('hidden');
             document.getElementById('notifyBox').classList.remove('hidden');
+            document.getElementById('updateReqBox').classList.remove('hidden');
+            loadUpdateRequests();
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
@@ -180,8 +191,10 @@
             document.getElementById('partsDashBox').classList.remove('hidden');
             document.getElementById('suppliesDashBox').classList.remove('hidden');
             document.getElementById('notifyBox').classList.remove('hidden');
+            document.getElementById('updateReqBox').classList.remove('hidden');
             loadBookings();
             loadPartsDash();
+            loadUpdateRequests();
             loadSuppliesDash();
             loadNotifications();
         }
@@ -369,6 +382,25 @@
             }).join('');
         } catch (err) {
             document.getElementById('partsDashList').innerHTML = '<p class="text-red-500">Could not load parts</p>';
+        }
+    }
+
+    async function loadUpdateRequests() {
+        try {
+            const res = await fetch('/api/update-requests', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.requests || [];
+            const box = document.getElementById('updateReqList');
+            if (!box) return;
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open update requests</p>'; return; }
+            box.innerHTML = rows.map(function(r) {
+                return '<a href="/jobs/' + r.id + '" class="block p-3 bg-orange-900 bg-opacity-40 rounded-lg border border-orange-500">' +
+                    '<div class="font-medium">' + r.stock_number + ' — ' + (r.vehicle_description || '') + ' ' + (r.year || '') + '</div>' +
+                    '<div class="text-xs text-orange-200">' + (r.requested_by || '') + ' — ' + (r.requested_at || '').replace('T',' ').substring(0,16) + (r.note ? ' — ' + r.note : '') + '</div></a>';
+            }).join('');
+        } catch (err) {
+            const box = document.getElementById('updateReqList');
+            if (box) box.innerHTML = '<p class="text-red-400">Could not load requests</p>';
         }
     }
 
