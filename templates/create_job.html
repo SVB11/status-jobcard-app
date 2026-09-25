@@ -175,6 +175,7 @@
     const role = localStorage.getItem('role') || '';
     const userId = localStorage.getItem('user_id') || null;
 
+    if ((role || '').toLowerCase() === 'stock') window.location.href = '/stock';
     if (!token) {
         window.location.href = '/login';
     } else {

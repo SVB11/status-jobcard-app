@@ -5,140 +5,139 @@
 {% block header_right %}
 <div class="flex items-center gap-3">
     <span id="userInfo" class="text-sm text-gray-600"></span>
-    <a href="/dashboard" class="text-sm text-status-blue hover:underline">Dashboard</a>
-    <a href="/jobs/create" class="text-sm text-status-blue hover:underline">+ New Job</a>
     <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-    <div>
-        <h1 class="text-2xl font-bold text-gray-800">Job Cards</h1>
-        <p class="text-gray-500 text-sm">All preparation jobs between Sales and Workshop</p>
-    </div>
-    <div class="flex gap-2 flex-wrap">
-        <button onclick="loadJobs()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">All</button>
-        <button onclick="loadJobs('Submitted to Workshop')" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Submitted</button>
-        <button onclick="loadJobs('Accepted by Workshop')" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Accepted</button>
-        <button onclick="loadJobs('In Progress')" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">In Progress</button>
-        <button onclick="loadJobs('Work Completed')" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Work Completed</button>
-    </div>
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Job Cards</h1>
+    <p class="text-sm text-[#9aa6b4]">WS · vehicle · year · location · status. No extra lists on this page.</p>
 </div>
 
-<div id="jobsContainer" class="space-y-3">
-    <p class="text-gray-400 text-sm">Loading jobs...</p>
+<div class="flex flex-wrap gap-2 mb-4" id="filterBar">
+    <button type="button" data-f="all" class="g-filter on">All</button>
+    <button type="button" data-f="needs" class="g-filter">Needs me</button>
+    <button type="button" data-f="workshop" class="g-filter">In workshop</button>
+    <button type="button" data-f="third" class="g-filter">At 3rd party</button>
+    <button type="button" data-f="ready" class="g-filter">Ready</button>
+</div>
+<input id="wsSearch" type="search" placeholder="FIND WS / VEHICLE" class="w-full mb-5 px-3 py-3 rounded-lg bg-[#11151c] border border-[#2a3340] text-white uppercase text-sm">
+
+<div id="jobsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <p class="text-[#9aa6b4] text-sm col-span-full">Loading jobs...</p>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<style>
+.g-filter { padding: 8px 14px; border-radius: 999px; border: 1px solid #2a3340; background: #11151c; color: #d5dde6; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.g-filter.on { background: #025daa; border-color: #025daa; color: #fff; }
+.g-card { display: block; background: #11151c; border: 1px solid #243040; border-radius: 14px; padding: 16px; color: #e8edf3; text-decoration: none; }
+.g-card:hover { border-color: #025daa; }
+</style>
 <script>
     const token = localStorage.getItem('token');
     const fullName = localStorage.getItem('full_name') || '';
-    const role = localStorage.getItem('role') || '';
+    const role = (localStorage.getItem('role') || '').toLowerCase();
     const userId = localStorage.getItem('user_id');
-
     if (!token) window.location.href = '/login';
+    if (role === 'stock') window.location.href = '/stock';
     document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+    function logout() { localStorage.clear(); window.location.href = '/login'; }
 
-    function logout() {
-        localStorage.clear();
-        window.location.href = '/login';
+    const WORKSHOP = ['yard','bay 1 reuben','bay 2 ricardo','bay 3 jonas','bay 4 josiah','bay 5 josiah 2','wash bay','test pit bay 1','test pit bay 2','test pit bay 3'];
+    const THIRD = ['3rd party','pft','fk','stt','itl','east rand','liquid flow','man auto','scotty','calibration'];
+    let allJobs = [];
+    let currentFilter = 'all';
+
+    function locOf(j) { return (j.current_location || '').toLowerCase(); }
+    function isWorkshop(j) { return WORKSHOP.indexOf(locOf(j)) !== -1; }
+    function isThird(j) {
+        const l = locOf(j);
+        if (l === '3rd party') return true;
+        return THIRD.some(function(k){ return l.indexOf(k) !== -1; });
+    }
+    function isReady(j) {
+        const s = (j.status || '').toLowerCase();
+        return s.indexOf('ready') !== -1 || s.indexOf('delivered') !== -1 || s === 'pdi completed' || s === 'work completed';
+    }
+    function needsMe(j) {
+        const s = (j.status || '').toLowerCase();
+        const fail = s.indexOf('fail') !== -1;
+        if (role === 'sales') {
+            if ((j.salesman_name || '') !== fullName) return false;
+            return fail || s.indexOf('submitted') !== -1 || s.indexOf('pdi') !== -1 || (s.indexOf('ready') !== -1 && !j.ready_sales);
+        }
+        if (role === 'workshop') {
+            return fail || s.indexOf('submitted') !== -1 || s === 'in progress' || s === 'accepted by workshop' || (s.indexOf('ready') !== -1 && !j.ready_workshop);
+        }
+        return fail || s.indexOf('submitted') !== -1 || s.indexOf('pdi') !== -1 || s === 'in progress';
+    }
+    function statusClass(s) {
+        s = (s || '').toLowerCase();
+        if (s.indexOf('fail') !== -1) return 'bg-red-700';
+        if (s.indexOf('ready') !== -1 || s.indexOf('delivered') !== -1) return 'bg-green-700';
+        if (s.indexOf('progress') !== -1) return 'bg-[#025daa]';
+        if (s.indexOf('submitted') !== -1) return 'bg-amber-700';
+        return 'bg-[#2a3340]';
     }
 
-    function priorityBadge(p) {
-        if (p === 'Urgent') return '<span class="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">Urgent</span>';
-        if (p === 'High') return '<span class="px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-700 font-medium">High</span>';
-        return '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">Normal</span>';
+    function render() {
+        const q = (document.getElementById('wsSearch').value || '').toLowerCase().trim();
+        let rows = allJobs.slice();
+        if (currentFilter === 'needs') rows = rows.filter(needsMe);
+        if (currentFilter === 'workshop') rows = rows.filter(isWorkshop);
+        if (currentFilter === 'third') rows = rows.filter(isThird);
+        if (currentFilter === 'ready') rows = rows.filter(isReady);
+        if (q) {
+            rows = rows.filter(function(j) {
+                return (j.stock_number || '').toLowerCase().indexOf(q) !== -1
+                    || (j.vehicle_description || '').toLowerCase().indexOf(q) !== -1
+                    || (j.job_number || '').toLowerCase().indexOf(q) !== -1;
+            });
+        }
+        const box = document.getElementById('jobsContainer');
+        if (!rows.length) {
+            box.innerHTML = '<div class="col-span-full text-[#9aa6b4] text-sm p-6">No jobs in this filter</div>';
+            return;
+        }
+        box.innerHTML = rows.map(function(j) {
+            const accept = (role === 'workshop' || role === 'admin' || role === 'accounts') && j.status === 'Submitted to Workshop';
+            return '<a class="g-card" href="/jobs/' + j.id + '">' +
+                (j.photo_url ? '<img class="stock-thumb mb-3" src="' + j.photo_url + '" alt="">' : '') +
+                '<div class="text-lg font-bold tracking-wide">' + (j.stock_number || j.job_number) + '</div>' +
+                '<div class="text-sm mt-1">' + (j.vehicle_description || '') + '</div>' +
+                '<div class="text-xs text-[#9aa6b4] mt-1 uppercase">' + (j.year || '') + (j.main_type ? ' · ' + j.main_type : '') + '</div>' +
+                '<div class="flex flex-wrap gap-2 mt-3">' +
+                '<span class="text-xs px-2 py-1 rounded bg-[#1b2430]">' + (j.current_location || 'No location') + '</span>' +
+                '<span class="text-xs px-2 py-1 rounded ' + statusClass(j.status) + '">' + (j.status || '') + '</span>' +
+                '</div>' +
+                (accept ? '<div class="mt-3 text-xs uppercase tracking-wider text-[#7ec2ff]">Tap card then Accept on the job</div>' : '') +
+                '</a>';
+        }).join('');
     }
 
-    function statusBadge(s) {
-        const colours = {
-            'Submitted to Workshop': 'bg-yellow-100 text-yellow-800',
-            'Accepted by Workshop': 'bg-blue-100 text-blue-800',
-            'In Progress': 'bg-indigo-100 text-indigo-800',
-            'Work Completed': 'bg-purple-100 text-purple-800',
-            'PDI in Progress': 'bg-pink-100 text-pink-800',
-            'PDI Completed': 'bg-teal-100 text-teal-800',
-            'Ready for Delivery': 'bg-green-100 text-green-800',
-            'Delivered / Closed': 'bg-gray-100 text-gray-600'
+    document.querySelectorAll('.g-filter').forEach(function(btn) {
+        btn.onclick = function() {
+            document.querySelectorAll('.g-filter').forEach(function(b){ b.classList.remove('on'); });
+            btn.classList.add('on');
+            currentFilter = btn.getAttribute('data-f');
+            render();
         };
-        const c = colours[s] || 'bg-gray-100 text-gray-600';
-        return '<span class="px-2 py-0.5 text-xs rounded-full ' + c + ' font-medium">' + s + '</span>';
-    }
+    });
+    document.getElementById('wsSearch').addEventListener('input', render);
 
-    async function loadJobs(statusFilter) {
-        const container = document.getElementById('jobsContainer');
-        container.innerHTML = '<p class="text-gray-400 text-sm">Loading...</p>';
-
-        let url = '/api/jobs';
-        if (statusFilter) url += '?status=' + encodeURIComponent(statusFilter);
-
+    async function loadJobs() {
         try {
-            const res = await fetch(url, {
-                headers: { 'Authorization': 'Bearer ' + token }
-            });
+            const res = await fetch('/api/jobs', { headers: { 'Authorization': 'Bearer ' + token } });
             const data = await res.json();
-            const jobs = data.jobs || [];
-
-            if (jobs.length === 0) {
-                container.innerHTML = '<div class="bg-white rounded-xl shadow p-8 text-center text-gray-400">No jobs found</div>';
-                return;
-            }
-
-            let html = '';
-            jobs.forEach(function(j) {
-                const canAccept = (role === 'workshop' || role === 'admin') && j.status === 'Submitted to Workshop';
-                html += '<div class="bg-white rounded-xl shadow p-4 border-l-4 ' +
-                    (j.priority === 'Urgent' ? 'border-red-500' : j.priority === 'High' ? 'border-orange-400' : 'border-status-blue') + '">' +
-                    '<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
-                    '<div>' +
-                    '<div class="flex items-center gap-2 flex-wrap">' +
-                    '<span class="font-bold text-gray-800">' + j.job_number + '</span>' +
-                    priorityBadge(j.priority) +
-                    statusBadge(j.status) +
-                    '</div>' +
-                    '<div class="text-sm text-gray-700 mt-1">' + j.stock_number + ' &mdash; ' + j.vehicle_description + '</div>' +
-                    '<div class="text-xs text-gray-500 mt-1">Client: ' + j.client_name + ' | Sales: ' + j.salesman_name +
-                    (j.target_delivery_date ? ' | Target: ' + j.target_delivery_date : '') +
-                    (j.current_location ? ' | Loc: ' + j.current_location : '') + '</div>' +
-                    '</div>' +
-                    '<div class="flex gap-2">' +
-                    '<a href="/jobs/' + j.id + '" class="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg">View</a>';
-                if (canAccept) {
-                    html += '<button onclick="acceptJob(' + j.id + ', \'' + j.job_number + '\')" class="px-3 py-1.5 text-sm bg-status-blue text-white hover:bg-blue-800 rounded-lg">Accept Job</button>';
-                }
-                html += '</div></div></div>';
-            });
-            container.innerHTML = html;
+            allJobs = data.jobs || [];
+            render();
         } catch (err) {
-            container.innerHTML = '<p class="text-red-500 text-sm">Could not load jobs.</p>';
+            document.getElementById('jobsContainer').innerHTML = '<p class="text-red-500 text-sm">Could not load jobs.</p>';
         }
     }
-
-    async function acceptJob(jobId, jobNumber) {
-        if (!confirm('Accept job ' + jobNumber + '?')) return;
-        try {
-            const res = await fetch('/api/jobs/' + jobId + '/accept', {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer ' + token,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ user_id: userId ? parseInt(userId) : null })
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                alert(data.detail || 'Failed to accept job');
-                return;
-            }
-            alert('Job ' + jobNumber + ' accepted successfully. Salesman has been notified.');
-            loadJobs();
-        } catch (err) {
-            alert('Connection error');
-        }
-    }
-
     loadJobs();
 </script>
 {% endblock %}

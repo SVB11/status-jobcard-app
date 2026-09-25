@@ -22,6 +22,9 @@
         </div>
         <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
     </div>
+    <div id="stockPhotoWrap" class="hidden bg-white rounded-xl shadow p-3">
+        <img id="stockPhoto" class="stock-hero" alt="Vehicle">
+    </div>
     <div class="flex gap-2 overflow-x-auto pb-1 text-sm">
         <a href="#tasksList" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Work / Prep Tasks</a>
         <a href="#partsSection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Parts</a>
@@ -528,6 +531,10 @@
 
             document.getElementById('jobNumber').textContent = j.job_number;
             document.getElementById('vehicleLine').textContent = j.stock_number + ' — ' + j.vehicle_description;
+            if (j.photo_url) {
+                document.getElementById('stockPhoto').src = j.photo_url;
+                document.getElementById('stockPhotoWrap').classList.remove('hidden');
+            }
             document.getElementById('stockNumber').textContent = j.stock_number;
             const canFixVehicle = isAdmin || (userId && String(j.created_by) === String(userId));
             if (canFixVehicle && !(j.status === 'Delivered / Closed' && !isAdmin)) {

@@ -15,6 +15,7 @@ from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
 from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES
 from .migrate import migrate_schema
+from .stock_photos import match_stock_photo
 
 # Create tables and seed
 Base.metadata.create_all(bind=engine)
@@ -350,13 +351,18 @@ async def api_list_jobs(status: str = None, salesman: str = None, created_by: in
             "current_location": j.current_location,
             "year": j.year,
             "created_by": j.created_by,
-            "created_at": j.created_at.isoformat() if j.created_at else None
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "pdi_signed_sales": bool(j.pdi_signed_sales),
+            "pdi_signed_workshop": bool(j.pdi_signed_workshop),
+            "ready_sales": bool(j.ready_sales),
+            "ready_workshop": bool(j.ready_workshop),
+            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
         })
     return {"jobs": result}
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "Status Truck Sales Job Card System", "version": "0.2"}
+    return {"status": "ok", "app": "Status Truck Sales Job Card System", "version": "0.3-glass"}
 
 # ---------- JOB LIST PAGE ----------
 
@@ -488,6 +494,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "year": job.year,
         "main_type": job.main_type,
         "sub_type": job.sub_type,
+        "photo_url": match_stock_photo(job.vehicle_description, job.main_type, job.sub_type, job.year),
         "vin_number": getattr(job, "vin_number", None),
         "chassis_number": getattr(job, "chassis_number", None),
         "registration_number": getattr(job, "registration_number", None),
@@ -1342,7 +1349,8 @@ async def api_locations_board(db: Session = Depends(get_db)):
             "year": j.year,
             "label": f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip(),
             "status": j.status,
-            "priority": j.priority
+            "priority": j.priority,
+            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
         })
     return {"board": board}
 
