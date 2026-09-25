@@ -896,7 +896,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
     if not username or not full_name or not password:
         raise HTTPException(status_code=400, detail="Username, full name and password are required")
 
-    if role not in ("sales", "workshop", "accounts", "admin", "stock", "supplier"):
+    if role not in ("sales", "workshop", "accounts", "admin", "stock", "supplier", "marketing"):
         raise HTTPException(status_code=400, detail="Invalid role")
     company = (body.get("supplier_company") or "").strip() or None
     if role == "supplier" and not company:
@@ -1437,6 +1437,8 @@ def location_touched_today(db, job_id):
 
 @app.get("/api/workshop/morning-locations")
 async def api_morning_locations(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "workshop":
+        return {"date": str(sast_today()), "pending": [], "confirmed": 0, "total": 0, "locations": LOCATIONS}
     jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).order_by(models.JobCard.stock_number).all()
     pending = []
     done = 0
@@ -1453,7 +1455,7 @@ async def api_morning_locations(db: Session = Depends(get_db), current_user: mod
             done += 1
         else:
             pending.append(item)
-    if current_user.role in ("workshop", "admin", "accounts") and pending:
+    if pending:
         already = db.query(models.Notification).filter(
             models.Notification.user_id == current_user.id,
             models.Notification.message.like("Morning location check%"),
@@ -1465,10 +1467,18 @@ async def api_morning_locations(db: Session = Depends(get_db), current_user: mod
                 message=f"Morning location check — confirm where each WS is today ({len(pending)} still open)",
             ))
             db.commit()
+    else:
+        db.query(models.Notification).filter(
+            models.Notification.user_id == current_user.id,
+            models.Notification.message.like("Morning location check%")
+        ).delete(synchronize_session=False)
+        db.commit()
     return {"date": str(sast_today()), "pending": pending, "confirmed": done, "total": done + len(pending), "locations": LOCATIONS}
 
 @app.post("/api/jobs/{job_id}/location-confirm")
 async def api_confirm_location(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "workshop":
+        raise HTTPException(status_code=403, detail="Workshop only")
     try:
         body = await request.json()
     except Exception:
@@ -2719,8 +2729,18 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
 
 @app.get("/api/notifications")
 async def api_notifications(user_id: int, db: Session = Depends(get_db)):
-    unread = db.query(models.Notification).filter(models.Notification.user_id == user_id, models.Notification.is_read == False).count()
-    rows = db.query(models.Notification).filter(models.Notification.user_id == user_id).order_by(models.Notification.created_at.desc()).limit(30).all()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if user and user.role != "workshop":
+        db.query(models.Notification).filter(
+            models.Notification.user_id == user_id,
+            models.Notification.message.like("Morning location check%")
+        ).delete(synchronize_session=False)
+        db.commit()
+    q = db.query(models.Notification).filter(models.Notification.user_id == user_id)
+    if not user or user.role != "workshop":
+        q = q.filter(~models.Notification.message.like("Morning location check%"))
+    unread = q.filter(models.Notification.is_read == False).count()
+    rows = q.order_by(models.Notification.created_at.desc()).limit(30).all()
     return {"unread": unread, "notifications": [{
         "id": n.id,
         "message": n.message,
@@ -2781,3 +2801,90 @@ async def api_pdi_fails(db: Session = Depends(get_db)):
             "fails": [{"item": f.check_item, "notes": f.notes, "by": f.initials} for f in fails]
         })
     return {"jobs": out}
+
+@app.post("/api/jobs/{job_id}/wash-request")
+async def api_wash_request(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in ("sales", "admin", "accounts", "marketing"):
+        raise HTTPException(status_code=403, detail="Sales / marketing can request a wash")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    notes = (body.get("notes") or "Wash for marketing photos").strip()
+    wr = models.WashRequest(
+        job_card_id=job.id,
+        notes=notes,
+        status="Requested",
+        requested_by_name=current_user.full_name,
+        requested_by=current_user.id,
+    )
+    db.add(wr)
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="wash_request",
+        description="Wash requested for marketing / photos",
+        notes=notes,
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    db.commit()
+    notify_role(db, "workshop", f"Wash requested for {job.stock_number} — {job.vehicle_description}", job.id)
+    notify_role(db, "admin", f"Wash requested for {job.stock_number}", job.id)
+    return {"success": True}
+
+@app.get("/api/wash-requests")
+async def api_list_wash_requests(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    rows = db.query(models.WashRequest).order_by(models.WashRequest.created_at.desc()).limit(80).all()
+    out = []
+    for r in rows:
+        if r.status == "Done":
+            continue
+        job = db.query(models.JobCard).filter(models.JobCard.id == r.job_card_id).first()
+        if not job or job.status in CLOSED_STATUSES:
+            continue
+        out.append({
+            "id": r.id,
+            "job_id": job.id,
+            "stock_number": job.stock_number,
+            "vehicle_description": job.vehicle_description,
+            "year": job.year,
+            "location": job.current_location,
+            "notes": r.notes,
+            "status": r.status,
+            "requested_by_name": r.requested_by_name,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"requests": out}
+
+@app.post("/api/wash-requests/{item_id}/status")
+async def api_wash_status(item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "workshop":
+        raise HTTPException(status_code=403, detail="Workshop only")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    wr = db.query(models.WashRequest).filter(models.WashRequest.id == item_id).first()
+    if not wr:
+        raise HTTPException(status_code=404, detail="Request not found")
+    status = body.get("status") or "At wash bay"
+    if status not in ("Requested", "At wash bay", "Done"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    wr.status = status
+    wr.updated_by_name = current_user.full_name
+    job = db.query(models.JobCard).filter(models.JobCard.id == wr.job_card_id).first()
+    if job and status == "At wash bay" and "Wash Bay" in LOCATIONS:
+        job.current_location = "Wash Bay"
+    db.add(models.JobUpdate(
+        job_card_id=wr.job_card_id,
+        category="wash_request",
+        description=f"Wash request {status}",
+        notes=wr.notes,
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    db.commit()
+    return {"success": True}

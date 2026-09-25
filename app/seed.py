@@ -8,6 +8,7 @@ STAFF = [
     ("rob", "Rob Ling", "sales", "Rob123"),
     ("drickus", "Drickus van Biljon", "sales", "Drickus123"),
     ("stanley", "Stanley Johnson", "sales", "Stanley123"),
+    ("damian", "Damian", "marketing", "Damian123"),
     ("sebastian_sales", "Sebastian van Biljon", "sales", "Sebastian123"),
     # Workshop
     ("jean", "Jean-Pierre De Fillet", "workshop", "Jean123"),
@@ -44,6 +45,10 @@ def seed_database():
         ))
         added.append(username)
     db.commit()
+    damian = db.query(models.User).filter(models.User.username == "damian").first()
+    if damian and damian.role != "marketing":
+        damian.role = "marketing"
+        db.commit()
     if added:
         print("Added users:", ", ".join(added))
     else:

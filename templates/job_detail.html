@@ -13,6 +13,12 @@
 
 {% block content %}
 <div id="salesViewNote" class="hidden mb-4 p-3 bg-blue-50 text-blue-800 text-sm rounded-lg">View only for work updates. You can complete and sign the PDI. Workshop updates location, parts, 3rd party and extras.</div>
+<div id="washReqBox" class="hidden mb-4 p-4 rounded-xl border border-[#025daa] bg-[#025daa22]">
+    <div class="font-semibold uppercase text-sm mb-2">Request wash</div>
+    <p class="text-xs text-[#9aa6b4] mb-2">For marketing photos. Workshop will move it to Wash Bay.</p>
+    <textarea id="washNote" class="w-full mb-2 px-3 py-2 rounded text-sm" rows="2" placeholder="Wash for photos / marketing"></textarea>
+    <button type="button" onclick="requestWash()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded uppercase">Send wash request</button>
+</div>
 <div id="loading" class="text-gray-400">Loading job...</div>
 <div id="content" class="hidden space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -46,16 +52,20 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="clientName" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Salesman</dt><dd id="salesman" class="font-medium"></dd></div>
             </dl>
-            <div id="editVehicleBox" class="hidden mt-4 pt-3 border-t">
-                <p class="text-xs text-gray-500 mb-2">Correct a mistake. Workshop work stays the same.</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                    <input id="editStock" class="border rounded px-2 py-1" placeholder="WS number">
-                    <input id="editYear" class="border rounded px-2 py-1" placeholder="Year">
-                    <input id="editDesc" class="sm:col-span-2 border rounded px-2 py-1" placeholder="Vehicle description">
-                    <input id="editVin" class="border rounded px-2 py-1" placeholder="VIN">
-                    <input id="editReg" class="border rounded px-2 py-1" placeholder="Reg no">
+            <div id="fixMistakeWrap" class="hidden mt-4 pt-3 border-t">
+                <button type="button" id="fixMistakeBtn" onclick="toggleMistakeForm()" class="px-3 py-2 bg-[#2a3340] text-white text-xs uppercase rounded">Correct a mistake</button>
+                <div id="editVehicleBox" class="hidden mt-3">
+                    <p class="text-xs text-gray-500 mb-2">Fix WS number or vehicle details only. Workshop work stays the same.</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                        <input id="editStock" class="border rounded px-2 py-1" placeholder="WS number">
+                        <input id="editYear" class="border rounded px-2 py-1" placeholder="Year">
+                        <input id="editDesc" class="sm:col-span-2 border rounded px-2 py-1" placeholder="Vehicle description">
+                        <input id="editVin" class="border rounded px-2 py-1" placeholder="VIN">
+                        <input id="editReg" class="border rounded px-2 py-1" placeholder="Reg no">
+                    </div>
+                    <button type="button" onclick="saveVehicle()" class="mt-2 px-3 py-2 bg-status-blue text-white text-xs rounded">Save correction</button>
+                    <button type="button" onclick="toggleMistakeForm()" class="mt-2 px-3 py-2 text-xs text-[#9aa6b4]">Cancel</button>
                 </div>
-                <button type="button" onclick="saveVehicle()" class="mt-2 px-3 py-2 bg-status-blue text-white text-xs rounded">Save vehicle details</button>
             </div>
         </div>
         <div class="bg-white rounded-xl shadow p-5">
@@ -215,6 +225,11 @@
     function logout() {
         localStorage.clear();
         window.location.href = '/login';
+    }
+
+    function toggleMistakeForm() {
+        const box = document.getElementById('editVehicleBox');
+        box.classList.toggle('hidden');
     }
 
     async function saveVehicle() {
@@ -538,13 +553,15 @@
             document.getElementById('stockNumber').textContent = j.stock_number;
             const canFixVehicle = isAdmin || (userId && String(j.created_by) === String(userId));
             if (canFixVehicle && !(j.status === 'Delivered / Closed' && !isAdmin)) {
-                document.getElementById('editVehicleBox').classList.remove('hidden');
+                document.getElementById('fixMistakeWrap').classList.remove('hidden');
+                document.getElementById('editVehicleBox').classList.add('hidden');
                 document.getElementById('editStock').value = j.stock_number || '';
                 document.getElementById('editYear').value = j.year || '';
                 document.getElementById('editDesc').value = j.vehicle_description || '';
                 document.getElementById('editVin').value = j.vin_number || '';
                 document.getElementById('editReg').value = j.registration_number || '';
             } else {
+                document.getElementById('fixMistakeWrap').classList.add('hidden');
                 document.getElementById('editVehicleBox').classList.add('hidden');
             }
             document.getElementById('typeLine').textContent = j.main_type + (j.sub_type ? ' / ' + j.sub_type : '');
@@ -647,6 +664,9 @@
             buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
             buttons += '<a href="/jobs/' + jobId + '/print-work" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print completed work</a>';
             document.getElementById('actionButtons').innerHTML = buttons;
+            if ((role === 'sales' || role === 'marketing' || isAdmin) && j.status !== 'Delivered / Closed') {
+                document.getElementById('washReqBox').classList.remove('hidden');
+            }
 
         } catch (err) {
             document.getElementById('loading').textContent = 'Could not load job details.';
@@ -799,6 +819,20 @@
         }
     }
 
+
+    async function requestWash() {
+        const notes = (document.getElementById('washNote').value || '').trim() || 'Wash for marketing photos';
+        const res = await fetch('/api/jobs/' + jobId + '/wash-request', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notes: notes })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.detail || 'Could not send wash request'); return; }
+        document.getElementById('washNote').value = '';
+        alert('Wash request sent to workshop.');
+        if (typeof refreshBell === 'function') refreshBell();
+    }
 
     async function markReady(party) {
         if (!confirm('Mark this job as Ready for Delivery (' + party + ')?')) return;

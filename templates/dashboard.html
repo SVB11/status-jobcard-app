@@ -15,6 +15,11 @@
     <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
 </div>
 
+<div id="washDashBox" class="hidden mb-6 rounded-xl border-2 border-cyan-500 p-4">
+    <h2 class="font-bold uppercase tracking-wide text-cyan-300">Wash requests</h2>
+    <p class="text-sm text-[#d5dde6] mb-3">Marketing / photos. Move to Wash Bay then mark done.</p>
+    <div id="washDashList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="morningLocBox" class="hidden mb-6 rounded-xl border-2 border-[#025daa] bg-[#025daa22] p-4">
     <h2 class="font-bold uppercase tracking-wide text-[#7ec2ff]">Morning location check</h2>
     <p class="text-sm text-[#d5dde6] mb-3">Workshop: confirm where every open WS is before the day starts. Same bay is fine — just confirm it.</p>
@@ -221,7 +226,6 @@
             loadPartsDash();
             loadSuppliesDash();
             show('systemStatusBox');
-            loadMorningLocations();
             show('workshopCard');
             show('createCard');
             show('stockCard');
@@ -251,8 +255,15 @@
             loadBookings();
             loadNotifications();
         }
+        if (role === 'marketing') {
+            show('allJobsBox');
+            show('notifyBox');
+            loadJobList('/api/jobs', 'allJobsList');
+            loadNotifications();
+        }
         if (role === 'workshop') {
             loadMorningLocations();
+            loadWashRequests();
             show('workshopCard');
             show('createCard');
             show('stockCard');
@@ -618,54 +629,76 @@
             let html = '';
             Object.keys(board).forEach(function(loc) {
                 const items = board[loc] || [];
-                if (loc === 'Unspecified' && items.length === 0) return;
+                if (!items.length) return;
                 const icon = (loc || '').toLowerCase().indexOf('wash') !== -1 ? '🚿'
                     : ((loc || '').toLowerCase().indexOf('test pit') !== -1 ? '🛠️' : '🚛');
                 html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2 uppercase tracking-wide">' + icon + ' ' + loc +
                     ' <span class="text-gray-400">(' + items.length + ')</span></div>';
-                if (items.length === 0) {
-                    html += '<div class="text-xs text-gray-400">Empty</div>';
-                } else if ((loc || '').toLowerCase() === 'yard' || (loc || '').toLowerCase() === 'delivered / out') {
-                    html += '<select class="loc-jump w-full bg-[#0d1116] border border-[#2a3340] rounded px-2 py-2 text-xs">';
-                    html += '<option value="">Select WS (' + items.length + ')</option>';
-                    items.forEach(function(j) {
-                        const label = j.label || ((j.stock_number || '') + ' ' + (j.vehicle_description || '') + ' ' + (j.year || ''));
-                        html += '<option value="/jobs/' + j.id + '">' + label + '</option>';
-                    });
-                    html += '</select>';
-                } else {
-                    items.forEach(function(j) {
-                        html += '<a href="/jobs/' + j.id + '" class="flex items-center gap-2 text-xs py-1 hover:underline">' +
-                            (j.photo_url ? '<img src="' + j.photo_url + '" alt="" class="h-8 w-12 object-contain rounded bg-black/20">' : '') +
-                            '<span>' + (j.label || (j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || ''))) + '</span></a>';
-                    });
-                }
+                items.forEach(function(j) {
+                    html += '<a href="/jobs/' + j.id + '" class="flex items-center gap-2 text-xs py-1 hover:underline">' +
+                        (j.photo_url ? '<img src="' + j.photo_url + '" alt="" class="h-8 w-12 object-contain rounded bg-black/20">' : '') +
+                        '<span>' + (j.label || (j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || ''))) + '</span></a>';
+                });
                 html += '</div>';
             });
-            document.getElementById('locationBoard').innerHTML = html;
-            document.querySelectorAll('.loc-jump').forEach(function(sel) {
-                sel.onchange = function() { if (sel.value) window.location.href = sel.value; };
-            });
+            document.getElementById('locationBoard').innerHTML = html || '<p class="text-sm text-gray-400">No vehicles on the board</p>';
         } catch (err) {
             document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
         }
     }
 
+    async function loadWashRequests() {
+        const box = document.getElementById('washDashBox');
+        if (!box) return;
+        box.classList.remove('hidden');
+        try {
+            const res = await fetch('/api/wash-requests', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = data.requests || [];
+            const list = document.getElementById('washDashList');
+            if (!rows.length) { list.innerHTML = '<div class="text-[#9aa6b4]">No open wash requests</div>'; return; }
+            list.innerHTML = rows.map(function(r) {
+                return '<div class="p-2 rounded border border-[#2a3340] bg-[#11151c]">' +
+                    '<a href="/jobs/' + r.job_id + '" class="font-semibold">' + r.stock_number + ' · ' + (r.vehicle_description||'') + '</a>' +
+                    '<div class="text-xs text-[#9aa6b4]">' + (r.requested_by_name||'') + ' · ' + (r.status||'') + ' · ' + (r.location||'') + '</div>' +
+                    '<div class="text-xs">' + (r.notes||'') + '</div>' +
+                    '<div class="flex gap-2 mt-2">' +
+                    '<button type="button" class="px-2 py-1 bg-[#025daa] text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'At wash bay\')">At wash bay</button>' +
+                    '<button type="button" class="px-2 py-1 bg-green-700 text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'Done\')">Done</button>' +
+                    '</div></div>';
+            }).join('');
+        } catch (e) {}
+    }
+    async function setWashStatus(id, status) {
+        const res = await fetch('/api/wash-requests/' + id + '/status', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: status })
+        });
+        if (!res.ok) { alert('Could not update wash request'); return; }
+        loadWashRequests();
+        if (typeof loadLocationBoard === 'function') loadLocationBoard();
+    }
+
     async function loadMorningLocations() {
         const box = document.getElementById('morningLocBox');
         if (!box) return;
+        if ((localStorage.getItem('role') || '') !== 'workshop') {
+            box.classList.add('hidden');
+            return;
+        }
         try {
             const res = await fetch('/api/workshop/morning-locations', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             if (!res.ok) return;
             const data = await res.json();
-            box.classList.remove('hidden');
             const pending = data.pending || [];
-            document.getElementById('morningLocMeta').textContent = (data.confirmed || 0) + ' of ' + (data.total || 0) + ' confirmed today';
             const list = document.getElementById('morningLocList');
             if (!pending.length) {
-                list.innerHTML = '<div class="text-green-400 text-sm">All open WS locations confirmed this morning.</div>';
+                box.classList.add('hidden');
                 return;
             }
+            box.classList.remove('hidden');
+            document.getElementById('morningLocMeta').textContent = (data.confirmed || 0) + ' of ' + (data.total || 0) + ' confirmed today';
             const locs = data.locations || [];
             list.innerHTML = pending.map(function(j) {
                 const opts = locs.map(function(l) {

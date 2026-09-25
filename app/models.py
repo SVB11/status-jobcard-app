@@ -11,6 +11,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     STOCK = "stock"
     SUPPLIER = "supplier"
+    MARKETING = "marketing"
 
 class JobStatus(str, enum.Enum):
     SUBMITTED = "Submitted to Workshop"
@@ -319,4 +320,16 @@ class WorkshopStockOrder(Base):
     workshop_received_by = Column(String, nullable=True)
     workshop_received_at = Column(DateTime(timezone=True), nullable=True)
     last_updated_by = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class WashRequest(Base):
+    __tablename__ = "wash_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    notes = Column(Text, nullable=True)
+    status = Column(String, default="Requested")
+    requested_by_name = Column(String, nullable=True)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
