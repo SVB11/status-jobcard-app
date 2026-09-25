@@ -24,21 +24,31 @@
             --muted: #9aa6b4;
         }
         html, body {
-            background-color: var(--bg);
+            background: #07090c;
             color: var(--text);
             font-family: 'Barlow', Arial, sans-serif;
             min-height: 100%;
         }
-        body::before {
-            content: "";
+        #pageBg {
             position: fixed;
             inset: 0;
-            z-index: -1;
+            z-index: 0;
+            pointer-events: none;
             background-color: #07090c;
-            background-image: linear-gradient(180deg, rgba(7,9,12,.45), rgba(7,9,12,.88)), url('/static/images/yard_dusk.jpg');
+            background-image: url('/static/images/yard_dusk.jpg');
             background-repeat: no-repeat;
+            background-position: center top;
             background-size: cover;
-            background-position: center center;
+        }
+        #pageBg::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(7,9,12,.22), rgba(7,9,12,.48));
+        }
+        header, main, footer, #bellPanel {
+            position: relative;
+            z-index: 1;
         }
         .bg-status-blue { background-color: #025daa; }
         .text-status-blue { color: #5eb0ff; }
@@ -110,37 +120,78 @@
             min-height: 44px;
         }
         .task-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #7ec2ff; margin-bottom: 4px; }
+        .brand-logo {
+            height: 48px !important;
+            width: auto !important;
+            max-width: 220px;
+            object-fit: contain;
+            display: block;
+        }
+        .nav-scroll {
+            display: flex;
+            gap: 18px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            white-space: nowrap;
+            padding: 8px 16px 12px;
+        }
+        .nav-scroll a, .nav-scroll button {
+            flex: 0 0 auto;
+            font-size: 12px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #7ec2ff;
+            font-weight: 700;
+            min-height: 40px;
+        }
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 12px 16px 6px;
+        }
         @media (max-width: 640px) {
             header .nav-text { display: none; }
+            .brand-logo { height: 28px !important; max-width: 110px; }
+            .header-top { padding: 8px 16px 4px; }
+            .nav-scroll { gap: 14px; padding: 6px 16px 10px; }
+            .nav-scroll a, .nav-scroll button { font-size: 11px; min-height: 36px; }
+            #pageBg {
+                background-position: center center;
+                background-size: cover;
+                width: 100vw;
+                height: 100dvh;
+            }
         }
     </style>
     {% block head %}{% endblock %}
 </head>
 <body class="min-h-screen">
-    <header class="sticky-top bg-[#0c1015]/92 border-b-2 border-[#025daa] backdrop-blur">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <img src="/static/images/status_logo_white.png" alt="Status Truck Sales" class="h-12 w-auto">
-                <div class="hidden sm:block">
-                    <div class="text-xs text-[#9aa6b4] uppercase tracking-widest">Job Card System</div>
+    <div id="pageBg" aria-hidden="true"></div>
+    <header class="sticky-top bg-[#0c1015]/55 border-b-2 border-[#025daa] backdrop-blur">
+        <div class="max-w-7xl mx-auto">
+            <div class="header-top">
+                <img src="/static/images/status_logo_white.png" alt="Status Truck Sales" class="brand-logo">
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" id="bellBtn" onclick="toggleBell()" class="relative text-[#7ec2ff] font-semibold text-xs uppercase">
+                        Alerts
+                        <span id="bellBadge" class="hidden absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center">0</span>
+                    </button>
+                    {% block header_right %}{% endblock %}
                 </div>
             </div>
-            <div class="flex items-center gap-3 flex-wrap justify-end uppercase text-xs tracking-wider">
-                <a href="/dashboard" class="text-[#7ec2ff] font-semibold">Dashboard</a>
-                <a href="/jobs" id="navJobs" class="text-[#7ec2ff] font-semibold">Jobs</a>
-                <a href="/jobs/archive" id="navArchive" class="hidden text-[#7ec2ff] font-semibold">Closed</a>
-                <a href="/admin/users" id="navUsers" class="hidden text-[#7ec2ff] font-semibold">Users</a>
-                <a href="/admin/third-parties" id="navTp" class="hidden text-[#7ec2ff] font-semibold">3rd Parties</a>
-                <a href="/stock" id="navStock" class="hidden text-[#7ec2ff] font-semibold">Workshop stock</a>
-                <a href="/supplier" id="navSupplier" class="hidden text-[#7ec2ff] font-semibold">Supplier jobs</a>
-                <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 py-2 rounded-lg font-semibold">Create</a>
-                <button type="button" id="bellBtn" onclick="toggleBell()" class="relative text-[#7ec2ff] font-semibold">
-                    Alerts
-                    <span id="bellBadge" class="hidden absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center">0</span>
-                </button>
-                <button type="button" onclick="enablePings()" class="text-[#7ec2ff] font-semibold">Enable phone pings</button>
-                {% block header_right %}{% endblock %}
-            </div>
+            <nav class="nav-scroll">
+                <a href="/dashboard">Dashboard</a>
+                <a href="/jobs" id="navJobs">Jobs</a>
+                <a href="/jobs/archive" id="navArchive" class="hidden">Closed</a>
+                <a href="/admin/users" id="navUsers" class="hidden">Users</a>
+                <a href="/admin/third-parties" id="navTp" class="hidden">3rd Parties</a>
+                <a href="/stock" id="navStock" class="hidden">Stock</a>
+                <a href="/supplier" id="navSupplier" class="hidden">Supplier</a>
+                <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 rounded-lg">Create</a>
+                <button type="button" onclick="enablePings()">Pings</button>
+            </nav>
         </div>
     </header>
 
