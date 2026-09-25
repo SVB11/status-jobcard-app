@@ -49,8 +49,8 @@
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
         }
-        .stock-hero { width: 100%; max-height: 220px; object-fit: contain; background: transparent; }
-        .stock-thumb { width: 100%; height: 148px; object-fit: contain; background: transparent; }
+        .stock-hero { width: 100%; max-height: 240px; object-fit: contain; background: #12161c; border-radius: 12px; }
+        .stock-thumb { width: 100%; height: 168px; object-fit: contain; background: #12161c; border-radius: 10px; }
         header.sticky-top { position: sticky; top: 0; z-index: 50; }
         .sticky-sub { position: sticky; top: 64px; z-index: 40; padding: 8px 0 10px; background: linear-gradient(180deg, rgba(7,9,12,.94), rgba(7,9,12,.78)); backdrop-filter: blur(12px); }
         details.dash-fold { background: rgba(18,22,28,0.82); border: 1px solid #2a3340; border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; backdrop-filter: blur(16px); }
@@ -119,12 +119,23 @@
                 <a href="/stock" id="navStock" class="hidden text-[#7ec2ff] font-semibold">Workshop stock</a>
                 <a href="/supplier" id="navSupplier" class="hidden text-[#7ec2ff] font-semibold">Supplier jobs</a>
                 <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 py-2 rounded-lg font-semibold">Create</a>
+                <button type="button" id="bellBtn" onclick="toggleBell()" class="relative text-[#7ec2ff] font-semibold">
+                    Alerts
+                    <span id="bellBadge" class="hidden absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center">0</span>
+                </button>
                 <button type="button" onclick="enablePings()" class="text-[#7ec2ff] font-semibold">Enable phone pings</button>
                 {% block header_right %}{% endblock %}
             </div>
         </div>
     </header>
 
+    <div id="bellPanel" class="hidden fixed right-3 top-20 z-50 w-[92vw] max-w-sm max-h-[70vh] overflow-auto rounded-xl border border-[#2a3340] bg-[#12161ce8] backdrop-blur p-3">
+        <div class="flex items-center justify-between mb-2">
+            <div class="uppercase text-xs tracking-widest text-[#9aa6b4]">Updates</div>
+            <button type="button" onclick="markBellRead()" class="text-xs text-[#7ec2ff]">Mark read</button>
+        </div>
+        <div id="bellList" class="space-y-2 text-sm text-[#e8edf3]">No alerts</div>
+    </div>
     <main class="max-w-7xl mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>
@@ -191,6 +202,55 @@
             if (nc) nc.classList.add('hidden');
         }
     })();
+    async function refreshBell() {
+        const uid = localStorage.getItem('user_id');
+        const token = localStorage.getItem('token');
+        if (!uid || !token) return;
+        try {
+            const res = await fetch('/api/notifications?user_id=' + uid, { headers: { 'Authorization': 'Bearer ' + token } });
+            const data = await res.json();
+            const unread = data.unread || 0;
+            const badge = document.getElementById('bellBadge');
+            if (badge) {
+                if (unread > 0) { badge.textContent = unread > 9 ? '9+' : String(unread); badge.classList.remove('hidden'); }
+                else { badge.classList.add('hidden'); }
+            }
+            if (navigator.setAppBadge) {
+                if (unread) navigator.setAppBadge(unread);
+                else if (navigator.clearAppBadge) navigator.clearAppBadge();
+            }
+            const list = document.getElementById('bellList');
+            const rows = data.notifications || [];
+            if (list) {
+                if (!rows.length) list.innerHTML = '<div class="text-[#9aa6b4]">No alerts</div>';
+                else list.innerHTML = rows.map(function(n) {
+                    const href = n.job_card_id ? '/jobs/' + n.job_card_id : '/dashboard';
+                    return '<a href="' + href + '" class="block p-2 rounded ' + (n.is_read ? 'bg-[#1a2028]' : 'bg-[#025daa33] border border-[#025daa]') + '">' +
+                        (n.is_read ? '' : '<span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-2"></span>') +
+                        n.message + '<div class="text-[11px] text-[#9aa6b4] mt-1">' + (n.created_at || '').replace('T',' ').substring(0,16) + '</div></a>';
+                }).join('');
+            }
+        } catch (e) {}
+    }
+    function toggleBell() {
+        const p = document.getElementById('bellPanel');
+        if (!p) return;
+        p.classList.toggle('hidden');
+        if (!p.classList.contains('hidden')) refreshBell();
+    }
+    async function markBellRead() {
+        const uid = localStorage.getItem('user_id');
+        const token = localStorage.getItem('token');
+        if (!uid || !token) return;
+        await fetch('/api/notifications/mark-read', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: parseInt(uid) })
+        });
+        refreshBell();
+    }
+    refreshBell();
+    setInterval(refreshBell, 20000);
     </script>
     {% block scripts %}{% endblock %}
 </body>

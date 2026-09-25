@@ -315,6 +315,10 @@ async def api_create_job(
     if created_by_id:
         log_audit(db, created_by_id, "Created Job Card", job.id,
                   f"Job {job_number} for {job.stock_number} – {job.vehicle_description}")
+    msg = f"New job card {job.stock_number} — {job.vehicle_description}"
+    notify_role(db, "workshop", msg, job.id)
+    notify_role(db, "admin", msg, job.id)
+    notify_role(db, "accounts", msg, job.id)
 
     return {
         "success": True,
@@ -357,6 +361,7 @@ async def api_list_jobs(status: str = None, salesman: str = None, created_by: in
             "current_location": j.current_location,
             "year": j.year,
             "created_by": j.created_by,
+            "accepted_by": j.accepted_by,
             "created_at": j.created_at.isoformat() if j.created_at else None,
             "pdi_signed_sales": bool(j.pdi_signed_sales),
             "pdi_signed_workshop": bool(j.pdi_signed_workshop),
@@ -1418,6 +1423,74 @@ async def api_update_location(job_id: int, request: Request, db: Session = Depen
     if user_id:
         log_audit(db, user_id, "Changed Location", job.id, update.description)
     return {"success": True, "current_location": job.current_location}
+
+def sast_today():
+    return (datetime.utcnow() + timedelta(hours=2)).date()
+
+def location_touched_today(db, job_id):
+    start = datetime.combine(sast_today(), datetime.min.time()) - timedelta(hours=2)
+    return db.query(models.JobUpdate).filter(
+        models.JobUpdate.job_card_id == job_id,
+        models.JobUpdate.category == "location",
+        models.JobUpdate.created_at >= start
+    ).first() is not None
+
+@app.get("/api/workshop/morning-locations")
+async def api_morning_locations(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).order_by(models.JobCard.stock_number).all()
+    pending = []
+    done = 0
+    for j in jobs:
+        item = {
+            "id": j.id,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "current_location": j.current_location or "Unspecified",
+            "confirmed_today": location_touched_today(db, j.id),
+        }
+        if item["confirmed_today"]:
+            done += 1
+        else:
+            pending.append(item)
+    if current_user.role in ("workshop", "admin", "accounts") and pending:
+        already = db.query(models.Notification).filter(
+            models.Notification.user_id == current_user.id,
+            models.Notification.message.like("Morning location check%"),
+            models.Notification.created_at >= datetime.combine(sast_today(), datetime.min.time()) - timedelta(hours=2)
+        ).first()
+        if not already:
+            db.add(models.Notification(
+                user_id=current_user.id,
+                message=f"Morning location check — confirm where each WS is today ({len(pending)} still open)",
+            ))
+            db.commit()
+    return {"date": str(sast_today()), "pending": pending, "confirmed": done, "total": done + len(pending), "locations": LOCATIONS}
+
+@app.post("/api/jobs/{job_id}/location-confirm")
+async def api_confirm_location(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    location = body.get("location") or job.current_location
+    if location and location in LOCATIONS:
+        job.current_location = location
+    loc = job.current_location or "Unspecified"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="location",
+        description=f"Morning location confirmed: {loc}",
+        notes="Daily morning check",
+        created_by_name=current_user.full_name,
+        created_by=current_user.id
+    ))
+    db.commit()
+    log_audit(db, current_user.id, "Morning location confirmed", job.id, loc)
+    return {"success": True, "current_location": loc}
 
 @app.post("/api/jobs/{job_id}/updates")
 async def api_add_update(job_id: int, request: Request, db: Session = Depends(get_db)):
@@ -2646,8 +2719,8 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
 
 @app.get("/api/notifications")
 async def api_notifications(user_id: int, db: Session = Depends(get_db)):
+    unread = db.query(models.Notification).filter(models.Notification.user_id == user_id, models.Notification.is_read == False).count()
     rows = db.query(models.Notification).filter(models.Notification.user_id == user_id).order_by(models.Notification.created_at.desc()).limit(30).all()
-    unread = sum(1 for n in rows if not n.is_read)
     return {"unread": unread, "notifications": [{
         "id": n.id,
         "message": n.message,

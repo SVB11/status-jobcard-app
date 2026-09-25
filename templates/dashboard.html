@@ -15,6 +15,13 @@
     <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
 </div>
 
+<div id="morningLocBox" class="hidden mb-6 rounded-xl border-2 border-[#025daa] bg-[#025daa22] p-4">
+    <h2 class="font-bold uppercase tracking-wide text-[#7ec2ff]">Morning location check</h2>
+    <p class="text-sm text-[#d5dde6] mb-3">Workshop: confirm where every open WS is before the day starts. Same bay is fine — just confirm it.</p>
+    <div id="morningLocMeta" class="text-xs text-[#9aa6b4] mb-2"></div>
+    <div id="morningLocList" class="space-y-2 text-sm"></div>
+</div>
+
 <div id="pendingExtrasBox" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg text-amber-800 mb-1 uppercase">Extras waiting for your approval <span id="pendingExtrasCount"></span></h2>
     <p class="text-sm text-amber-700 mb-4">Shows here as soon as workshop adds extra work. Approve without opening the job.</p>
@@ -214,17 +221,20 @@
             loadPartsDash();
             loadSuppliesDash();
             show('systemStatusBox');
+            loadMorningLocations();
             show('workshopCard');
             show('createCard');
             show('stockCard');
             show('stockDashBox');
             loadStockDash();
+            show('myJobsBox');
             show('allJobsBox');
             show('updateReqBox');
             show('notifyBox');
             show('bookingsBox');
             loadUpdateRequests();
             loadNotifications();
+            loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
         }
@@ -242,6 +252,7 @@
             loadNotifications();
         }
         if (role === 'workshop') {
+            loadMorningLocations();
             show('workshopCard');
             show('createCard');
             show('stockCard');
@@ -575,13 +586,7 @@
                 return '<div class="p-2 bg-gray-50 rounded ' + (n.is_read ? '' : 'border border-[#025daa]') + '">' + n.message +
                     '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + (n.is_read ? '' : ' · new') + '</div></div>';
             }).join('');
-            fetch('/api/notifications/mark-read', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: parseInt(uid) })
-            }).then(function(){
-                if (navigator.clearAppBadge) navigator.clearAppBadge();
-            }).catch(function(){});
+            if (typeof refreshBell === 'function') refreshBell();
         } catch (err) {}
     }
 
@@ -620,6 +625,14 @@
                     ' <span class="text-gray-400">(' + items.length + ')</span></div>';
                 if (items.length === 0) {
                     html += '<div class="text-xs text-gray-400">Empty</div>';
+                } else if ((loc || '').toLowerCase() === 'yard' || (loc || '').toLowerCase() === 'delivered / out') {
+                    html += '<select class="loc-jump w-full bg-[#0d1116] border border-[#2a3340] rounded px-2 py-2 text-xs">';
+                    html += '<option value="">Select WS (' + items.length + ')</option>';
+                    items.forEach(function(j) {
+                        const label = j.label || ((j.stock_number || '') + ' ' + (j.vehicle_description || '') + ' ' + (j.year || ''));
+                        html += '<option value="/jobs/' + j.id + '">' + label + '</option>';
+                    });
+                    html += '</select>';
                 } else {
                     items.forEach(function(j) {
                         html += '<a href="/jobs/' + j.id + '" class="flex items-center gap-2 text-xs py-1 hover:underline">' +
@@ -630,9 +643,55 @@
                 html += '</div>';
             });
             document.getElementById('locationBoard').innerHTML = html;
+            document.querySelectorAll('.loc-jump').forEach(function(sel) {
+                sel.onchange = function() { if (sel.value) window.location.href = sel.value; };
+            });
         } catch (err) {
             document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
         }
+    }
+
+    async function loadMorningLocations() {
+        const box = document.getElementById('morningLocBox');
+        if (!box) return;
+        try {
+            const res = await fetch('/api/workshop/morning-locations', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            if (!res.ok) return;
+            const data = await res.json();
+            box.classList.remove('hidden');
+            const pending = data.pending || [];
+            document.getElementById('morningLocMeta').textContent = (data.confirmed || 0) + ' of ' + (data.total || 0) + ' confirmed today';
+            const list = document.getElementById('morningLocList');
+            if (!pending.length) {
+                list.innerHTML = '<div class="text-green-400 text-sm">All open WS locations confirmed this morning.</div>';
+                return;
+            }
+            const locs = data.locations || [];
+            list.innerHTML = pending.map(function(j) {
+                const opts = locs.map(function(l) {
+                    return '<option value="' + l + '"' + (l === j.current_location ? ' selected' : '') + '>' + l + '</option>';
+                }).join('');
+                return '<div class="flex flex-col sm:flex-row sm:items-center gap-2 p-2 rounded bg-[#11151c] border border-[#2a3340]">' +
+                    '<a href="/jobs/' + j.id + '" class="font-semibold flex-1">' + j.stock_number + ' · ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</a>' +
+                    '<select data-id="' + j.id + '" class="morn-loc bg-[#0d1116] border border-[#2a3340] rounded px-2 py-1 text-xs">' + opts + '</select>' +
+                    '<button type="button" data-id="' + j.id + '" class="morn-ok px-3 py-1 bg-[#025daa] text-white text-xs uppercase rounded">Confirm</button></div>';
+            }).join('');
+            list.querySelectorAll('.morn-ok').forEach(function(btn) {
+                btn.onclick = async function() {
+                    const id = btn.getAttribute('data-id');
+                    const sel = list.querySelector('select[data-id="' + id + '"]');
+                    const res2 = await fetch('/api/jobs/' + id + '/location-confirm', {
+                        method: 'POST',
+                        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ location: sel ? sel.value : '' })
+                    });
+                    if (!res2.ok) { alert('Could not confirm'); return; }
+                    loadMorningLocations();
+                    if (typeof loadLocationBoard === 'function') loadLocationBoard();
+                    if (typeof refreshBell === 'function') refreshBell();
+                };
+            });
+        } catch (e) {}
     }
 </script>
 {% endblock %}

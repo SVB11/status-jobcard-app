@@ -18,7 +18,7 @@
 <div class="sticky-sub" id="filterBar">
     <div class="flex flex-wrap gap-2 mb-3">
     <button type="button" data-f="all" class="g-filter on">All</button>
-    <button type="button" data-f="needs" class="g-filter">Needs me</button>
+    <button type="button" data-f="needs" class="g-filter">My jobs</button>
     <button type="button" data-f="workshop" class="g-filter">In workshop</button>
     <button type="button" data-f="third" class="g-filter">At 3rd party</button>
     <button type="button" data-f="ready" class="g-filter">Ready</button>
@@ -64,17 +64,15 @@
         const s = (j.status || '').toLowerCase();
         return s.indexOf('ready') !== -1 || s.indexOf('delivered') !== -1 || s === 'pdi completed' || s === 'work completed';
     }
+    function isMine(j) {
+        const uid = parseInt(userId || '0');
+        if ((j.salesman_name || '') === fullName) return true;
+        if (j.created_by && uid && parseInt(j.created_by) === uid) return true;
+        if (j.accepted_by && uid && parseInt(j.accepted_by) === uid) return true;
+        return false;
+    }
     function needsMe(j) {
-        const s = (j.status || '').toLowerCase();
-        const fail = s.indexOf('fail') !== -1;
-        if (role === 'sales') {
-            if ((j.salesman_name || '') !== fullName) return false;
-            return fail || s.indexOf('submitted') !== -1 || s.indexOf('pdi') !== -1 || (s.indexOf('ready') !== -1 && !j.ready_sales);
-        }
-        if (role === 'workshop') {
-            return fail || s.indexOf('submitted') !== -1 || s === 'in progress' || s === 'accepted by workshop' || (s.indexOf('ready') !== -1 && !j.ready_workshop);
-        }
-        return fail || s.indexOf('submitted') !== -1 || s.indexOf('pdi') !== -1 || s === 'in progress';
+        return isMine(j);
     }
     function statusClass(s) {
         s = (s || '').toLowerCase();
