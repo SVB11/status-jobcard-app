@@ -13,7 +13,7 @@ from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
 from .seed import seed_database
 from .tasks_config import get_tasks_for_vehicle
-from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES
+from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES, type_family
 from .migrate import migrate_schema
 from .stock_photos import match_stock_photo
 
@@ -244,7 +244,7 @@ async def api_create_job(
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Required fields
-    required = ["stock_number", "vehicle_description", "year", "main_type", "sub_type",
+    required = ["stock_number", "vehicle_description", "year", "main_type",
                 "client_name", "salesman_name", "priority", "target_delivery_date",
                 "vin_number", "registration_number", "quotation_invoice_number"]
     for field in required:
@@ -263,7 +263,7 @@ async def api_create_job(
         vehicle_description=body["vehicle_description"].strip(),
         year=str(body["year"]).strip(),
         main_type=body["main_type"],
-        sub_type=body["sub_type"].strip(),
+        sub_type=(body.get("sub_type") or body.get("main_type") or "").strip(),
         client_name=body["client_name"].strip(),
         salesman_name=body["salesman_name"],
         created_by=created_by_id,
@@ -539,6 +539,13 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "pdi_signed_sales_by_name": user_name(db, job.pdi_signed_sales_by),
         "pdi_signed_workshop_at": job.pdi_signed_workshop_at.isoformat() if job.pdi_signed_workshop_at else None,
         "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None,
+        "is_tanker": type_family(job.main_type) == "tanker",
+        "empty_signed_workshop": bool(getattr(job, "empty_signed_workshop", False)),
+        "empty_signed_sales": bool(getattr(job, "empty_signed_sales", False)),
+        "empty_signed_workshop_by_name": user_name(db, getattr(job, "empty_signed_workshop_by", None)),
+        "empty_signed_sales_by_name": user_name(db, getattr(job, "empty_signed_sales_by", None)),
+        "empty_signed_workshop_at": job.empty_signed_workshop_at.isoformat() if getattr(job, "empty_signed_workshop_at", None) else None,
+        "empty_signed_sales_at": job.empty_signed_sales_at.isoformat() if getattr(job, "empty_signed_sales_at", None) else None,
         "status": job.status,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "created_by": job.created_by,
@@ -733,6 +740,8 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
             if user_id:
                 log_audit(db, user_id, "Work Completed", job.id, f"All tasks completed on {job.job_number}")
             notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready for delivery")
+            if type_family(job.main_type) == "tanker":
+                notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
             db.commit()
 
     # Blocked notification placeholder
@@ -994,6 +1003,8 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    if type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
+        raise HTTPException(status_code=400, detail="Tanker empty check must be signed by workshop and sales before marking ready")
     if job.status not in ("PDI Completed", "Work Completed", "Ready for Delivery"):
         # Allow from Work Completed for now (PDI can be added later)
         if job.status != "Work Completed":
@@ -1040,6 +1051,86 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
         "status": job.status
     }
 
+@app.post("/api/jobs/{job_id}/empty-sign")
+async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if type_family(job.main_type) != "tanker":
+        raise HTTPException(status_code=400, detail="Empty check is only for tankers")
+    if job.status in ("Delivered / Closed",):
+        raise HTTPException(status_code=400, detail="Job already delivered")
+    party = body.get("party") or ("workshop" if current_user.role == "workshop" else "sales" if current_user.role == "sales" else None)
+    if current_user.role in ("admin", "accounts") and body.get("party"):
+        party = body.get("party")
+    if party not in ("workshop", "sales"):
+        raise HTTPException(status_code=400, detail="Workshop or sales must sign the empty check")
+    if party == "workshop":
+        job.empty_signed_workshop = True
+        job.empty_signed_workshop_by = current_user.id
+        job.empty_signed_workshop_at = datetime.utcnow()
+    else:
+        job.empty_signed_sales = True
+        job.empty_signed_sales_by = current_user.id
+        job.empty_signed_sales_at = datetime.utcnow()
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="empty_check",
+        description=f"Tanker empty check signed by {party} — compartments and pipelines to APIs empty",
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    log_audit(db, current_user.id, "Tanker empty check", job.id, party)
+    if job.empty_signed_workshop and job.empty_signed_sales:
+        notify_signoff(db, job, f"Tanker empty check complete on {job.stock_number} — can mark ready / deliver")
+    elif party == "workshop":
+        notify_salesman(db, job, f"Workshop signed tanker empty check on {job.stock_number} — sales must sign")
+    else:
+        notify_role(db, "workshop", f"Sales signed tanker empty check on {job.stock_number} — workshop must sign", job.id)
+    db.commit()
+    return {
+        "success": True,
+        "empty_signed_workshop": bool(job.empty_signed_workshop),
+        "empty_signed_sales": bool(job.empty_signed_sales),
+    }
+
+@app.get("/api/jobs/empty-check-queue")
+async def api_empty_check_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    out = []
+    for j in jobs:
+        if type_family(j.main_type) != "tanker":
+            continue
+        if j.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery"):
+            continue
+        need = False
+        if current_user.role == "sales":
+            if (j.salesman_name or "") != current_user.full_name:
+                continue
+            need = not bool(j.empty_signed_sales)
+        elif current_user.role == "workshop":
+            need = not bool(j.empty_signed_workshop)
+        elif current_user.role in ("admin", "accounts"):
+            need = not (j.empty_signed_workshop and j.empty_signed_sales)
+        else:
+            continue
+        if not need:
+            continue
+        out.append({
+            "id": j.id,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "status": j.status,
+            "empty_signed_workshop": bool(j.empty_signed_workshop),
+            "empty_signed_sales": bool(j.empty_signed_sales),
+        })
+    return {"jobs": out}
+
 @app.post("/api/jobs/{job_id}/close")
 async def api_close_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     try:
@@ -1053,6 +1144,8 @@ async def api_close_job(job_id: int, request: Request, db: Session = Depends(get
 
     if job.status != "Ready for Delivery":
         raise HTTPException(status_code=400, detail="Job must be Ready for Delivery before closing")
+    if type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
+        raise HTTPException(status_code=400, detail="Tanker empty check must be signed by workshop and sales before delivery")
     missing = parts_missing_order_numbers(db, job_id)
     if missing:
         raise HTTPException(

@@ -22,6 +22,12 @@ NEW_COLUMNS = {
         "update_requested_at": "DATETIME",
         "update_requested_by": "VARCHAR",
         "update_request_note": "TEXT",
+        "empty_signed_workshop": "BOOLEAN",
+        "empty_signed_workshop_by": "INTEGER",
+        "empty_signed_workshop_at": "DATETIME",
+        "empty_signed_sales": "BOOLEAN",
+        "empty_signed_sales_by": "INTEGER",
+        "empty_signed_sales_at": "DATETIME",
     },
     "part_items": {
         "quantity": "VARCHAR",

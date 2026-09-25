@@ -13,6 +13,14 @@
 
 {% block content %}
 <div id="salesViewNote" class="hidden mb-4 p-3 bg-blue-50 text-blue-800 text-sm rounded-lg">View only for work updates. You can complete and sign the PDI. Workshop updates location, parts, 3rd party and extras.</div>
+<div id="emptyCheckJobBox" class="hidden mb-4 rounded-xl border-2 border-orange-500">
+    <div class="glass-inner">
+        <div class="font-semibold uppercase text-orange-300">Tanker empty check</div>
+        <p class="text-sm text-[#d5dde6] my-2">Confirm the tanker is empty. No water or liquid in the compartments or in the pipeline to the APIs. Workshop and sales must both sign before this job can be marked ready or delivered.</p>
+        <div id="emptyCheckStatus" class="text-xs text-[#9aa6b4] mb-3"></div>
+        <div id="emptyCheckButtons" class="flex gap-2 flex-wrap"></div>
+    </div>
+</div>
 <div id="washReqBox" class="hidden mb-4 p-4 rounded-xl border border-[#025daa] bg-[#025daa22]">
     <div class="font-semibold uppercase text-sm mb-2">Request wash</div>
     <p class="text-xs text-[#9aa6b4] mb-2">For marketing photos. Workshop will move it to Wash Bay.</p>
@@ -40,7 +48,7 @@
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-white rounded-xl shadow p-5">
+        <div class="bg-white rounded-xl shadow"><div class="glass-inner">
             <h2 class="font-semibold text-status-blue mb-3">Vehicle & Client</h2>
             <dl class="text-sm space-y-2">
                 <div class="flex justify-between"><dt class="text-gray-500">Stock No</dt><dd id="stockNumber" class="font-medium"></dd></div>
@@ -67,8 +75,8 @@
                     <button type="button" onclick="toggleMistakeForm()" class="mt-2 px-3 py-2 text-xs text-[#9aa6b4]">Cancel</button>
                 </div>
             </div>
-        </div>
-        <div class="bg-white rounded-xl shadow p-5">
+        </div></div>
+        <div class="bg-white rounded-xl shadow"><div class="glass-inner">
             <h2 class="font-semibold text-status-blue mb-3">Job Info</h2>
             <dl class="text-sm space-y-2">
                 <div class="flex justify-between"><dt class="text-gray-500">Status</dt><dd id="status" class="font-medium"></dd></div>
@@ -80,10 +88,10 @@
                 <div class="flex justify-between"><dt class="text-gray-500">Created</dt><dd id="createdAt" class="font-medium"></dd></div>
                 <div class="flex justify-between"><dt class="text-gray-500">Accepted by</dt><dd id="acceptedBy" class="font-medium"></dd></div>
             </dl>
-        </div>
+        </div></div>
     </div>
 
-    <div class="bg-white rounded-xl shadow p-5">
+    <div class="bg-white rounded-xl shadow"><div class="glass-inner">
         <div class="flex items-center justify-between mb-3">
             <h2 class="font-semibold text-status-blue">Work / Prep Tasks</h2>
             <span id="taskProgress" class="text-sm text-gray-500"></span>
@@ -100,11 +108,12 @@
         </div>
 
         <div id="otherInstructions" class="mt-4 text-sm text-gray-600 hidden"></div>
-    </div>
+    </div></div>
 
     
     
-    <div id="partsSection" class="bg-white rounded-xl shadow p-5">
+    <div id="partsSection" class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-1">Parts</h2>
         <p class="text-sm text-gray-600 mb-3">Submit a part here. The form resets so you can add the next one. Change part status (Ordered / Waiting / Delivered) under Work / Prep Tasks. Order number is created by Chantelle.</p>
         <div id="partsLockNote" class="hidden mb-3 p-2 bg-red-50 text-red-700 text-sm rounded">Parts are locked for closing — add missing order numbers.</div>
@@ -120,9 +129,11 @@
             </div>
             <button type="button" onclick="savePart()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Submit part</button>
         </div>
+        </div>
     </div>
 
-    <div id="suppliesSection" class="bg-white rounded-xl shadow p-5">
+    <div id="suppliesSection" class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-1">DELIVERY HOSE / COUPLERS / SUZI CABLES</h2>
         <p class="text-sm text-gray-500 mb-3">Book the item onto this job card. When it is supplied, mark Completed so it goes onto the completed list and print.</p>
         <div id="suppliesBooked" class="space-y-2 text-sm mb-3"></div>
@@ -147,9 +158,11 @@
             <input type="text" id="supNotes" class="w-full px-3 py-2 border rounded text-sm" placeholder="Notes (optional)">
             <button type="button" onclick="saveSupply()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Book onto job card</button>
         </div>
+        </div>
     </div>
 
-<div id="thirdPartySection" class="bg-white rounded-xl shadow p-5">
+<div id="thirdPartySection" class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-3">3rd Party Bookings</h2>
         <div id="tpList" class="space-y-2 mb-4 text-sm"></div>
         <div id="tpForm" class="hidden space-y-3 p-3 bg-gray-50 rounded-lg">
@@ -180,9 +193,11 @@
             <input type="text" id="tpNotes" placeholder="Notes (optional)" class="w-full px-3 py-2 border rounded text-sm">
             <button type="button" onclick="saveThirdParty()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Add 3rd party booking</button>
         </div>
+        </div>
     </div>
 
-    <div id="workshopExtras" class="bg-white rounded-xl shadow p-5">
+    <div id="workshopExtras" class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-1">Current activity</h2>
         <p class="text-xs text-gray-500 mb-3">Where the vehicle is now and what workshop is doing. Sales can see this.</p>
         <div id="activityView" class="mb-3 text-sm text-gray-700"></div>
@@ -204,7 +219,7 @@
         <h3 class="text-sm font-semibold mb-2">Updates log</h3>
 <div id="updatesList" class="space-y-2 text-sm"></div>
         <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
-    </div>
+    </div></div>
 </div>
 {% endblock %}
 
@@ -667,6 +682,24 @@
             if ((role === 'sales' || role === 'marketing' || isAdmin) && j.status !== 'Delivered / Closed') {
                 document.getElementById('washReqBox').classList.remove('hidden');
             }
+            const emptyBox = document.getElementById('emptyCheckJobBox');
+            if (j.is_tanker && j.status !== 'Delivered / Closed') {
+                emptyBox.classList.remove('hidden');
+                document.getElementById('emptyCheckStatus').textContent =
+                    'Workshop: ' + (j.empty_signed_workshop ? ('signed' + (j.empty_signed_workshop_by_name ? ' by ' + j.empty_signed_workshop_by_name : '')) : 'not signed') +
+                    '  ·  Sales: ' + (j.empty_signed_sales ? ('signed' + (j.empty_signed_sales_by_name ? ' by ' + j.empty_signed_sales_by_name : '')) : 'not signed');
+                let eb = '';
+                if ((role === 'workshop' || isAdmin) && !j.empty_signed_workshop) {
+                    eb += '<button type="button" onclick="signEmpty(\'workshop\')" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Workshop sign empty</button>';
+                }
+                if ((role === 'sales' || isAdmin) && !j.empty_signed_sales) {
+                    eb += '<button type="button" onclick="signEmpty(\'sales\')" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Sales sign empty</button>';
+                }
+                if (j.empty_signed_workshop && j.empty_signed_sales) {
+                    eb += '<div class="text-green-400 text-sm">Empty check complete</div>';
+                }
+                document.getElementById('emptyCheckButtons').innerHTML = eb;
+            } else if (emptyBox) emptyBox.classList.add('hidden');
 
         } catch (err) {
             document.getElementById('loading').textContent = 'Could not load job details.';
@@ -819,6 +852,19 @@
         }
     }
 
+
+    async function signEmpty(party) {
+        if (!confirm('Confirm this tanker is empty — no water or liquid in the compartments or pipeline to the APIs?')) return;
+        const res = await fetch('/api/jobs/' + jobId + '/empty-sign', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ party: party })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.detail || 'Could not sign empty check'); return; }
+        loadJob();
+        if (typeof refreshBell === 'function') refreshBell();
+    }
 
     async function requestWash() {
         const notes = (document.getElementById('washNote').value || '').trim() || 'Wash for marketing photos';

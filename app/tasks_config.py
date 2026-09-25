@@ -46,8 +46,10 @@ def get_tasks_for_vehicle(main_type: str, year: str = None) -> list:
         {"task_name": "As Is – without Roadworthy", "description": "Sell as is. No roadworthy"},
     ]
 
+    from .lists_config import type_family
+    family = type_family(main_type)
     tasks = []
-    if main_type == "Tanker":
+    if family == "tanker":
         tasks.extend(tanker)
         try:
             vehicle_year = int(year) if year else 0
@@ -56,15 +58,19 @@ def get_tasks_for_vehicle(main_type: str, year: str = None) -> list:
         except (ValueError, TypeError):
             pass
         tasks.extend(common)
-    elif main_type == "Truck Tractor":
-        tasks.extend(common)
-        tasks.extend(truck)
-    elif main_type in ("Trailer", "Tipper"):
+        if main_type in ("Fuel Rigid", "Water Truck"):
+            tasks.extend(truck)
+    elif family == "trailer":
         tasks.extend(common)
         tasks.extend(trailer)
     else:
         tasks.extend(common)
         tasks.extend(truck)
+        if main_type == "Tipper Truck":
+            tasks.extend([
+                {"task_name": "Tipper bin / hydraulics check", "description": "Tipper cylinder, pipes and bin condition"},
+                {"task_name": "Crack repairs", "description": "Crack repairs on bin / body / chassis as required"},
+            ])
 
     tasks.extend(as_is)
     return tasks

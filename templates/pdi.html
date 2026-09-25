@@ -14,7 +14,8 @@
 {% block content %}
 <div id="loading" class="text-gray-400">Loading PDI...</div>
 <div id="content" class="hidden space-y-4">
-    <div class="bg-white rounded-xl shadow p-5">
+    <div class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div>
                 <h1 class="text-xl font-bold text-status-blue">Pre-Delivery Inspection (PDI)</h1>
@@ -23,11 +24,13 @@
             </div>
             <div class="text-sm" id="signStatus"></div>
         </div>
+        </div>
     </div>
 
     <div id="pdiSections" class="space-y-4"></div>
 
-    <div class="bg-white rounded-xl shadow p-5">
+    <div class="bg-white rounded-xl shadow">
+        <div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-3">Sign-off</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div class="p-3 bg-gray-50 rounded-lg">
@@ -41,6 +44,7 @@
         </div>
         <div id="signButtons" class="flex gap-2 flex-wrap"></div>
         <p class="text-xs text-gray-400 mt-3">Both Workshop and Sales must sign before the PDI is complete.</p>
+        </div>
     </div>
 
     <div class="flex gap-2">
@@ -115,7 +119,7 @@
 
             let html = '';
             Object.keys(sections).forEach(function(sec) {
-                html += '<div class="bg-white rounded-xl shadow p-4">' +
+                html += '<div class="bg-white rounded-xl shadow"><div class="glass-inner">' +
                     '<h3 class="font-semibold text-sm text-status-blue mb-3">' + sec + '</h3>' +
                     '<div class="space-y-3">';
                 sections[sec].forEach(function(it) {
@@ -137,7 +141,7 @@
                         'onchange="saveNote(' + it.id + ')">') +
                         '</div>';
                 });
-                html += '</div></div>';
+                html += '</div></div></div>';
             });
             document.getElementById('pdiSections').innerHTML = html;
 

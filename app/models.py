@@ -121,6 +121,13 @@ class JobCard(Base):
     ready_sales = Column(Boolean, default=False)
     ready_workshop = Column(Boolean, default=False)
 
+    empty_signed_workshop = Column(Boolean, default=False)
+    empty_signed_workshop_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    empty_signed_workshop_at = Column(DateTime(timezone=True), nullable=True)
+    empty_signed_sales = Column(Boolean, default=False)
+    empty_signed_sales_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    empty_signed_sales_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     created_by_user = relationship("User", back_populates="jobs_created", foreign_keys=[created_by])
     tasks = relationship("JobTask", back_populates="job_card", cascade="all, delete-orphan")

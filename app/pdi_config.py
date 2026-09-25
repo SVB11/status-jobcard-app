@@ -230,10 +230,10 @@ TRAILER_PDI = [
 
 
 def get_pdi_for_type(main_type: str):
-    main_type = (main_type or "").strip()
-    if main_type == "Tanker":
+    from .lists_config import type_family
+    family = type_family(main_type)
+    if family == "tanker":
         return TANKER_PDI
-    if main_type in ("Trailer", "Tipper"):
+    if family == "trailer":
         return TRAILER_PDI
-    # Truck Tractor and Other use the truck PDI
     return TRUCK_PDI

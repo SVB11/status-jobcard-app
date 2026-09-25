@@ -35,7 +35,7 @@
 <style>
 .g-filter { padding: 8px 14px; border-radius: 999px; border: 1px solid #2a3340; background: #11151c; color: #d5dde6; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .g-filter.on { background: #025daa; border-color: #025daa; color: #fff; }
-.g-card { display: block; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); border-radius: 14px; padding: 12px 16px 16px; color: #e8edf3; text-decoration: none; backdrop-filter: blur(22px) saturate(140%); -webkit-backdrop-filter: blur(22px) saturate(140%); box-shadow: 0 8px 24px rgba(0,0,0,0.2);  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000; }
+.g-card { display: block; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.22); border-radius: 18px; padding: 8px; color: #e8edf3; text-decoration: none; backdrop-filter: blur(20px) saturate(140%); -webkit-backdrop-filter: blur(20px) saturate(140%); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
 .g-card:hover { border-color: #025daa; }
 </style>
 <script>
@@ -105,7 +105,8 @@
         box.innerHTML = rows.map(function(j) {
             const accept = (role === 'workshop' || role === 'admin' || role === 'accounts') && j.status === 'Submitted to Workshop';
             return '<a class="g-card" href="/jobs/' + j.id + '">' +
-                (j.photo_url ? '<img class="stock-thumb mb-3" src="' + j.photo_url + '" alt="">' : '') +
+                (j.photo_url ? '<img class="stock-thumb mb-2" src="' + j.photo_url + '" alt="">' : '') +
+                '<div class="glass-inner">' +
                 '<div class="text-lg font-bold tracking-wide">' + (j.stock_number || j.job_number) + '</div>' +
                 '<div class="text-sm mt-1">' + (j.vehicle_description || '') + '</div>' +
                 '<div class="text-xs text-[#9aa6b4] mt-1 uppercase">' + (j.year || '') + (j.main_type ? ' · ' + j.main_type : '') + '</div>' +
@@ -114,7 +115,7 @@
                 '<span class="text-xs px-2 py-1 rounded ' + statusClass(j.status) + '">' + (j.status || '') + '</span>' +
                 '</div>' +
                 (accept ? '<div class="mt-3 text-xs uppercase tracking-wider text-[#7ec2ff]">Tap card then Accept on the job</div>' : '') +
-                '</a>';
+                '</div></a>';
         }).join('');
     }
 

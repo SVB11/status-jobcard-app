@@ -1,3 +1,40 @@
+MAIN_TYPES = [
+    "Fuel Tanker",
+    "Truck Tractor",
+    "Fuel Rigid",
+    "Rigid (other)",
+    "Side Tipper",
+    "Tautliner",
+    "Tipper Truck",
+    "Trailer (other)",
+    "Water Truck",
+    "Flatdeck",
+    "Drawbar (fuel)",
+    "HFO Tanker",
+    "LPG Gas Tanker",
+    "Tanker (other)",
+]
+
+TANKER_TYPES = {
+    "Fuel Tanker", "HFO Tanker", "LPG Gas Tanker", "Drawbar (fuel)",
+    "Tanker (other)", "Fuel Rigid", "Water Truck", "Tanker",
+}
+TRUCK_TYPES = {
+    "Truck Tractor", "Rigid (other)", "Tipper Truck", "Other",
+}
+TRAILER_TYPES = {
+    "Side Tipper", "Tautliner", "Trailer (other)", "Flatdeck", "Trailer", "Tipper",
+}
+
+def type_family(main_type: str) -> str:
+    name = (main_type or "").strip()
+    low = name.lower()
+    if name in TANKER_TYPES or "tanker" in low or "drawbar" in low or name in ("Water Truck", "Fuel Rigid"):
+        return "tanker"
+    if name in TRAILER_TYPES or "trailer" in low or "tautliner" in low or "flatdeck" in low or "side tipper" in low:
+        return "trailer"
+    return "truck"
+
 LOCATIONS = [
     "Yard",
     "Bay 1 Reuben",
