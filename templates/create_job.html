@@ -39,8 +39,8 @@
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Vehicle Description *</label>
-                    <input type="text" name="vehicle_description" required placeholder="e.g. Scania G460 Fuel Tanker"
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Make and Model *</label>
+                    <input type="text" name="vehicle_description" required placeholder="e.g. Scania G460"
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
                 </div>
                 <div>
@@ -66,7 +66,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Sub-type *</label>
-                    <input type="text" name="sub_type" required placeholder="e.g. fuel tanker, tautliner"
+                    <input type="text" name="sub_type" required placeholder="e.g. tri axle, superlink, interlink"
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none">
                 </div>
                 <div>
@@ -85,10 +85,17 @@
 
         <div id="purposeBox" class="hidden">
             <h2 class="text-lg font-semibold text-status-blue border-b pb-2 mb-4">Job type</h2>
-            <select name="job_purpose" id="job_purpose" class="w-full px-3 py-2 border rounded-lg" onchange="togglePurpose()">
-                <option value="sold">Sold vehicle — ready for delivery</option>
-                <option value="showroom">Showroom stock — refurb / service to park on the floor</option>
-            </select>
+            <input type="hidden" name="job_purpose" id="job_purpose" value="sold">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button type="button" id="btnSold" onclick="setPurpose('sold')"
+                    class="min-h-[64px] rounded-xl border-2 border-[#025daa] bg-[#025daa] text-white font-semibold uppercase tracking-wide px-4 py-3">
+                    Sold vehicle job
+                </button>
+                <button type="button" id="btnShowroom" onclick="setPurpose('showroom')"
+                    class="min-h-[64px] rounded-xl border-2 border-[#7ec2ff] bg-transparent text-[#7ec2ff] font-semibold uppercase tracking-wide px-4 py-3">
+                    Showroom job
+                </button>
+            </div>
             <p id="purposeNote" class="hidden text-sm text-orange-400 mt-2">Showroom jobs wait for admin approval before workshop can start.</p>
         </div>
 
@@ -210,22 +217,29 @@
         }
     }
 
-    function togglePurpose() {
-        const purpose = document.getElementById('job_purpose').value;
+    function setPurpose(purpose) {
+        document.getElementById('job_purpose').value = purpose;
         const note = document.getElementById('purposeNote');
         const btn = document.getElementById('submitBtn');
         const client = document.querySelector('[name="client_name"]');
+        const sold = document.getElementById('btnSold');
+        const show = document.getElementById('btnShowroom');
         if (purpose === 'showroom') {
             note.classList.remove('hidden');
             btn.textContent = 'Submit showroom job for admin approval';
             if (client && !client.value) client.value = 'Showroom';
             client.required = false;
+            show.className = 'min-h-[64px] rounded-xl border-2 border-[#025daa] bg-[#025daa] text-white font-semibold uppercase tracking-wide px-4 py-3';
+            sold.className = 'min-h-[64px] rounded-xl border-2 border-[#7ec2ff] bg-transparent text-[#7ec2ff] font-semibold uppercase tracking-wide px-4 py-3';
         } else {
             note.classList.add('hidden');
             btn.textContent = 'Submit Job Card to Workshop';
             client.required = true;
+            sold.className = 'min-h-[64px] rounded-xl border-2 border-[#025daa] bg-[#025daa] text-white font-semibold uppercase tracking-wide px-4 py-3';
+            show.className = 'min-h-[64px] rounded-xl border-2 border-[#7ec2ff] bg-transparent text-[#7ec2ff] font-semibold uppercase tracking-wide px-4 py-3';
         }
     }
+    function togglePurpose() { setPurpose(document.getElementById('job_purpose').value); }
 
     function logout() {
         localStorage.clear();
