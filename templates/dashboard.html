@@ -174,48 +174,57 @@
         window.location.href = '/login';
     } else {
         const name = localStorage.getItem('full_name') || 'User';
-        const role = localStorage.getItem('role') || '';
-        if (role === 'supplier') { window.location.href = '/supplier'; return; }
+        const role = (localStorage.getItem('role') || '').toLowerCase();
+        if (role === 'supplier') {
+            window.location.href = '/supplier';
+        } else {
         const isAdmin = (role === 'admin' || role === 'accounts');
-        document.getElementById('userInfo').textContent = `${name} (${role})`;
+        const userInfo = document.getElementById('userInfo');
+        if (userInfo) userInfo.textContent = name + ' (' + role + ')';
+        function show(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.remove('hidden');
+        }
         if (isAdmin) {
-            document.getElementById('adminCard').classList.remove('hidden');
-            document.getElementById('adminTpCard').classList.remove('hidden');
-            document.getElementById('pendingExtrasBox').classList.remove('hidden');
+            show('adminCard');
+            show('adminTpCard');
+            show('pendingExtrasBox');
             loadPendingExtras();
             setInterval(loadPendingExtras, 10000);
-            document.getElementById('supplierDashBox').classList.remove('hidden');
+            show('supplierDashBox');
             loadSupplierDash();
             if ((name || '').toLowerCase() === 'sebastian van biljon') {
-                document.getElementById('workshopCountBox').classList.remove('hidden');
+                show('workshopCountBox');
                 loadWorkshopCounts();
             }
-            document.getElementById('jobBookingsBox').classList.remove('hidden');
-            document.getElementById('partsDashBox').classList.remove('hidden');
-            document.getElementById('suppliesDashBox').classList.remove('hidden');
+            show('jobBookingsBox');
+            show('partsDashBox');
+            show('suppliesDashBox');
             loadJobBookings();
             loadPartsDash();
             loadSuppliesDash();
-            document.getElementById('systemStatusBox').classList.remove('hidden');
-            document.getElementById('workshopCard').classList.remove('hidden');
-            document.getElementById('createCard').classList.remove('hidden');
-            document.getElementById('stockCard').classList.remove('hidden');
-            document.getElementById('stockDashBox').classList.remove('hidden');
+            show('systemStatusBox');
+            show('workshopCard');
+            show('createCard');
+            show('stockCard');
+            show('stockDashBox');
             loadStockDash();
-            document.getElementById('allJobsBox').classList.remove('hidden');
-            document.getElementById('updateReqBox').classList.remove('hidden');
-            document.getElementById('notifyBox').classList.remove('hidden');
+            show('allJobsBox');
+            show('updateReqBox');
+            show('notifyBox');
+            show('bookingsBox');
             loadUpdateRequests();
             loadNotifications();
             loadJobList('/api/jobs', 'allJobsList');
+            loadBookings();
         }
         if (role === 'sales') {
-            document.getElementById('createCard').classList.remove('hidden');
-            document.getElementById('myJobsBox').classList.remove('hidden');
-            document.getElementById('allJobsBox').classList.remove('hidden');
-            document.getElementById('bookingsBox').classList.remove('hidden');
-            document.getElementById('notifyBox').classList.remove('hidden');
-            document.getElementById('updateReqBox').classList.remove('hidden');
+            show('createCard');
+            show('myJobsBox');
+            show('allJobsBox');
+            show('bookingsBox');
+            show('notifyBox');
+            show('updateReqBox');
             loadUpdateRequests();
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
@@ -223,18 +232,18 @@
             loadNotifications();
         }
         if (role === 'workshop') {
-            document.getElementById('workshopCard').classList.remove('hidden');
-            document.getElementById('createCard').classList.remove('hidden');
-            document.getElementById('stockCard').classList.remove('hidden');
-            document.getElementById('stockDashBox').classList.remove('hidden');
+            show('workshopCard');
+            show('createCard');
+            show('stockCard');
+            show('stockDashBox');
             loadStockDash();
-            document.getElementById('supplierDashBox').classList.remove('hidden');
+            show('supplierDashBox');
             loadSupplierDash();
-            document.getElementById('bookingsBox').classList.remove('hidden');
-            document.getElementById('partsDashBox').classList.remove('hidden');
-            document.getElementById('suppliesDashBox').classList.remove('hidden');
-            document.getElementById('notifyBox').classList.remove('hidden');
-            document.getElementById('updateReqBox').classList.remove('hidden');
+            show('bookingsBox');
+            show('partsDashBox');
+            show('suppliesDashBox');
+            show('notifyBox');
+            show('updateReqBox');
             loadBookings();
             loadPartsDash();
             loadUpdateRequests();
@@ -242,22 +251,16 @@
             loadNotifications();
         }
         if (role === 'stock') {
-            document.getElementById('stockCard').classList.remove('hidden');
-            document.getElementById('stockDashBox').classList.remove('hidden');
-            document.getElementById('notifyBox').classList.remove('hidden');
+            show('stockCard');
+            show('stockDashBox');
+            show('notifyBox');
             loadStockDash();
             loadNotifications();
         }
-        if (isAdmin) {
-            const bb = document.getElementById('bookingsBox');
-            if (bb) { bb.classList.remove('hidden'); loadBookings(); }
-        }
-        
-        if (localStorage.getItem('must_change_password') === '1') {
-            document.getElementById('firstLoginBox').classList.remove('hidden');
-        }
+        if (localStorage.getItem('must_change_password') === '1') show('firstLoginBox');
         loadLocationBoard();
         loadPdiFails();
+        }
     }
 
     async function loadJobBookings() {

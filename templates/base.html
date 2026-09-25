@@ -92,6 +92,8 @@
             <div class="flex items-center gap-3 flex-wrap justify-end uppercase text-xs tracking-wider">
                 <a href="/dashboard" class="text-[#7ec2ff] font-semibold">Dashboard</a>
                 <a href="/jobs" class="text-[#7ec2ff] font-semibold">Jobs</a>
+                <a href="/admin/users" id="navUsers" class="hidden text-[#7ec2ff] font-semibold">Users</a>
+                <a href="/admin/third-parties" id="navTp" class="hidden text-[#7ec2ff] font-semibold">3rd Parties</a>
                 <a href="/stock" id="navStock" class="hidden text-[#7ec2ff] font-semibold">Workshop stock</a>
                 <a href="/supplier" id="navSupplier" class="hidden text-[#7ec2ff] font-semibold">Supplier jobs</a>
                 <a href="/jobs/create" class="text-white bg-status-blue px-3 py-2 rounded-lg font-semibold">Create</a>
@@ -149,11 +151,15 @@
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
     }
     (function(){
-        var r = localStorage.getItem('role') || '';
+        var r = (localStorage.getItem('role') || '').toLowerCase();
         var el = document.getElementById('navStock');
         if (el && ['stock','workshop','admin','accounts'].indexOf(r) !== -1) el.classList.remove('hidden');
         var s = document.getElementById('navSupplier');
         if (s && r === 'supplier') s.classList.remove('hidden');
+        var u = document.getElementById('navUsers');
+        var t = document.getElementById('navTp');
+        if (u && (r === 'admin' || r === 'accounts')) u.classList.remove('hidden');
+        if (t && (r === 'admin' || r === 'accounts')) t.classList.remove('hidden');
     })();
     </script>
     {% block scripts %}{% endblock %}
