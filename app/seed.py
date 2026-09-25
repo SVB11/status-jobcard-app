@@ -20,6 +20,8 @@ STAFF = [
     ("sebastian", "Sebastian van Biljon", "admin", "Sebastian123"),
     # Accounts
     ("cindy", "Cindy van Biljon", "accounts", "Cindy123"),
+    # Stock taker — workshop keep-on-hand orders
+    ("william", "William", "stock", "William123"),
     # Keep a system admin login
     ("admin", "System Admin", "admin", "admin123"),
 ]

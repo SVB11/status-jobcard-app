@@ -9,6 +9,8 @@ class UserRole(str, enum.Enum):
     WORKSHOP = "workshop"
     ACCOUNTS = "accounts"
     ADMIN = "admin"
+    STOCK = "stock"
+    SUPPLIER = "supplier"
 
 class JobStatus(str, enum.Enum):
     SUBMITTED = "Submitted to Workshop"
@@ -45,7 +47,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     password_plain = Column(String, nullable=True)
     must_change_password = Column(Boolean, default=True)
-    role = Column(String, nullable=False)  # sales, workshop, accounts, admin
+    role = Column(String, nullable=False)  # sales, workshop, accounts, admin, stock, supplier
+    supplier_company = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -278,4 +281,42 @@ class PushSubscription(Base):
     endpoint = Column(String, nullable=False, unique=True)
     p256dh = Column(String, nullable=False)
     auth = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class SupplierUpdate(Base):
+    __tablename__ = "supplier_updates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("job_tasks.id"), nullable=True)
+    company = Column(String, nullable=False)
+    status = Column(String, default="Booked")
+    work_doing = Column(Text, nullable=True)
+    parts_needed = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    photo_path = Column(String, nullable=True)
+    workshop_parts_decision = Column(String, nullable=True)
+    workshop_parts_note = Column(Text, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class WorkshopStockOrder(Base):
+    """Keep-on-hand workshop stock requested by the stock controller."""
+    __tablename__ = "workshop_stock_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    description = Column(String, nullable=False)
+    quantity = Column(String, default="1")
+    notes = Column(Text, nullable=True)
+    status = Column(String, default="To be ordered")
+    created_by_name = Column(String, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    ordered_date = Column(String, nullable=True)
+    supplier_invoice = Column(String, nullable=True)
+    stock_received_by = Column(String, nullable=True)
+    stock_received_at = Column(DateTime(timezone=True), nullable=True)
+    workshop_received_by = Column(String, nullable=True)
+    workshop_received_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

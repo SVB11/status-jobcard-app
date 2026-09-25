@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Workshop stock{% endblock %}
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-300"></span>
+    <button onclick="logout()" class="text-sm text-red-400 hover:underline">Logout</button>
+</div>
+{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-1 uppercase tracking-widest">Workshop keep-on-hand stock</h1>
+<p class="text-sm text-[#9aa6b4] mb-6">Stock controller lists what is running low. Workshop orders it and updates status. Both must sign Received before it closes.</p>
+<div id="addBox" class="hidden rounded-xl p-4 mb-6 border border-[#2a3340] bg-[#12161c] space-y-2">
+    <div class="text-xs font-semibold uppercase text-[#7ec2ff]">Add item to order</div>
+    <input id="stDesc" class="w-full px-3 py-2 rounded bg-[#07090c] border border-[#2a3340] text-sm" placeholder="Part / accessory description *">
+    <div class="grid grid-cols-2 gap-2">
+        <input id="stQty" type="number" min="1" value="1" class="px-3 py-2 rounded bg-[#07090c] border border-[#2a3340] text-sm" placeholder="Qty">
+        <input id="stNotes" class="px-3 py-2 rounded bg-[#07090c] border border-[#2a3340] text-sm" placeholder="Notes (optional)">
+    </div>
+    <button type="button" onclick="addStock()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Add to order list</button>
+</div>
+<div id="openList" class="space-y-3 mb-8"></div>
+<h2 class="font-bold uppercase tracking-widest text-sm mb-2">Closed</h2>
+<div id="closedList" class="space-y-2 text-sm"></div>
+<script>
+    const token = localStorage.getItem('token');
+    const role = localStorage.getItem('role') || '';
+    const userId = localStorage.getItem('user_id');
+    const fullName = localStorage.getItem('full_name') || '';
+    if (!token) location.href = '/login';
+    if (!['stock','workshop','admin','accounts'].includes(role)) {
+        alert('This tab is only for the stock controller and workshop.');
+        location.href = '/dashboard';
+    }
+    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+    if (role === 'stock' || role === 'admin' || role === 'accounts') document.getElementById('addBox').classList.remove('hidden');
+
+    function auth() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
+    function bodyExtra(extra) {
+        return JSON.stringify(Object.assign({ role: role, user_id: userId ? parseInt(userId) : null, full_name: fullName }, extra || {}));
+    }
+
+    async function loadStock() {
+        const data = await (await fetch('/api/stock-orders', { headers: auth() })).json();
+        const rows = data.orders || [];
+        const open = rows.filter(function(r){ return r.status !== 'Closed'; });
+        const closed = rows.filter(function(r){ return r.status === 'Closed'; });
+        document.getElementById('openList').innerHTML = open.length ? open.map(card).join('') : '<p class="text-[#6b7683]">Nothing to order</p>';
+        document.getElementById('closedList').innerHTML = closed.length ? closed.map(function(r){
+            return '<div class="p-3 rounded border border-[#2a3340]">' + r.description + ' × ' + r.quantity + ' — signed ' + (r.stock_received_by||'') + ' / ' + (r.workshop_received_by||'') + '</div>';
+        }).join('') : '<p class="text-[#6b7683]">None closed yet</p>';
+    }
+
+    function card(r) {
+        const canWs = role === 'workshop' || role === 'admin' || role === 'accounts';
+        const canStock = role === 'stock' || role === 'admin' || role === 'accounts';
+        let html = '<div class="rounded-xl p-4 border border-[#2a3340] bg-[#12161c]">';
+        html += '<div class="font-semibold">' + r.description + ' × ' + (r.quantity||'1') + '</div>';
+        html += '<div class="text-xs text-[#9aa6b4] mb-2">Requested by ' + (r.created_by_name||'') + ' — ' + r.status + (r.notes ? ' — ' + r.notes : '') + '</div>';
+        if (canWs || canStock) {
+            html += '<div class="flex flex-wrap gap-2 mb-2">';
+            html += '<select id="st'+r.id+'" class="text-xs px-2 py-1 rounded bg-[#07090c] border border-[#2a3340]">';
+            ['To be ordered','Ordered','Waiting for delivery','Received'].forEach(function(s){
+                html += '<option'+(r.status===s?' selected':'')+'>'+s+'</option>';
+            });
+            html += '</select>';
+            html += '<input id="dt'+r.id+'" type="date" value="'+(r.ordered_date||'')+'" class="text-xs px-2 py-1 rounded bg-[#07090c] border border-[#2a3340]">';
+            html += '<input id="inv'+r.id+'" placeholder="Supplier invoice" value="'+(r.supplier_invoice||'')+'" class="text-xs px-2 py-1 rounded bg-[#07090c] border border-[#2a3340]">';
+            html += '<button type="button" onclick="saveStatus('+r.id+')" class="text-xs px-3 py-1 bg-[#025daa] text-white rounded">Save status</button>';
+            html += '</div>';
+        }
+        html += '<div class="text-xs mb-2">Stock signed received: ' + (r.stock_received_by || '—') + ' &nbsp;|&nbsp; Workshop signed received: ' + (r.workshop_received_by || '—') + '</div>';
+        if (canStock && !r.stock_received_by) html += '<button type="button" onclick="signRecv('+r.id+')" class="text-xs px-3 py-1 bg-orange-600 text-white rounded mr-2">Stock controller sign received</button>';
+        if (role === 'workshop' && !r.workshop_received_by) html += '<button type="button" onclick="signRecv('+r.id+')" class="text-xs px-3 py-1 bg-green-700 text-white rounded">Workshop sign received</button>';
+        html += '</div>';
+        return html;
+    }
+
+    async function addStock() {
+        const res = await fetch('/api/stock-orders', { method:'POST', headers: auth(), body: bodyExtra({
+            description: document.getElementById('stDesc').value,
+            quantity: document.getElementById('stQty').value,
+            notes: document.getElementById('stNotes').value
+        })});
+        const data = await res.json().catch(function(){return {};});
+        if (!res.ok) { alert(data.detail || 'Could not add'); return; }
+        document.getElementById('stDesc').value = '';
+        document.getElementById('stNotes').value = '';
+        loadStock();
+    }
+    async function saveStatus(id) {
+        await fetch('/api/stock-orders/'+id+'/status', { method:'POST', headers: auth(), body: bodyExtra({
+            status: document.getElementById('st'+id).value,
+            ordered_date: document.getElementById('dt'+id).value,
+            supplier_invoice: document.getElementById('inv'+id).value
+        })});
+        loadStock();
+    }
+    async function signRecv(id) {
+        await fetch('/api/stock-orders/'+id+'/sign-received', { method:'POST', headers: auth(), body: bodyExtra({}) });
+        loadStock();
+    }
+    function logout(){ localStorage.clear(); location.href='/login'; }
+    loadStock();
+</script>
+{% endblock %}

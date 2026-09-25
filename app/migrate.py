@@ -5,6 +5,7 @@ NEW_COLUMNS = {
     "users": {
         "password_plain": "VARCHAR",
         "must_change_password": "BOOLEAN",
+        "supplier_company": "VARCHAR",
     },
     "job_cards": {
         "vin_number": "VARCHAR",
@@ -41,6 +42,9 @@ NEW_COLUMNS = {
         "approved_by_name": "VARCHAR",
         "test_result": "VARCHAR",
         "fail_list": "TEXT",
+    },
+    "supplier_updates": {
+        "photo_path": "VARCHAR",
     },
 }
 

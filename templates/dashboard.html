@@ -15,6 +15,12 @@
     <p class="text-gray-500">Welcome to the Status Truck Sales Job Card System</p>
 </div>
 
+<div id="pendingExtrasBox" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg text-amber-800 mb-1 uppercase">Extras waiting for your approval <span id="pendingExtrasCount"></span></h2>
+    <p class="text-sm text-amber-700 mb-4">Shows here as soon as workshop adds extra work. Approve without opening the job.</p>
+    <div id="pendingExtrasList" class="space-y-2 text-sm">Loading...</div>
+</div>
+
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
     <a href="/jobs/create" id="createCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-status-blue">
         <div class="text-status-blue font-bold text-lg mb-1">Create Job Card</div>
@@ -32,17 +38,28 @@
         <div class="text-purple-600 font-bold text-lg mb-1">User Management</div>
         <p class="text-sm text-gray-500">Add staff and assign roles (Admin only)</p>
     </a>
+    <a href="/stock" id="stockCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-cyan-500">
+        <div class="text-cyan-600 font-bold text-lg mb-1">Workshop stock to order</div>
+        <p class="text-sm text-gray-500">Keep-on-hand parts and accessories. Stock controller + workshop both sign received.</p>
+    </a>
     <a href="/admin/third-parties" id="adminTpCard" class="hidden bg-white rounded-xl shadow p-6 hover:shadow-md transition border-l-4 border-orange-500">
         <div class="text-orange-600 font-bold text-lg mb-1">3rd Party list</div>
         <p class="text-sm text-gray-500">Add companies and their test category</p>
     </a>
 </div>
 
-<div id="pendingExtrasBox" class="hidden bg-amber-50 border border-amber-300 rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg text-amber-800 mb-1">Extra work waiting for approval</h2>
-    <p class="text-sm text-amber-700 mb-4">Approve here without opening each job card.</p>
-    <div id="pendingExtrasList" class="space-y-2 text-sm">Loading...</div>
+<div id="supplierDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1 uppercase">Supplier updates</h2>
+    <p class="text-sm text-gray-500 mb-4">PFT / FK notes. Parts listed here are a workshop note only — not a Chantelle order.</p>
+    <div id="supplierDashList" class="space-y-2 text-sm">Loading...</div>
 </div>
+<div id="workshopCountBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+    <h2 class="font-bold text-lg mb-1 uppercase">Workshop update counts</h2>
+    <p class="text-sm text-gray-500 mb-4">How many times each workshop user updated a job.</p>
+    <div id="workshopCountList" class="space-y-3 text-sm">Loading...</div>
+</div>
+
+
 
 <div id="myJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">My job cards</h2>
@@ -75,6 +92,12 @@
     <h2 class="font-bold text-lg mb-1">HOSES / COUPLERS / SUZI</h2>
     <p class="text-sm text-gray-500 mb-4">Booked and completed supply items on open job cards.</p>
     <div id="suppliesDashList" class="space-y-2 text-sm">Loading...</div>
+</div>
+<div id="stockDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8 border-2 border-cyan-600">
+    <h2 class="font-bold text-lg mb-1">WORKSHOP STOCK TO ORDER</h2>
+    <p class="text-sm text-gray-500 mb-4">Keep-on-hand items. Open the tab to update ordered / received and sign off.</p>
+    <div id="stockDashList" class="space-y-2 text-sm">Loading...</div>
+    <a href="/stock" class="inline-block mt-3 text-sm text-status-blue font-semibold">Open workshop stock tab</a>
 </div>
 <div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
@@ -123,18 +146,22 @@
         <li>✅ Workshop extras, location board, permanent updates</li>
     </ul>
     <h3 class="font-semibold text-sm mb-2">Backup</h3>
-    <p class="text-xs text-gray-500 mb-2">Download these to the office PC every week. Keep the .db file safe. That file is the job cards and logins.</p>
+    <p class="text-xs text-gray-500 mb-2">Full zip saves EVERY job and EVERY update from sales, workshop, admin, accounts, stock and suppliers. PDI, tasks, extras, parts, supplies, notes, photos. File name includes today so it does not replace last week. Restore puts missing jobs back. Jobs still open on the app stay.</p>
     <div class="flex flex-wrap gap-2 mb-4">
-        <button type="button" onclick="downloadBackup('/api/admin/backup-pack.zip', 'sts_jobcards_backup.zip')" class="px-3 py-2 bg-green-700 text-white text-sm rounded">DOWNLOAD FULL BACKUP (ZIP)</button>
-        <button type="button" onclick="downloadBackup('/api/admin/backup.db', 'status_jobcard_backup.db')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download database (.db)</button>
-        <button type="button" onclick="downloadBackup('/api/admin/export/jobs.csv', 'jobcards_backup.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download job list (CSV)</button>
+        <button type="button" onclick="downloadBackup('/api/admin/backup-pack.zip', datedName('STS_full_backup', 'zip'))" class="px-3 py-2 bg-green-700 text-white text-sm rounded">DOWNLOAD FULL BACKUP (ZIP)</button>
+        <button type="button" onclick="downloadBackup('/api/admin/backup.db', datedName('status_jobcard_backup', 'db'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download database (.db)</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/jobs.csv', datedName('jobcards', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Download job list (CSV)</button>
     </div>
-    <h3 class="font-semibold text-sm mb-2">Download data (CSV)</h3>
-    <p class="text-xs text-gray-500 mb-2">Use these files to collect extras and parts for later dropdown lists.</p>
+    <div class="mb-4">
+        <label class="block text-xs font-semibold mb-1">Put backup back on the app (does not wipe jobs that are still open)</label>
+        <input type="file" id="restoreFile" accept=".zip,.json" class="text-sm mb-2">
+        <button type="button" onclick="restoreBackup()" class="px-3 py-2 bg-[#b91c1c] text-white text-sm rounded">RESTORE FROM FILE</button>
+    </div>
+    <h3 class="font-semibold text-sm mb-2">Download separately (dated)</h3>
     <div class="flex flex-wrap gap-2">
-        <button type="button" onclick="downloadBackup('/api/admin/export/extras.csv', 'workshop_extras.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Workshop extras CSV</button>
-        <button type="button" onclick="downloadBackup('/api/admin/export/parts.csv', 'parts.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</button>
-        <button type="button" onclick="downloadBackup('/api/admin/export/custom-tasks.csv', 'manual_tasks.csv')" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/extras.csv', datedName('workshop_extras', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Workshop extras CSV</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/custom-tasks.csv', datedName('manual_tasks', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</button>
+        <button type="button" onclick="downloadBackup('/api/admin/export/parts.csv', datedName('parts', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</button>
     </div>
 </div>
 {% endblock %}
@@ -148,6 +175,7 @@
     } else {
         const name = localStorage.getItem('full_name') || 'User';
         const role = localStorage.getItem('role') || '';
+        if (role === 'supplier') { window.location.href = '/supplier'; return; }
         const isAdmin = (role === 'admin' || role === 'accounts');
         document.getElementById('userInfo').textContent = `${name} (${role})`;
         if (isAdmin) {
@@ -155,6 +183,13 @@
             document.getElementById('adminTpCard').classList.remove('hidden');
             document.getElementById('pendingExtrasBox').classList.remove('hidden');
             loadPendingExtras();
+            setInterval(loadPendingExtras, 10000);
+            document.getElementById('supplierDashBox').classList.remove('hidden');
+            loadSupplierDash();
+            if ((name || '').toLowerCase() === 'sebastian van biljon') {
+                document.getElementById('workshopCountBox').classList.remove('hidden');
+                loadWorkshopCounts();
+            }
             document.getElementById('jobBookingsBox').classList.remove('hidden');
             document.getElementById('partsDashBox').classList.remove('hidden');
             document.getElementById('suppliesDashBox').classList.remove('hidden');
@@ -164,6 +199,9 @@
             document.getElementById('systemStatusBox').classList.remove('hidden');
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
+            document.getElementById('stockCard').classList.remove('hidden');
+            document.getElementById('stockDashBox').classList.remove('hidden');
+            loadStockDash();
             document.getElementById('allJobsBox').classList.remove('hidden');
             document.getElementById('updateReqBox').classList.remove('hidden');
             document.getElementById('notifyBox').classList.remove('hidden');
@@ -187,6 +225,11 @@
         if (role === 'workshop') {
             document.getElementById('workshopCard').classList.remove('hidden');
             document.getElementById('createCard').classList.remove('hidden');
+            document.getElementById('stockCard').classList.remove('hidden');
+            document.getElementById('stockDashBox').classList.remove('hidden');
+            loadStockDash();
+            document.getElementById('supplierDashBox').classList.remove('hidden');
+            loadSupplierDash();
             document.getElementById('bookingsBox').classList.remove('hidden');
             document.getElementById('partsDashBox').classList.remove('hidden');
             document.getElementById('suppliesDashBox').classList.remove('hidden');
@@ -196,6 +239,13 @@
             loadPartsDash();
             loadUpdateRequests();
             loadSuppliesDash();
+            loadNotifications();
+        }
+        if (role === 'stock') {
+            document.getElementById('stockCard').classList.remove('hidden');
+            document.getElementById('stockDashBox').classList.remove('hidden');
+            document.getElementById('notifyBox').classList.remove('hidden');
+            loadStockDash();
             loadNotifications();
         }
         if (isAdmin) {
@@ -233,6 +283,11 @@
         }
     }
 
+    function datedName(prefix, ext) {
+        const d = new Date();
+        const stamp = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        return prefix + '_' + stamp + '.' + ext;
+    }
     async function downloadBackup(url, filename) {
         const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
         if (!res.ok) { alert('Could not download backup. Log in as Admin.'); return; }
@@ -242,6 +297,22 @@
         a.download = filename;
         a.click();
     }
+    async function restoreBackup() {
+        const f = document.getElementById('restoreFile').files[0];
+        if (!f) { alert('Choose the dated backup zip first'); return; }
+        if (!confirm('Restore missing jobs from this file? Open jobs already on the app will stay.')) return;
+        const fd = new FormData();
+        fd.append('file', f);
+        const res = await fetch('/api/admin/restore', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') },
+            body: fd
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Restore failed'); return; }
+        alert('Restored ' + data.restored + ' jobs. Already on app: ' + data.skipped_already_on_app);
+        location.reload();
+    }
 
     async function loadPendingExtras() {
         try {
@@ -249,6 +320,8 @@
             const data = await res.json();
             const rows = data.tasks || [];
             const box = document.getElementById('pendingExtrasList');
+            const cnt = document.getElementById('pendingExtrasCount');
+            if (cnt) cnt.textContent = rows.length ? '(' + rows.length + ')' : '';
             if (!rows.length) { box.innerHTML = '<p class="text-amber-600">No extras waiting</p>'; return; }
             box.innerHTML = rows.map(function(t) {
                 return '<div class="p-3 bg-white border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
@@ -385,6 +458,68 @@
         }
     }
 
+    async function loadSupplierDash() {
+        try {
+            const res = await fetch('/api/supplier-updates', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const box = document.getElementById('supplierDashList');
+            const rows = data.updates || [];
+            if (!box) return;
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No supplier updates yet</p>'; return; }
+            box.innerHTML = rows.map(function(u) {
+                let html = '<div class="p-3 rounded-lg border border-[#2a3340]"><div class="font-semibold">' + (u.stock_number||'') + ' · ' + (u.company||'') + ' — ' + u.status + '</div>';
+                if (u.work_doing) html += '<div class="text-xs">Work: ' + u.work_doing + '</div>';
+                if (u.parts_needed) html += '<div class="text-xs text-orange-400">Parts needed: ' + u.parts_needed + '</div>';
+                if (u.note) html += '<div class="text-xs">Note: ' + u.note + '</div>';
+                if (u.photo_path) html += '<div class="mt-1"><a href="'+u.photo_path+'" target="_blank"><img src="'+u.photo_path+'" class="max-h-28 rounded"></a></div>';
+                html += '<div class="text-xs text-gray-500">' + (u.created_by_name||'') + '</div>';
+                if (u.parts_needed && !u.workshop_parts_decision) {
+                    html += '<div class="flex flex-wrap gap-2 mt-2"><button type="button" onclick="supDecide('+u.id+',\'workshop_assist\')" class="text-xs px-3 py-2 bg-[#025daa] text-white rounded">Workshop can assist</button><button type="button" onclick="supDecide('+u.id+',\'supplier_supply\')" class="text-xs px-3 py-2 bg-[#2a3340] text-white rounded">Supplier must supply</button></div>';
+                } else if (u.workshop_parts_decision) {
+                    html += '<div class="text-xs text-green-400 mt-1">' + (u.workshop_parts_decision === 'workshop_assist' ? 'Workshop will assist' : 'Supplier must supply') + '</div>';
+                }
+                html += '</div>';
+                return html;
+            }).join('');
+        } catch (err) {}
+    }
+    async function supDecide(id, decision) {
+        await fetch('/api/supplier-updates/'+id+'/workshop', {
+            method:'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workshop_parts_decision: decision })
+        });
+        loadSupplierDash();
+    }
+
+    async function loadWorkshopCounts() {
+        try {
+            const res = await fetch('/api/admin/workshop-counts', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const box = document.getElementById('workshopCountList');
+            const rows = data.workshop || [];
+            if (!box) return;
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No workshop users</p>'; return; }
+            box.innerHTML = rows.map(function(u) {
+                return '<div class="p-3 rounded-lg border border-[#2a3340] font-semibold">' + u.name + ' — ' + u.total + ' updates</div>';
+            }).join('');
+        } catch (err) {}
+    }
+
+    async function loadStockDash() {
+        try {
+            const res = await fetch('/api/stock-orders', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const rows = (data.orders || []).filter(function(r){ return r.status !== 'Closed'; });
+            const box = document.getElementById('stockDashList');
+            if (!box) return;
+            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open stock orders</p>'; return; }
+            box.innerHTML = rows.map(function(r){
+                return '<a href="/stock" class="block p-3 bg-gray-50 rounded-lg"><div class="font-medium">' + r.description + ' × ' + (r.quantity||'1') + '</div><div class="text-xs text-gray-500">' + r.status + ' — ' + (r.created_by_name||'') + '</div></a>';
+            }).join('');
+        } catch (err) {}
+    }
+
     async function loadUpdateRequests() {
         try {
             const res = await fetch('/api/update-requests', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
@@ -411,12 +546,24 @@
             const res = await fetch('/api/notifications?user_id=' + uid, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             const data = await res.json();
             const rows = data.notifications || [];
+            const unread = data.unread || rows.filter(function(n){ return !n.is_read; }).length;
+            if (navigator.setAppBadge) {
+                if (unread) navigator.setAppBadge(unread);
+                else if (navigator.clearAppBadge) navigator.clearAppBadge();
+            }
             const box = document.getElementById('notifyList');
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No notifications</p>'; return; }
             box.innerHTML = rows.map(function(n) {
-                return '<div class="p-2 bg-gray-50 rounded">' + n.message +
-                    '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + '</div></div>';
+                return '<div class="p-2 bg-gray-50 rounded ' + (n.is_read ? '' : 'border border-[#025daa]') + '">' + n.message +
+                    '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + (n.is_read ? '' : ' · new') + '</div></div>';
             }).join('');
+            fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: parseInt(uid) })
+            }).then(function(){
+                if (navigator.clearAppBadge) navigator.clearAppBadge();
+            }).catch(function(){});
         } catch (err) {}
     }
 

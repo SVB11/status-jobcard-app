@@ -49,6 +49,31 @@
         a { color: #7ec2ff; }
         .bg-blue-50, .bg-amber-50, .bg-red-50, .bg-green-50 { background-color: #161b22 !important; }
         #tasksList, #partsSection, #thirdPartySection, #workshopExtras { scroll-margin-top: 80px; }
+        #tasksList button, #actionButtons button {
+            background: #025daa !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            min-height: 44px;
+            padding: 10px 14px !important;
+            border-radius: 8px;
+        }
+        #tasksList button.task-off {
+            background: #2a3340 !important;
+            color: #ffffff !important;
+        }
+        #tasksList button.task-on {
+            background: #025daa !important;
+            color: #ffffff !important;
+            box-shadow: 0 0 0 2px #ffffff;
+        }
+        #tasksList button.task-done { background: #15803d !important; color: #fff !important; }
+        #tasksList button.task-block { background: #b91c1c !important; color: #fff !important; }
+        #tasksList select, #tasksList input {
+            color: #ffffff !important;
+            background: #0d1116 !important;
+            min-height: 44px;
+        }
+        .task-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #7ec2ff; margin-bottom: 4px; }
         @media (max-width: 640px) {
             header .nav-text { display: none; }
         }
@@ -67,6 +92,8 @@
             <div class="flex items-center gap-3 flex-wrap justify-end uppercase text-xs tracking-wider">
                 <a href="/dashboard" class="text-[#7ec2ff] font-semibold">Dashboard</a>
                 <a href="/jobs" class="text-[#7ec2ff] font-semibold">Jobs</a>
+                <a href="/stock" id="navStock" class="hidden text-[#7ec2ff] font-semibold">Workshop stock</a>
+                <a href="/supplier" id="navSupplier" class="hidden text-[#7ec2ff] font-semibold">Supplier jobs</a>
                 <a href="/jobs/create" class="text-white bg-status-blue px-3 py-2 rounded-lg font-semibold">Create</a>
                 <button type="button" onclick="enablePings()" class="text-[#7ec2ff] font-semibold">Enable phone pings</button>
                 {% block header_right %}{% endblock %}
@@ -121,6 +148,13 @@
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
     }
+    (function(){
+        var r = localStorage.getItem('role') || '';
+        var el = document.getElementById('navStock');
+        if (el && ['stock','workshop','admin','accounts'].indexOf(r) !== -1) el.classList.remove('hidden');
+        var s = document.getElementById('navSupplier');
+        if (s && r === 'supplier') s.classList.remove('hidden');
+    })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

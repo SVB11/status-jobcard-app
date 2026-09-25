@@ -38,8 +38,18 @@
                 <select id="role" class="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-status-blue">
                     <option value="sales">Sales</option>
                     <option value="workshop">Workshop</option>
+                    <option value="stock">Stock controller</option>
                     <option value="accounts">Accounts</option>
                     <option value="admin">Admin</option>
+                    <option value="supplier">Supplier</option>
+                </select>
+            </div>
+            <div id="companyBox" class="hidden">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Supplier company *</label>
+                <select id="supplier_company" class="w-full px-3 py-2 border rounded-lg text-sm">
+                    <option value="">Select company</option>
+                    <option value="PFT">PFT</option>
+                    <option value="FK Tanker Solutions">FK Tanker Solutions</option>
                 </select>
             </div>
             <button type="submit" class="w-full bg-status-blue text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-800">Add User</button>
@@ -64,6 +74,9 @@
     const role = localStorage.getItem('role') || '';
 
     if (!token) window.location.href = '/login';
+    document.getElementById('role').addEventListener('change', function(){
+        document.getElementById('companyBox').classList.toggle('hidden', this.value !== 'supplier');
+    });
     if (role !== 'admin' && role !== 'accounts') {
         alert('Admin access only');
         window.location.href = '/dashboard';
@@ -80,6 +93,8 @@
             admin: 'bg-purple-100 text-purple-700',
             sales: 'bg-blue-100 text-blue-700',
             workshop: 'bg-green-100 text-green-700',
+            stock: 'bg-cyan-100 text-cyan-700',
+            supplier: 'bg-orange-100 text-orange-700',
             accounts: 'bg-yellow-100 text-yellow-700'
         };
         return '<span class="px-2 py-0.5 text-xs rounded-full ' + (colours[r] || 'bg-gray-100') + '">' + r + '</span>';
@@ -98,7 +113,7 @@
                     '<div>' +
                     '<div class="font-medium text-sm">' + u.full_name + ' ' + roleBadge(u.role) + 
                     (!u.is_active ? ' <span class="text-xs text-red-500">(inactive)</span>' : '') + '</div>' +
-                    '<div class="text-xs text-gray-500">@' + u.username + ' &nbsp; Password: <span class="font-mono text-gray-800">' + (u.password || '—') + '</span></div>' +
+                    '<div class="text-xs text-gray-500">@' + u.username + (u.supplier_company ? ' · ' + u.supplier_company : '') + ' &nbsp; Password: <span class="font-mono text-gray-800">' + (u.password || '—') + '</span></div>' +
                     '</div>' +
                     '<div class="flex gap-2">' +
                     '<button onclick="toggleUser(' + u.id + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' + 
@@ -127,7 +142,8 @@
                     full_name: document.getElementById('full_name').value,
                     username: document.getElementById('username').value,
                     password: document.getElementById('password').value,
-                    role: document.getElementById('role').value
+                    role: document.getElementById('role').value,
+                    supplier_company: document.getElementById('supplier_company').value
                 })
             });
             const data = await res.json();

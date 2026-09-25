@@ -3,12 +3,16 @@ self.addEventListener('push', function(event) {
     try {
         if (event.data) data = Object.assign(data, event.data.json());
     } catch (e) {}
-    event.waitUntil(self.registration.showNotification(data.title || 'Status Job Cards', {
-        body: data.body || '',
-        icon: '/static/images/status_logo_white.png',
-        badge: '/static/images/status_logo_white.png',
-        data: { url: data.url || '/dashboard' }
-    }));
+    const unread = data.unread || 1;
+    event.waitUntil(Promise.all([
+        self.registration.showNotification(data.title || 'Status Job Cards', {
+            body: data.body || '',
+            icon: '/static/images/app_icon_192.png',
+            badge: '/static/images/app_icon_192.png',
+            data: { url: data.url || '/dashboard' }
+        }),
+        self.navigator.setAppBadge ? self.navigator.setAppBadge(unread) : Promise.resolve()
+    ]));
 });
 
 self.addEventListener('notificationclick', function(event) {

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Supplier jobs{% endblock %}
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-300"></span>
+    <button onclick="logout()" class="text-sm text-red-400 hover:underline">Logout</button>
+</div>
+{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold uppercase tracking-widest mb-1" id="pageTitle">My jobs</h1>
+<p class="text-sm text-[#9aa6b4] mb-6">You only see jobs booked to your company. Workshop still signs the task complete.</p>
+<div id="jobList" class="space-y-3 mb-8">Loading...</div>
+<div id="updBox" class="hidden rounded-xl p-4 border border-[#2a3340] bg-[#12161c] space-y-3">
+    <h2 class="font-bold uppercase tracking-widest" id="updTitle">Update</h2>
+    <div class="task-label">Status</div>
+    <div class="flex flex-wrap gap-2">
+        <button type="button" class="stBtn" data-s="Booked">Booked</button>
+        <button type="button" class="stBtn" data-s="In progress">In progress</button>
+        <button type="button" class="stBtn" data-s="Waiting parts">Waiting parts</button>
+        <button type="button" class="stBtn" data-s="Completed">Completed</button>
+    </div>
+    <div class="task-label">Work we are doing</div>
+    <textarea id="workDoing" rows="2" class="w-full px-3 py-2 rounded bg-[#07090c] border border-[#2a3340]"></textarea>
+    <div class="task-label">Parts we need to replace (note to workshop only — not a parts order)</div>
+    <textarea id="partsNeed" rows="2" class="w-full px-3 py-2 rounded bg-[#07090c] border border-[#2a3340]"></textarea>
+    <div class="task-label">Note for Status workshop</div>
+    <textarea id="supNote" rows="2" class="w-full px-3 py-2 rounded bg-[#07090c] border border-[#2a3340]"></textarea>
+    <div class="task-label">Photo of their job card</div>
+    <input type="file" id="supPhoto" accept="image/*" capture="environment" class="w-full text-sm">
+    <button type="button" onclick="sendUpd()" class="px-4 py-2 bg-status-blue text-white rounded font-bold">SUBMIT UPDATE</button>
+</div>
+<style>
+    .stBtn { background:#2a3340; color:#fff; padding:10px 12px; border-radius:8px; font-weight:800; min-height:44px; }
+    .stBtn.on { background:#025daa; }
+</style>
+<script>
+    const token = localStorage.getItem('token');
+    const role = localStorage.getItem('role') || '';
+    const fullName = localStorage.getItem('full_name') || '';
+    if (!token) location.href = '/login';
+    if (role !== 'supplier') { location.href = '/dashboard'; }
+    document.getElementById('userInfo').textContent = fullName + ' (supplier)';
+    let chosenStatus = 'Booked';
+    let jobId = null;
+    document.querySelectorAll('.stBtn').forEach(function(b){
+        b.onclick = function(){ chosenStatus = b.getAttribute('data-s'); document.querySelectorAll('.stBtn').forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on'); };
+    });
+    document.querySelector('.stBtn').classList.add('on');
+
+    async function loadJobs() {
+        const data = await (await fetch('/api/supplier/jobs', { headers: { 'Authorization': 'Bearer ' + token } })).json();
+        document.getElementById('pageTitle').textContent = 'MY JOBS — ' + (data.company || '');
+        const jobs = data.jobs || [];
+        document.getElementById('jobList').innerHTML = jobs.length ? jobs.map(function(j){
+            return '<button type="button" onclick="openJob('+j.id+',\''+(j.stock_number||'')+'\',\''+(j.service||'').replace(/'/g,'')+'\')" class="block w-full text-left p-4 rounded-xl border border-[#2a3340] bg-[#12161c]"><div class="font-bold text-[#7ec2ff]">'+j.stock_number+'</div><div>'+(j.vehicle_description||'')+' '+(j.year||'')+'</div><div class="text-xs text-[#9aa6b4]">'+(j.service||'')+' · '+(j.booked_date||'no date')+' · '+(j.latest_status||'Booked')+'</div></button>';
+        }).join('') : '<p class="text-[#6b7683]">No jobs booked to your company yet</p>';
+    }
+    function openJob(id, stock, service) {
+        jobId = id;
+        document.getElementById('updBox').classList.remove('hidden');
+        document.getElementById('updTitle').textContent = 'UPDATE — ' + stock + ' ' + service;
+        document.getElementById('workDoing').value = '';
+        document.getElementById('partsNeed').value = '';
+        document.getElementById('supNote').value = '';
+        window.scrollTo(0, document.getElementById('updBox').offsetTop);
+    }
+    async function sendUpd() {
+        if (!jobId) return;
+        const fd = new FormData();
+        fd.append('status_val', chosenStatus);
+        fd.append('work_doing', document.getElementById('workDoing').value);
+        fd.append('parts_needed', document.getElementById('partsNeed').value);
+        fd.append('note', document.getElementById('supNote').value);
+        const pic = document.getElementById('supPhoto').files[0];
+        if (pic) fd.append('photo', pic);
+        const res = await fetch('/api/supplier/jobs/'+jobId+'/update', {
+            method:'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+            body: fd
+        });
+        const data = await res.json().catch(function(){return {};});
+        if (!res.ok) { alert(data.detail || 'Could not send'); return; }
+        document.getElementById('workDoing').value = '';
+        document.getElementById('partsNeed').value = '';
+        document.getElementById('supNote').value = '';
+        document.getElementById('supPhoto').value = '';
+        loadJobs();
+        alert('Update sent to workshop');
+    }
+    function logout(){ localStorage.clear(); location.href='/login'; }
+    loadJobs();
+</script>
+{% endblock %}

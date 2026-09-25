@@ -138,6 +138,7 @@ TANKER_PDI = [
         {"num": 38, "item": 'Pneumatic pipe straps', "criteria": 'Secure, no loose pipes.'},
         {"num": 39, "item": 'Straps for delivery hose & PTO pipes', "criteria": 'Fitted and secure.'},
         {"num": 40, "item": 'End caps on side rails', "criteria": 'Fitted and secure.'},
+        {"num": 65, "item": 'Are all barrel test plates fitted on tanker? (3 / 6 year and 15 year)', "criteria": '3-year, 6-year and 15-year barrel test plates fitted on the tanker as applicable.'},
     ]},
     {"section": '6. HAZCHEM, SAFETY & EARTHING', "items": [
         {"num": 41, "item": 'Yellow tape / Hazchem markings', "criteria": 'Correct labels, visible and intact.'},

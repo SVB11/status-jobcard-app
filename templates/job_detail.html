@@ -17,17 +17,17 @@
 <div id="content" class="hidden space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800" id="jobNumber"></h1>
-            <p class="text-gray-500" id="vehicleLine"></p>
+            <h1 class="text-2xl font-bold text-white uppercase tracking-wide" id="jobNumber"></h1>
+            <p class="text-[#9aa6b4]" id="vehicleLine"></p>
         </div>
         <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
     </div>
     <div class="flex gap-2 overflow-x-auto pb-1 text-sm">
-        <a href="#tasksList" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Work / Prep Tasks</a>
-        <a href="#partsSection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Parts</a>
-        <a href="#suppliesSection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Hoses / Couplers / Suzi</a>
-        <a href="#thirdPartySection" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">3rd Party Bookings</a>
-        <a href="#workshopExtras" class="px-3 py-2 bg-white rounded-lg shadow whitespace-nowrap">Current activity</a>
+        <a href="#tasksList" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Work / Prep Tasks</a>
+        <a href="#partsSection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Parts</a>
+        <a href="#suppliesSection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Hoses / Couplers / Suzi</a>
+        <a href="#thirdPartySection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">3rd Party Bookings</a>
+        <a href="#workshopExtras" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Current activity</a>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -98,11 +98,12 @@
         <div id="partsList" class="space-y-2 mb-3 text-sm"></div>
         <div id="partsForm" class="hidden space-y-2 p-3 bg-gray-50 rounded-lg">
             <p class="text-xs font-medium text-gray-700">Add a part</p>
+            <div class="task-label">Part description</div>
             <input type="text" id="partDesc" placeholder="Part description *" class="w-full px-3 py-2 border rounded text-sm">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <input type="number" min="1" id="partQty" placeholder="Qty *" value="1" class="px-3 py-2 border rounded text-sm">
-                <input type="text" id="partPrice" placeholder="Price (optional)" class="px-3 py-2 border rounded text-sm">
-                <input type="text" id="partOrder" placeholder="Chantelle order no" class="px-3 py-2 border rounded text-sm">
+                <div><div class="task-label">Quantity</div><input type="number" min="1" id="partQty" placeholder="Qty *" value="1" class="w-full px-3 py-2 border rounded text-sm"></div>
+                <div><div class="task-label">Price (optional)</div><input type="text" id="partPrice" placeholder="Price (optional)" class="w-full px-3 py-2 border rounded text-sm"></div>
+                <div><div class="task-label">Chantelle order no</div><input type="text" id="partOrder" placeholder="Chantelle order no" class="w-full px-3 py-2 border rounded text-sm"></div>
             </div>
             <button type="button" onclick="savePart()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Submit part</button>
         </div>
@@ -115,16 +116,21 @@
         <div id="suppliesCompleted" class="space-y-2 text-sm mb-3"></div>
         <div id="suppliesForm" class="hidden space-y-2 p-3 bg-gray-50 rounded-lg">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <select id="supCat" class="px-3 py-2 border rounded text-sm" onchange="fillSupplyTypes()">
+                <div><div class="task-label">Category</div>
+                <select id="supCat" class="w-full px-3 py-2 border rounded text-sm" onchange="fillSupplyTypes()">
                     <option value="Delivery hose">Delivery hose</option>
                     <option value="Coupler">Coupler</option>
                     <option value="Suzi cable">Suzi cable</option>
                     <option value="Other">Other (type it in)</option>
-                </select>
-                <select id="supType" class="px-3 py-2 border rounded text-sm"></select>
-                <input type="number" min="1" id="supQty" value="1" class="px-3 py-2 border rounded text-sm" placeholder="Qty">
+                </select></div>
+                <div><div class="task-label">Type</div>
+                <select id="supType" class="w-full px-3 py-2 border rounded text-sm"></select></div>
+                <div><div class="task-label">Quantity</div>
+                <input type="number" min="1" id="supQty" value="1" class="w-full px-3 py-2 border rounded text-sm" placeholder="Qty"></div>
             </div>
+            <div class="task-label">Other item (if not in list)</div>
             <input type="text" id="supCustom" class="w-full px-3 py-2 border rounded text-sm" placeholder="Type any other item here if it is not in the list">
+            <div class="task-label">Notes</div>
             <input type="text" id="supNotes" class="w-full px-3 py-2 border rounded text-sm" placeholder="Notes (optional)">
             <button type="button" onclick="saveSupply()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Book onto job card</button>
         </div>
@@ -181,6 +187,7 @@
             <textarea id="extraNotes" rows="2" placeholder="Notes (optional)" class="w-full px-3 py-2 border rounded text-sm"></textarea>
             <button type="button" onclick="saveActivity()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Update current activity</button>
         </div>
+        <div id="supplierProgressBox" class="mt-4 p-3 rounded-lg border border-[#2a3340]"></div>
         <h3 class="text-sm font-semibold mb-2">Updates log</h3>
 <div id="updatesList" class="space-y-2 text-sm"></div>
         <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
@@ -233,13 +240,29 @@
 
     function statusColour(s) {
         const map = {
-            'Not Started': 'bg-gray-100 text-gray-600',
-            'In Progress': 'bg-blue-100 text-blue-700',
-            'Completed': 'bg-green-100 text-green-700',
-            'Blocked': 'bg-red-100 text-red-700',
-            'Failed test - back to workshop': 'bg-red-100 text-red-700'
+            'Not Started': 'bg-[#3a4450] text-white',
+            'In Progress': 'bg-[#025daa] text-white',
+            'Completed': 'bg-green-700 text-white',
+            'Blocked': 'bg-red-700 text-white',
+            'Failed test - back to workshop': 'bg-red-700 text-white'
         };
-        return map[s] || 'bg-gray-100 text-gray-600';
+        return map[s] || 'bg-[#3a4450] text-white';
+    }
+
+    function statusButtons(t, canEdit) {
+        const opts = ['Not Started', 'In Progress', 'Completed', 'Blocked'];
+        if ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1) opts.push('Failed test - back to workshop');
+        if (!canEdit) {
+            return '<span class="px-3 py-2 text-xs font-bold rounded ' + statusColour(t.status) + '">' + t.status + '</span>';
+        }
+        return '<div class="task-label">Task status</div><div class="flex flex-wrap gap-1">' + opts.map(function(s) {
+            const on = t.status === s;
+            let cls = 'task-off';
+            if (on && s === 'Completed') cls = 'task-done';
+            else if (on && (s === 'Blocked' || s.indexOf('Failed') === 0)) cls = 'task-block';
+            else if (on) cls = 'task-on';
+            return '<button type="button" onclick="updateTaskStatus(' + t.id + ', \'' + s.replace(/'/g, '') + '\')" class="' + cls + '">' + s + '</button>';
+        }).join('') + '</div>';
     }
 
 
@@ -389,62 +412,52 @@
         } else {
             tasks.forEach(function(t) {
                 if (t.status === 'Completed') completed++;
-                html += '<div class="p-3 bg-gray-50 rounded-lg border">' +
-                    '<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
+                html += '<div class="p-3 bg-[#1a1f27] rounded-lg border border-[#2a3340] text-white">' +
+                    '<div class="flex flex-col gap-2">' +
                     '<div class="flex-1">' +
-                    '<div class="text-sm font-medium">' + t.task_name + 
+                    '<div class="text-sm font-bold uppercase tracking-wide">' + t.task_name + 
                     (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + (t.needs_approval ? ' <span class="text-xs text-red-600">(awaiting admin approval)</span>' : '') + '</div>' +
-                    (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
+                    (t.description && t.description !== t.task_name ? '<div class="text-xs text-[#9aa6b4]">' + t.description + '</div>' : '') +
                     (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') + (t.needs_approval && isAdmin ? '<div class="mt-1"><button type="button" onclick="approveTask(' + t.id + ')" class="text-xs px-2 py-1 bg-purple-700 text-white rounded">Approve extra task</button></div>' : '') +
                     partStatusControls(t) +
                     '</div>';
 
-                if (canEdit) {
-                    html += '<select onchange="updateTaskStatus(' + t.id + ', this.value)" class="text-xs border rounded px-2 py-1 ' + statusColour(t.status) + '">' +
-                        '<option value="Not Started"' + (t.status === 'Not Started' ? ' selected' : '') + '>Not Started</option>' +
-                        '<option value="In Progress"' + (t.status === 'In Progress' ? ' selected' : '') + '>In Progress</option>' +
-                        '<option value="Completed"' + (t.status === 'Completed' ? ' selected' : '') + '>Completed</option>' +
-                        '<option value="Blocked"' + (t.status === 'Blocked' ? ' selected' : '') + '>Blocked</option>' +
-                        ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1 ? '<option value="Failed test - back to workshop"' + (t.status === 'Failed test - back to workshop' ? ' selected' : '') + '>Failed test - back to workshop</option>' : '') +
-                        '</select>';
-                } else {
-                    html += '<span class="px-2 py-0.5 text-xs rounded-full ' + statusColour(t.status) + '">' + t.status + '</span>';
-                }
+                html += statusButtons(t, canEdit);
                 html += '</div>';
 
                 // Notes
-                if (canEdit) {
-                    html += '<div class="mt-2 flex gap-2">' +
-                        '<input type="text" id="note-' + t.id + '" value="' + (t.notes || '').replace(/"/g, '&quot;') + '" placeholder="Add note..." ' +
-                        'class="flex-1 text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-status-blue">' +
-                        '<button onclick="saveNote(' + t.id + ')" class="text-xs px-2 py-1 bg-gray-200 rounded hover:bg-gray-300">Save Note</button>' +
-                        '</div>';
-                } else if (t.notes) {
-                    html += '<div class="mt-1 text-xs text-orange-600">Note: ' + t.notes + '</div>';
+                if (t.notes) {
+                    html += '<div class="mt-2 text-xs text-orange-300 whitespace-pre-wrap">Notes:\n' + t.notes + '</div>';
                 }
                 if (canEdit) {
-                    html += '<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">' +
-                        '<select id="loc-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskLocation(' + t.id + ')">' +
-                        locationOptions(t) + '</select>';
+                    html += '<div class="mt-2"><div class="task-label">Add another note</div><div class="flex gap-2">' +
+                        '<input type="text" id="note-' + t.id + '" value="" placeholder="New note...">' +
+                        '<button type="button" onclick="saveNote(' + t.id + ')">SAVE NOTE</button>' +
+                        '</div></div>';
+                }
+                if (canEdit) {
+                    const name = (t.task_name || '').toLowerCase();
+                    const isTest = name.indexOf('roadworthy') !== -1 || name.indexOf('pressure') !== -1 || name.indexOf('barrel') !== -1 || name.indexOf('calibration') !== -1 || name.indexOf('as is') !== -1;
+                    html += '<div class="mt-2"><div class="task-label">Location / bay</div>' +
+                        '<select id="loc-' + t.id + '" onchange="saveTaskLocation(' + t.id + ')">' +
+                        locationOptions(t) + '</select></div>';
                     const providers = (function() {
                     const all = t.providers || [];
-                    if (currentJob && currentJob.main_type === 'Tanker') return all;
-                    const name = (t.task_name || '').toLowerCase();
+                    if (!isTest) return [];
                     if (name.indexOf('roadworthy') !== -1) return all.length ? all : ['East Rand Testing Station'];
-                    return [];
+                    return all;
                 })();
                     if (providers.length) {
-                        html += '<select id="prov-' + t.id + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">' +
-                            '<option value="">3rd party company</option>';
+                        html += '<div class="mt-2"><div class="task-label">3rd party company</div>' +
+                            '<select id="prov-' + t.id + '" onchange="saveTaskProvider(' + t.id + ')">' +
+                            '<option value="">Select company</option>';
                         providers.forEach(function(pr) {
                             html += '<option value="' + pr + '"' + (t.third_party_provider === pr ? ' selected' : '') + '>' + pr + '</option>';
                         });
-                        html += '</select>';
-                        html += '<input type="date" id="bdate-' + t.id + '" value="' + (t.booked_date || '') + '" class="text-xs border rounded px-2 py-1" onchange="saveTaskProvider(' + t.id + ')">';
-                    } else {
-                        html += '<div class="text-xs text-gray-400 self-center">' + (t.task_location ? t.task_location : 'Set bay / location') + '</div>';
+                        html += '</select></div>';
+                        html += '<div class="mt-2"><div class="task-label">Booked date</div>' +
+                            '<input type="date" id="bdate-' + t.id + '" value="' + (t.booked_date || '') + '" onchange="saveTaskProvider(' + t.id + ')"></div>';
                     }
-                    html += '</div>';
                 } else if (t.task_location || t.third_party_provider || t.booked_date) {
                     html += '<div class="mt-1 text-xs text-gray-600">Location: ' + (t.task_location || '—') +
                         (t.third_party_provider ? ' | ' + t.third_party_provider : '') +
@@ -463,6 +476,42 @@
         if (canEdit) {
             document.getElementById('addTaskSection').classList.remove('hidden');
         }
+    }
+
+    function renderSupplierProgress(j) {
+        const box = document.getElementById('supplierProgressBox');
+        if (!box) return;
+        const rows = j.supplier_updates || [];
+        if (!rows.length) { box.innerHTML = '<div class="text-xs text-[#9aa6b4]">No supplier progress yet</div>'; return; }
+        const latest = rows[0];
+        let html = '<div class="task-label">Supplier progress</div><div class="font-semibold">' + (latest.company||'') + ' — ' + latest.status + '</div>';
+        if (latest.work_doing) html += '<div class="text-sm">Work: ' + latest.work_doing + '</div>';
+        if (role === 'sales') {
+            if (latest.photo_path) html += '<div class="mt-1"><img src="'+latest.photo_path+'" class="max-h-32 rounded"></div>';
+            box.innerHTML = html;
+            return;
+        }
+        html += rows.map(function(u){
+            let block = '<div class="mt-2 text-xs border-t border-[#2a3340] pt-2">' + (u.company||'') + ' · ' + u.status + ' · ' + (u.created_by_name||'');
+            if (u.work_doing) block += '<div>Work: ' + u.work_doing + '</div>';
+            if (u.parts_needed) block += '<div class="text-orange-400">Parts needed: ' + u.parts_needed + '</div>';
+            if (u.note) block += '<div>Note: ' + u.note + '</div>';
+            if (u.photo_path) block += '<div class="mt-1"><a href="'+u.photo_path+'" target="_blank"><img src="'+u.photo_path+'" alt="Supplier job card" class="max-h-40 rounded border border-[#2a3340]"></a></div>';
+            if (u.workshop_parts_decision) block += '<div>' + (u.workshop_parts_decision === 'workshop_assist' ? 'Workshop will assist' : 'Supplier must supply') + '</div>';
+            else if (u.parts_needed && (role === 'workshop' || role === 'admin' || role === 'accounts')) {
+                block += '<div class="flex gap-2 mt-1"><button type="button" onclick="supDecideJob('+u.id+',\'workshop_assist\')" class="px-2 py-1 bg-[#025daa] text-white rounded">Workshop can assist</button><button type="button" onclick="supDecideJob('+u.id+',\'supplier_supply\')" class="px-2 py-1 bg-[#2a3340] text-white rounded">Supplier must supply</button></div>';
+            }
+            return block + '</div>';
+        }).join('');
+        box.innerHTML = html;
+    }
+    async function supDecideJob(id, decision) {
+        await fetch('/api/supplier-updates/'+id+'/workshop', {
+            method:'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workshop_parts_decision: decision })
+        });
+        loadJob();
     }
 
     async function loadJob() {
@@ -547,6 +596,7 @@
             }
             
 
+            renderSupplierProgress(j);
             renderTasks(j.tasks);
 
             if (j.other_instructions) {
@@ -636,6 +686,7 @@
                 },
                 body: JSON.stringify({
                     notes: notes,
+                    append_note: true,
                     user_id: userId ? parseInt(userId) : null,
                     full_name: fullName
                 })
@@ -646,8 +697,8 @@
                 return;
             }
             // Brief visual feedback
-            noteInput.classList.add('border-green-400');
-            setTimeout(function() { noteInput.classList.remove('border-green-400'); }, 800);
+            noteInput.value = '';
+            loadJob();
         } catch (err) {
             alert('Connection error');
         }
@@ -913,6 +964,9 @@
         if (!res.ok) { alert(data.detail || 'Could not book'); return; }
         document.getElementById('supNotes').value = '';
         document.getElementById('supCustom').value = '';
+        document.getElementById('supQty').value = '1';
+        document.getElementById('supCat').value = 'Delivery hose';
+        if (typeof fillSupplyTypes === 'function') fillSupplyTypes();
         loadJob();
     }
 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Body
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, Body, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 import json
+import uuid
 
 from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
@@ -63,6 +64,11 @@ def require_admin(user: models.User):
 # Absolute paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+DATA_ROOT = "/data" if os.path.isdir("/data") else BASE_DIR
+UPLOAD_DIR = os.path.join(DATA_ROOT, "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "supplier"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 @app.get("/sw.js")
 async def service_worker():
@@ -187,7 +193,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         "role": user.role,
         "full_name": user.full_name,
         "user_id": user.id,
-        "must_change_password": bool(getattr(user, "must_change_password", False))
+        "must_change_password": bool(getattr(user, "must_change_password", False)),
+        "supplier_company": getattr(user, "supplier_company", None)
     }
 
 @app.get("/login", response_class=HTMLResponse)
@@ -203,6 +210,14 @@ async def home(request: Request):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     return render_template("dashboard.html", request=request, page_title="Dashboard")
+
+@app.get("/stock", response_class=HTMLResponse)
+async def stock_page(request: Request):
+    return render_template("stock.html", request=request, page_title="Workshop stock")
+
+@app.get("/supplier", response_class=HTMLResponse)
+async def supplier_page(request: Request):
+    return render_template("supplier.html", request=request, page_title="Supplier jobs")
 
 # ---------- CREATE JOB CARD ----------
 
@@ -511,6 +526,19 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "tasks": tasks,
         "updates": updates,
         "third_party_bookings": bookings,
+        "supplier_updates": [{
+            "id": s.id,
+            "company": s.company,
+            "status": s.status,
+            "work_doing": s.work_doing,
+            "parts_needed": s.parts_needed,
+            "note": s.note,
+            "photo_path": s.photo_path,
+            "workshop_parts_decision": s.workshop_parts_decision,
+            "workshop_parts_note": s.workshop_parts_note,
+            "created_by_name": s.created_by_name,
+            "created_at": s.created_at.isoformat() if s.created_at else None
+        } for s in db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job.id).order_by(models.SupplierUpdate.created_at.desc()).all()],
         "parts": part_items,
         "parts_missing_order": any(not (p.get("order_number") or "").strip() for p in part_items),
         "supplies": [{
@@ -634,7 +662,13 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
             task.completed_by = None
 
     if notes is not None:
-        task.notes = notes
+        if body.get("append_note") and str(notes).strip():
+            stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            who = body.get("full_name") or user_name(db, user_id) or "Staff"
+            line = f"{stamp} {who}: {str(notes).strip()}"
+            task.notes = (task.notes + "\n" + line) if task.notes else line
+        else:
+            task.notes = notes
 
     changer = body.get("full_name") or user_name(db, user_id) or "Staff"
     task.last_updated_by_name = changer
@@ -726,6 +760,9 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
     db.add(task)
     db.commit()
     db.refresh(task)
+    if task.needs_approval:
+        notify_role(db, "admin", f"EXTRA needs approval on {job.stock_number}: {task_name}", job.id)
+        db.commit()
 
     if user_id:
         log_audit(db, user_id, "Added Custom Task", job.id, f"Added task: {task_name}")
@@ -813,6 +850,7 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "username": u.username,
                 "full_name": u.full_name,
                 "role": u.role,
+                "supplier_company": getattr(u, "supplier_company", None),
                 "is_active": u.is_active,
                 "password": getattr(u, "password_plain", None) or "(changed — not stored)",
                 "created_at": u.created_at.isoformat() if u.created_at else None
@@ -836,8 +874,11 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
     if not username or not full_name or not password:
         raise HTTPException(status_code=400, detail="Username, full name and password are required")
 
-    if role not in ("sales", "workshop", "accounts", "admin"):
+    if role not in ("sales", "workshop", "accounts", "admin", "stock", "supplier"):
         raise HTTPException(status_code=400, detail="Invalid role")
+    company = (body.get("supplier_company") or "").strip() or None
+    if role == "supplier" and not company:
+        raise HTTPException(status_code=400, detail="Supplier must be allocated to a company")
 
     existing = db.query(models.User).filter(models.User.username == username).first()
     if existing:
@@ -850,6 +891,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
         password_plain=password,
         must_change_password=True,
         role=role,
+        supplier_company=company if role == "supplier" else None,
         is_active=True
     )
     db.add(user)
@@ -1013,6 +1055,27 @@ async def api_get_pdi(job_id: int, db: Session = Depends(get_db)):
 
     # Load existing PDI items or generate from template
     existing = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id).all()
+    have = {(p.check_item or "").strip().lower() for p in existing}
+    template = get_pdi_for_type(job.main_type)
+    added_missing = False
+    for section in template:
+        for item in section["items"]:
+            if (item["item"] or "").strip().lower() in have:
+                continue
+            if existing:
+                db.add(models.PDIItem(
+                    job_card_id=job_id,
+                    section=section["section"],
+                    item_number=item["num"],
+                    check_item=item["item"],
+                    acceptance_criteria=item.get("criteria"),
+                    status=None,
+                    notes=None
+                ))
+                added_missing = True
+    if added_missing:
+        db.commit()
+        existing = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id).all()
     if not existing:
         # Generate from template
         template = get_pdi_for_type(job.main_type)
@@ -1624,41 +1687,207 @@ async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Se
     db.commit()
     return {"success": True}
 
+def iso(v):
+    return v.isoformat() if v else None
+
+def build_snapshot(db):
+    jobs_out = []
+    for j in db.query(models.JobCard).order_by(models.JobCard.id.asc()).all():
+        jobs_out.append({
+            "job_number": j.job_number,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "main_type": j.main_type,
+            "sub_type": j.sub_type,
+            "vin_number": j.vin_number,
+            "registration_number": j.registration_number,
+            "client_name": j.client_name,
+            "salesman_name": j.salesman_name,
+            "quotation_invoice_number": getattr(j, "quotation_invoice_number", None),
+            "priority": j.priority,
+            "target_delivery_date": j.target_delivery_date,
+            "current_location": j.current_location,
+            "internal_notes": j.internal_notes,
+            "other_instructions": j.other_instructions,
+            "status": j.status,
+            "current_activity": getattr(j, "current_activity", None),
+            "current_activity_notes": getattr(j, "current_activity_notes", None),
+            "current_activity_by": getattr(j, "current_activity_by", None),
+            "pdi_signed_workshop": j.pdi_signed_workshop,
+            "pdi_signed_sales": j.pdi_signed_sales,
+            "ready_sales": j.ready_sales,
+            "ready_workshop": j.ready_workshop,
+            "created_at": iso(j.created_at),
+            "accepted_at": iso(j.accepted_at),
+            "tasks": [{
+                "task_name": t.task_name, "description": t.description, "is_custom": t.is_custom,
+                "status": t.status, "notes": t.notes, "task_location": getattr(t, "task_location", None),
+                "third_party_provider": getattr(t, "third_party_provider", None),
+                "booked_date": getattr(t, "booked_date", None),
+                "test_result": getattr(t, "test_result", None),
+                "fail_list": getattr(t, "fail_list", None),
+            } for t in (j.tasks or [])],
+            "pdi": [{
+                "section": p.section, "item_number": p.item_number, "check_item": p.check_item,
+                "acceptance_criteria": p.acceptance_criteria, "status": p.status, "notes": p.notes, "initials": p.initials
+            } for p in (j.pdi_items or [])],
+            "parts": [{
+                "description": p.description, "order_number": p.order_number, "quantity": getattr(p, "quantity", None),
+                "price": getattr(p, "price", None), "supplier_invoice": getattr(p, "supplier_invoice", None),
+                "part_progress": getattr(p, "part_progress", None), "ordered_date": getattr(p, "ordered_date", None),
+                "created_by_name": p.created_by_name
+            } for p in (getattr(j, "parts", None) or [])],
+            "supplies": [{
+                "category": s.category, "item_type": s.item_type, "quantity": s.quantity, "notes": s.notes,
+                "status": s.status, "created_by_name": s.created_by_name
+            } for s in (getattr(j, "supplies", None) or [])],
+            "updates": [{
+                "category": u.category, "description": u.description, "notes": u.notes, "created_by_name": u.created_by_name, "created_at": iso(u.created_at)
+            } for u in (j.updates or [])],
+            "bookings": [{
+                "service": b.service, "provider": b.provider, "booked_date": b.booked_date, "notes": b.notes, "created_by_name": b.created_by_name
+            } for b in (getattr(j, "third_party_bookings", None) or [])],
+            "supplier_updates": [{
+                "company": s.company, "status": s.status, "work_doing": s.work_doing, "parts_needed": s.parts_needed,
+                "note": s.note, "photo_path": getattr(s, "photo_path", None), "created_by_name": s.created_by_name
+            } for s in db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == j.id).all()],
+        })
+    return {
+        "saved_at": datetime.utcnow().isoformat(),
+        "jobs": jobs_out,
+        "stock_orders": [{
+            "description": s.description, "quantity": s.quantity, "notes": s.notes, "status": s.status,
+            "created_by_name": s.created_by_name
+        } for s in db.query(models.WorkshopStockOrder).all()] if hasattr(models, "WorkshopStockOrder") else [],
+        "third_party_companies": [{"category": c.category, "name": c.name} for c in db.query(models.ThirdPartyCompany).all()],
+    }
+
 @app.get("/api/admin/backup.db")
 async def api_admin_backup_db(current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
     path = SQLITE_FILE or "status_jobcard.db"
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Database file not found")
-    stamp = datetime.utcnow().strftime("%Y%m%d")
+    stamp = datetime.now().strftime("%Y-%m-%d")
     return FileResponse(path, filename=f"status_jobcard_backup_{stamp}.db", media_type="application/octet-stream")
 
 @app.get("/api/admin/backup-pack.zip")
 async def api_admin_backup_pack(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
     import csv, io, zipfile, tempfile
-    stamp = datetime.utcnow().strftime("%Y%m%d")
+    stamp = datetime.now().strftime("%Y-%m-%d")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp.close()
+    snap = build_snapshot(db)
     with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
         path = SQLITE_FILE or "status_jobcard.db"
         if path and os.path.exists(path):
             zf.write(path, f"status_jobcard_backup_{stamp}.db")
+        zf.writestr(f"full_restore_{stamp}.json", json.dumps(snap, ensure_ascii=False, indent=2))
         jobs = db.query(models.JobCard).order_by(models.JobCard.id.desc()).all()
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
+        w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "pdi_workshop", "pdi_sales"])
         for j in jobs:
-            w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type}/{j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.created_at])
-        zf.writestr("jobcards.csv", buf.getvalue())
-        parts = db.query(models.PartItem).all()
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["job_id", "description", "qty", "order_number", "progress", "price", "invoice"])
-        for p in parts:
-            w.writerow([p.job_card_id, p.description, getattr(p, "quantity", ""), p.order_number, getattr(p, "part_progress", ""), getattr(p, "price", ""), getattr(p, "supplier_invoice", "")])
-        zf.writestr("parts.csv", buf.getvalue())
-    return FileResponse(tmp.name, filename=f"sts_jobcards_backup_{stamp}.zip", media_type="application/zip")
+            w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type}/{j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.pdi_signed_workshop, j.pdi_signed_sales])
+        zf.writestr(f"jobcards_{stamp}.csv", buf.getvalue())
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow(["Job", "Stock", "Vehicle", "Section", "Item", "Status", "Notes"])
+        for j in jobs:
+            for p in (j.pdi_items or []):
+                w.writerow([j.job_number, j.stock_number, j.vehicle_description, p.section, p.check_item, p.status, p.notes])
+        zf.writestr(f"pdi_{stamp}.csv", buf.getvalue())
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow(["Job", "Stock", "Vehicle", "Task", "Custom", "Status", "Notes", "Location"])
+        for j in jobs:
+            for t in (j.tasks or []):
+                w.writerow([j.job_number, j.stock_number, j.vehicle_description, t.task_name, t.is_custom, t.status, t.notes, getattr(t, "task_location", "")])
+        zf.writestr(f"manual_tasks_{stamp}.csv", buf.getvalue())
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow(["Date", "Job", "Stock", "Vehicle", "Category", "Description", "Notes", "By"])
+        for u in db.query(models.JobUpdate).all():
+            job = db.query(models.JobCard).filter(models.JobCard.id == u.job_card_id).first()
+            w.writerow([iso(u.created_at), job.job_number if job else "", job.stock_number if job else "", job.vehicle_description if job else "", u.category, u.description, u.notes, u.created_by_name])
+        zf.writestr(f"workshop_extras_{stamp}.csv", buf.getvalue())
+        up_root = globals().get("UPLOAD_DIR")
+        if up_root and os.path.isdir(up_root):
+            for root, _, files in os.walk(up_root):
+                for fn in files:
+                    full = os.path.join(root, fn)
+                    rel = os.path.relpath(full, up_root)
+                    zf.write(full, f"uploads/{rel}")
+    return FileResponse(tmp.name, filename=f"STS_full_backup_{stamp}.zip", media_type="application/zip")
+
+@app.post("/api/admin/restore")
+async def api_admin_restore(file: UploadFile = File(...), db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    raw = await file.read()
+    data = None
+    name = (file.filename or "").lower()
+    if name.endswith(".json"):
+        data = json.loads(raw.decode("utf-8"))
+    elif name.endswith(".zip"):
+        import zipfile, io
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+        json_name = next((n for n in zf.namelist() if n.endswith(".json")), None)
+        if not json_name:
+            raise HTTPException(status_code=400, detail="Zip has no restore JSON")
+        data = json.loads(zf.read(json_name).decode("utf-8"))
+    else:
+        raise HTTPException(status_code=400, detail="Upload the dated backup zip or full_restore JSON")
+    added = 0
+    skipped = 0
+    for j in data.get("jobs") or []:
+        exists = db.query(models.JobCard).filter(models.JobCard.job_number == j.get("job_number")).first()
+        if exists:
+            skipped += 1
+            continue
+        job = models.JobCard(
+            job_number=j.get("job_number"),
+            stock_number=j.get("stock_number") or "WS0000",
+            vehicle_description=j.get("vehicle_description") or "",
+            year=str(j.get("year") or ""),
+            main_type=j.get("main_type") or "Other",
+            sub_type=j.get("sub_type") or "Other",
+            vin_number=j.get("vin_number"),
+            registration_number=j.get("registration_number"),
+            client_name=j.get("client_name") or "",
+            salesman_name=j.get("salesman_name") or "",
+            quotation_invoice_number=j.get("quotation_invoice_number"),
+            priority=j.get("priority") or "Normal",
+            target_delivery_date=j.get("target_delivery_date"),
+            current_location=j.get("current_location"),
+            internal_notes=j.get("internal_notes"),
+            other_instructions=j.get("other_instructions"),
+            status=j.get("status") or "Submitted to Workshop",
+            current_activity=j.get("current_activity"),
+            current_activity_notes=j.get("current_activity_notes"),
+            current_activity_by=j.get("current_activity_by"),
+            pdi_signed_workshop=bool(j.get("pdi_signed_workshop")),
+            pdi_signed_sales=bool(j.get("pdi_signed_sales")),
+            ready_sales=bool(j.get("ready_sales")),
+            ready_workshop=bool(j.get("ready_workshop")),
+        )
+        db.add(job)
+        db.flush()
+        for t in j.get("tasks") or []:
+            db.add(models.JobTask(job_card_id=job.id, task_name=t.get("task_name") or "Task", description=t.get("description"), is_custom=bool(t.get("is_custom")), status=t.get("status") or "Not Started", notes=t.get("notes"), task_location=t.get("task_location"), third_party_provider=t.get("third_party_provider"), booked_date=t.get("booked_date"), test_result=t.get("test_result"), fail_list=t.get("fail_list")))
+        for p in j.get("pdi") or []:
+            db.add(models.PDIItem(job_card_id=job.id, section=p.get("section"), item_number=p.get("item_number"), check_item=p.get("check_item") or "Item", acceptance_criteria=p.get("acceptance_criteria"), status=p.get("status"), notes=p.get("notes"), initials=p.get("initials")))
+        for p in j.get("parts") or []:
+            db.add(models.PartItem(job_card_id=job.id, description=p.get("description") or "Part", order_number=p.get("order_number"), quantity=p.get("quantity"), price=p.get("price"), supplier_invoice=p.get("supplier_invoice"), part_progress=p.get("part_progress"), ordered_date=p.get("ordered_date"), created_by_name=p.get("created_by_name")))
+        for s in j.get("supplies") or []:
+            db.add(models.SupplyItem(job_card_id=job.id, category=s.get("category") or "Other", item_type=s.get("item_type") or "Item", quantity=s.get("quantity") or "1", notes=s.get("notes"), status=s.get("status") or "Booked", created_by_name=s.get("created_by_name")))
+        for u in j.get("updates") or []:
+            db.add(models.JobUpdate(job_card_id=job.id, category=u.get("category") or "progress", description=u.get("description") or "Update", notes=u.get("notes"), created_by_name=u.get("created_by_name")))
+        for b in j.get("bookings") or []:
+            db.add(models.ThirdPartyBooking(job_card_id=job.id, service=b.get("service") or "Service", provider=b.get("provider") or "Provider", booked_date=b.get("booked_date"), notes=b.get("notes"), created_by_name=b.get("created_by_name")))
+        for s in j.get("supplier_updates") or []:
+            db.add(models.SupplierUpdate(job_card_id=job.id, company=s.get("company") or "Supplier", status=s.get("status") or "Booked", work_doing=s.get("work_doing"), parts_needed=s.get("parts_needed"), note=s.get("note"), photo_path=s.get("photo_path"), created_by_name=s.get("created_by_name")))
+        added += 1
+    db.commit()
+    return {"success": True, "restored": added, "skipped_already_on_app": skipped}
 
 @app.get("/api/admin/export/jobs.csv")
 async def api_admin_export_jobs(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -1670,7 +1899,7 @@ async def api_admin_export_jobs(db: Session = Depends(get_db), current_user: mod
     w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
     for j in jobs:
         w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type} / {j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.created_at])
-    return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=jobcards_backup.csv"})
+    return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=jobcards_{datetime.now().strftime('%Y-%m-%d')}.csv"})
 
 @app.get("/api/admin/export/extras.csv")
 async def export_extras_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -1697,7 +1926,7 @@ async def export_extras_csv(db: Session = Depends(get_db), current_user: models.
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=workshop_extras.csv"}
+        headers={"Content-Disposition": f"attachment; filename=workshop_extras_{datetime.now().strftime('%Y-%m-%d')}.csv"}
     )
 
 @app.get("/api/admin/export/parts.csv")
@@ -1724,7 +1953,7 @@ async def export_parts_csv(db: Session = Depends(get_db), current_user: models.U
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=parts.csv"}
+        headers={"Content-Disposition": f"attachment; filename=parts_{datetime.now().strftime('%Y-%m-%d')}.csv"}
     )
 
 @app.get("/api/admin/export/custom-tasks.csv")
@@ -1751,7 +1980,7 @@ async def export_custom_tasks_csv(db: Session = Depends(get_db), current_user: m
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=manual_tasks.csv"}
+        headers={"Content-Disposition": f"attachment; filename=manual_tasks_{datetime.now().strftime('%Y-%m-%d')}.csv"}
     )
 
 def diary_service_label(task_name: str):
@@ -1834,6 +2063,9 @@ async def api_workshop_bookings(db: Session = Depends(get_db)):
     out.sort(key=lambda x: (x.get("booked_date") or "9999", x.get("stock_number") or ""))
     return {"bookings": out}
 
+def unread_count(db, user_id):
+    return db.query(models.Notification).filter(models.Notification.user_id == user_id, models.Notification.is_read == False).count()
+
 def send_web_push(db, user_ids, title, body, url="/dashboard"):
     if not user_ids:
         return
@@ -1843,8 +2075,8 @@ def send_web_push(db, user_ids, title, body, url="/dashboard"):
     except Exception:
         return
     subs = db.query(models.PushSubscription).filter(models.PushSubscription.user_id.in_(list(set(user_ids)))).all()
-    payload = json.dumps({"title": title, "body": body, "url": url})
     for s in subs:
+        payload = json.dumps({"title": title, "body": body, "url": url, "unread": unread_count(db, s.user_id)})
         try:
             webpush(
                 subscription_info={"endpoint": s.endpoint, "keys": {"p256dh": s.p256dh, "auth": s.auth}},
@@ -1928,6 +2160,277 @@ async def api_update_requests(db: Session = Depends(get_db)):
         "requested_at": j.update_requested_at.isoformat() if j.update_requested_at else None,
         "note": j.update_request_note
     } for j in jobs if j.status != "Delivered / Closed"]}
+
+def stock_row(s):
+    return {
+        "id": s.id,
+        "description": s.description,
+        "quantity": s.quantity,
+        "notes": s.notes,
+        "status": s.status,
+        "created_by_name": s.created_by_name,
+        "ordered_date": s.ordered_date,
+        "supplier_invoice": s.supplier_invoice,
+        "stock_received_by": s.stock_received_by,
+        "stock_received_at": s.stock_received_at.isoformat() if s.stock_received_at else None,
+        "workshop_received_by": s.workshop_received_by,
+        "workshop_received_at": s.workshop_received_at.isoformat() if s.workshop_received_at else None,
+        "last_updated_by": s.last_updated_by,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "closed": s.status == "Closed"
+    }
+
+def section_label(cat):
+    c = (cat or "").lower()
+    if c in ("parts",):
+        return "Parts"
+    if c in ("activity", "location", "progress", "extra_work"):
+        return "Work / Prep & activity"
+    if c in ("third_party",):
+        return "3rd party"
+    if c in ("pdi",):
+        return "PDI"
+    if c in ("supplies", "supply"):
+        return "Hoses / supplies"
+    return (cat or "Other").replace("_", " ").title()
+
+@app.get("/api/admin/workshop-counts")
+async def api_workshop_counts(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "admin" or (current_user.full_name or "").strip().lower() != "sebastian van biljon":
+        raise HTTPException(status_code=403, detail="Only Sebastian can view workshop counts")
+    workshop = db.query(models.User).filter(models.User.role == "workshop", models.User.is_active == True).all()
+    tallies = {u.full_name: 0 for u in workshop}
+    for u in db.query(models.JobUpdate).all():
+        who = (u.created_by_name or "").strip()
+        if who in tallies:
+            tallies[who] += 1
+    rows = [{"name": name, "total": total} for name, total in tallies.items()]
+    rows.sort(key=lambda x: -x["total"])
+    return {"workshop": rows}
+
+def company_match(provider, company):
+    if not provider or not company:
+        return False
+    a = provider.lower().strip()
+    b = company.lower().strip()
+    return b in a or a in b
+
+def sup_row(s, job=None):
+    return {
+        "id": s.id,
+        "job_id": s.job_card_id,
+        "stock_number": job.stock_number if job else None,
+        "vehicle_description": job.vehicle_description if job else None,
+        "year": job.year if job else None,
+        "company": s.company,
+        "status": s.status,
+        "work_doing": s.work_doing,
+        "parts_needed": s.parts_needed,
+        "note": s.note,
+        "photo_path": s.photo_path,
+        "workshop_parts_decision": s.workshop_parts_decision,
+        "workshop_parts_note": s.workshop_parts_note,
+        "created_by_name": s.created_by_name,
+        "created_at": s.created_at.isoformat() if s.created_at else None
+    }
+
+@app.get("/api/supplier/jobs")
+async def api_supplier_jobs(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "supplier":
+        raise HTTPException(status_code=403, detail="Supplier login only")
+    company = (current_user.supplier_company or "").strip()
+    if not company:
+        return {"company": "", "jobs": []}
+    jobs = db.query(models.JobCard).filter(models.JobCard.status != "Delivered / Closed").order_by(models.JobCard.created_at.desc()).all()
+    out = []
+    for job in jobs:
+        tasks = [t for t in (job.tasks or []) if company_match(getattr(t, "third_party_provider", None), company)]
+        bookings = [b for b in (getattr(job, "third_party_bookings", None) or []) if company_match(getattr(b, "provider", None), company)]
+        if not tasks and not bookings:
+            continue
+        latest = db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job.id, models.SupplierUpdate.company == company).order_by(models.SupplierUpdate.created_at.desc()).first()
+        out.append({
+            "id": job.id,
+            "stock_number": job.stock_number,
+            "vehicle_description": job.vehicle_description,
+            "year": job.year,
+            "service": (tasks[0].task_name if tasks else bookings[0].service),
+            "booked_date": (getattr(tasks[0], "booked_date", None) if tasks else bookings[0].booked_date),
+            "latest_status": latest.status if latest else "Booked",
+            "latest_work": latest.work_doing if latest else None
+        })
+    return {"company": company, "jobs": out}
+
+@app.post("/api/supplier/jobs/{job_id}/update")
+async def api_supplier_update(
+    job_id: int,
+    status_val: str = Form("Booked"),
+    work_doing: str = Form(""),
+    parts_needed: str = Form(""),
+    note: str = Form(""),
+    photo: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    if current_user.role != "supplier":
+        raise HTTPException(status_code=403, detail="Supplier login only")
+    company = (current_user.supplier_company or "").strip()
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    allowed = any(company_match(getattr(t, "third_party_provider", None), company) for t in (job.tasks or []))
+    allowed = allowed or any(company_match(getattr(b, "provider", None), company) for b in (getattr(job, "third_party_bookings", None) or []))
+    if not allowed:
+        raise HTTPException(status_code=403, detail="This job is not booked to your company")
+    if status_val not in ("Booked", "In progress", "Waiting parts", "Completed"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    photo_path = None
+    if photo and photo.filename:
+        ext = os.path.splitext(photo.filename)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic"):
+            raise HTTPException(status_code=400, detail="Photo must be jpg, png or heic")
+        fname = f"{job.stock_number}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = os.path.join(UPLOAD_DIR, "supplier", fname)
+        with open(dest, "wb") as f:
+            f.write(await photo.read())
+        photo_path = "/uploads/supplier/" + fname
+    row = models.SupplierUpdate(
+        job_card_id=job.id,
+        company=company,
+        status=status_val,
+        work_doing=(work_doing or "").strip() or None,
+        parts_needed=(parts_needed or "").strip() or None,
+        note=(note or "").strip() or None,
+        photo_path=photo_path,
+        created_by_name=current_user.full_name,
+        created_by=current_user.id
+    )
+    db.add(row)
+    msg = f"SUPPLIER {company} on {job.stock_number}: {status_val}"
+    if row.parts_needed:
+        msg += " — parts needed (workshop note only)"
+    if photo_path:
+        msg += " — job card photo uploaded"
+    notify_role(db, "workshop", msg, job.id)
+    notify_role(db, "admin", msg, job.id)
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/supplier-updates")
+async def api_all_supplier_updates(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in ("workshop", "admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Workshop and admin only")
+    rows = db.query(models.SupplierUpdate).order_by(models.SupplierUpdate.created_at.desc()).limit(80).all()
+    out = []
+    for s in rows:
+        job = db.query(models.JobCard).filter(models.JobCard.id == s.job_card_id).first()
+        out.append(sup_row(s, job))
+    return {"updates": out}
+
+@app.post("/api/supplier-updates/{upd_id}/workshop")
+async def api_supplier_workshop_reply(upd_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in ("workshop", "admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Workshop and admin only")
+    row = db.query(models.SupplierUpdate).filter(models.SupplierUpdate.id == upd_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Update not found")
+    body = await request.json()
+    decision = body.get("workshop_parts_decision")
+    if decision not in ("workshop_assist", "supplier_supply"):
+        raise HTTPException(status_code=400, detail="Choose workshop assist or supplier must supply")
+    row.workshop_parts_decision = decision
+    row.workshop_parts_note = (body.get("workshop_parts_note") or "").strip() or None
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/stock-orders")
+async def api_stock_orders(db: Session = Depends(get_db)):
+    rows = db.query(models.WorkshopStockOrder).order_by(models.WorkshopStockOrder.id.desc()).all()
+    return {"orders": [stock_row(s) for s in rows]}
+
+@app.post("/api/stock-orders")
+async def api_add_stock_order(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    role = (body.get("role") or "").lower()
+    if role not in ("stock", "admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Only the stock controller can add keep-on-hand items")
+    desc = (body.get("description") or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Description is required")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Stock"
+    row = models.WorkshopStockOrder(
+        description=desc,
+        quantity=(body.get("quantity") or "1").strip() or "1",
+        notes=(body.get("notes") or "").strip() or None,
+        status="To be ordered",
+        created_by_name=who,
+        created_by=body.get("user_id"),
+        last_updated_by=who
+    )
+    db.add(row)
+    db.flush()
+    msg = f"WORKSHOP STOCK TO ORDER: {row.description} x{row.quantity}"
+    notify_role(db, "workshop", msg)
+    notify_role(db, "admin", msg)
+    db.commit()
+    return {"success": True, "id": row.id}
+
+@app.post("/api/stock-orders/{item_id}/status")
+async def api_stock_status(item_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    role = (body.get("role") or "").lower()
+    if role not in ("stock", "workshop", "admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    row = db.query(models.WorkshopStockOrder).filter(models.WorkshopStockOrder.id == item_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if row.status == "Closed":
+        raise HTTPException(status_code=400, detail="Already closed")
+    status = body.get("status") or row.status
+    if status not in ("To be ordered", "Ordered", "Waiting for delivery", "Received"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Staff"
+    row.status = status
+    row.last_updated_by = who
+    if body.get("ordered_date"):
+        row.ordered_date = body.get("ordered_date")
+    if body.get("supplier_invoice") is not None:
+        row.supplier_invoice = (body.get("supplier_invoice") or "").strip() or None
+    msg = f"Workshop stock {status}: {row.description} x{row.quantity} — {who}"
+    notify_role(db, "stock", msg)
+    notify_role(db, "workshop", msg)
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/stock-orders/{item_id}/sign-received")
+async def api_stock_sign(item_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    role = (body.get("role") or "").lower()
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Staff"
+    row = db.query(models.WorkshopStockOrder).filter(models.WorkshopStockOrder.id == item_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if row.status == "Closed":
+        raise HTTPException(status_code=400, detail="Already closed")
+    if role == "stock" or role in ("admin", "accounts"):
+        row.stock_received_by = who
+        row.stock_received_at = datetime.utcnow()
+    elif role == "workshop":
+        row.workshop_received_by = who
+        row.workshop_received_at = datetime.utcnow()
+    else:
+        raise HTTPException(status_code=403, detail="Only stock controller and workshop can sign received")
+    row.last_updated_by = who
+    row.status = "Received"
+    if row.stock_received_by and row.workshop_received_by:
+        row.status = "Closed"
+        msg = f"Workshop stock CLOSED (both signed received): {row.description}"
+    else:
+        msg = f"Workshop stock received signed by {who} ({role}). Waiting for the other sign-off: {row.description}"
+    notify_role(db, "stock", msg)
+    notify_role(db, "workshop", msg)
+    db.commit()
+    return {"success": True, "status": row.status}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/progress")
 async def api_part_progress(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
@@ -2103,13 +2606,28 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
 @app.get("/api/notifications")
 async def api_notifications(user_id: int, db: Session = Depends(get_db)):
     rows = db.query(models.Notification).filter(models.Notification.user_id == user_id).order_by(models.Notification.created_at.desc()).limit(30).all()
-    return {"notifications": [{
+    unread = sum(1 for n in rows if not n.is_read)
+    return {"unread": unread, "notifications": [{
         "id": n.id,
         "message": n.message,
         "job_card_id": n.job_card_id,
         "is_read": n.is_read,
         "created_at": n.created_at.isoformat() if n.created_at else None
     } for n in rows]}
+
+@app.post("/api/notifications/mark-read")
+async def api_mark_notifications_read(request: Request, db: Session = Depends(get_db)):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    uid = body.get("user_id")
+    if not uid:
+        raise HTTPException(status_code=400, detail="user_id required")
+    db.query(models.Notification).filter(models.Notification.user_id == uid, models.Notification.is_read == False).update({"is_read": True})
+    db.commit()
+    return {"success": True}
 
 @app.post("/api/jobs/{job_id}/tasks/{task_id}/approve")
 async def api_approve_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db)):
