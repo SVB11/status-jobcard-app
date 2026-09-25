@@ -12,17 +12,19 @@
 {% block content %}
 <div class="mb-5">
     <h1 class="text-2xl font-bold uppercase tracking-wide">Job Cards</h1>
-    <p class="text-sm text-[#9aa6b4]">WS · vehicle · year · location · status. No extra lists on this page.</p>
+    <p class="text-sm text-[#9aa6b4]">Open jobs only. Delivered jobs move to Closed.</p>
 </div>
 
-<div class="flex flex-wrap gap-2 mb-4" id="filterBar">
+<div class="sticky-sub" id="filterBar">
+    <div class="flex flex-wrap gap-2 mb-3">
     <button type="button" data-f="all" class="g-filter on">All</button>
     <button type="button" data-f="needs" class="g-filter">Needs me</button>
     <button type="button" data-f="workshop" class="g-filter">In workshop</button>
     <button type="button" data-f="third" class="g-filter">At 3rd party</button>
     <button type="button" data-f="ready" class="g-filter">Ready</button>
+    </div>
+    <input id="wsSearch" type="search" placeholder="FIND WS / VEHICLE" class="w-full px-3 py-3 rounded-lg bg-[#11151c] border border-[#2a3340] text-white uppercase text-sm">
 </div>
-<input id="wsSearch" type="search" placeholder="FIND WS / VEHICLE" class="w-full mb-5 px-3 py-3 rounded-lg bg-[#11151c] border border-[#2a3340] text-white uppercase text-sm">
 
 <div id="jobsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     <p class="text-[#9aa6b4] text-sm col-span-full">Loading jobs...</p>
@@ -33,7 +35,7 @@
 <style>
 .g-filter { padding: 8px 14px; border-radius: 999px; border: 1px solid #2a3340; background: #11151c; color: #d5dde6; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .g-filter.on { background: #025daa; border-color: #025daa; color: #fff; }
-.g-card { display: block; background: #11151c; border: 1px solid #243040; border-radius: 14px; padding: 16px; color: #e8edf3; text-decoration: none; }
+.g-card { display: block; background: rgba(17,21,28,0.78); border: 1px solid #243040; border-radius: 14px; padding: 12px 16px 16px; color: #e8edf3; text-decoration: none; backdrop-filter: blur(12px); }
 .g-card:hover { border-color: #025daa; }
 </style>
 <script>

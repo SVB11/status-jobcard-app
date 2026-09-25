@@ -325,16 +325,22 @@ async def api_create_job(
 
 # ---------- LIST JOBS (basic) ----------
 
+CLOSED_STATUSES = ("Delivered / Closed", "Delivered", "Closed")
+
 @app.get("/api/jobs")
-async def api_list_jobs(status: str = None, salesman: str = None, created_by: int = None, db: Session = Depends(get_db)):
+async def api_list_jobs(status: str = None, salesman: str = None, created_by: int = None, archived: int = 0, db: Session = Depends(get_db)):
     query = db.query(models.JobCard).order_by(models.JobCard.created_at.desc())
     if status:
         query = query.filter(models.JobCard.status == status)
+    elif int(archived or 0) == 1:
+        query = query.filter(models.JobCard.status.in_(CLOSED_STATUSES))
+    else:
+        query = query.filter(~models.JobCard.status.in_(CLOSED_STATUSES))
     if salesman:
         query = query.filter(models.JobCard.salesman_name == salesman)
     if created_by:
         query = query.filter(models.JobCard.created_by == created_by)
-    jobs = query.limit(100).all()
+    jobs = query.limit(400).all()
     result = []
     for j in jobs:
         result.append({
@@ -369,6 +375,10 @@ async def health():
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(request: Request):
     return render_template("jobs.html", request=request, page_title="Job Cards")
+
+@app.get("/jobs/archive", response_class=HTMLResponse)
+async def jobs_archive_page(request: Request):
+    return render_template("jobs_archive.html", request=request, page_title="Closed Job Cards")
 
 # ---------- ACCEPT JOB ----------
 
@@ -1260,7 +1270,8 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
 # ---------- DELETE JOB (Admin only) ----------
 
 @app.post("/api/jobs/{job_id}/delete")
-async def api_delete_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_delete_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
     try:
         body = await request.json()
     except:
@@ -1269,20 +1280,40 @@ async def api_delete_job(job_id: int, request: Request, db: Session = Depends(ge
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in CLOSED_STATUSES:
+        raise HTTPException(status_code=400, detail="Only delivered / closed jobs can be deleted from archive")
 
-    user_id = body.get("user_id")
+    user_id = body.get("user_id") or current_user.id
     job_number = job.job_number
 
-    # Delete related records first (tasks, pdi items, audit can stay or cascade)
     db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).delete()
     db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id).delete()
+    db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).delete()
+    db.query(models.SupplyItem).filter(models.SupplyItem.job_card_id == job_id).delete()
+    db.query(models.ThirdPartyBooking).filter(models.ThirdPartyBooking.job_card_id == job_id).delete()
+    db.query(models.JobUpdate).filter(models.JobUpdate.job_card_id == job_id).delete()
+    db.query(models.Notification).filter(models.Notification.job_card_id == job_id).delete()
+    db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job_id).delete()
     db.delete(job)
     db.commit()
 
     if user_id:
-        log_audit(db, user_id, "Deleted Job Card", None, f"Deleted job {job_number}")
+        log_audit(db, user_id, "Deleted closed Job Card", None, f"Deleted archived job {job_number}")
 
-    return {"success": True, "message": f"Job {job_number} deleted"}
+    return {"success": True, "message": f"Job {job_number} deleted from archive"}
+
+@app.get("/api/admin/closed-jobs.csv")
+async def api_closed_jobs_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    import csv, io
+    jobs = db.query(models.JobCard).filter(models.JobCard.status.in_(CLOSED_STATUSES)).order_by(models.JobCard.created_at.desc()).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
+    for j in jobs:
+        w.writerow([j.job_number, j.stock_number, j.vehicle_description, j.year, f"{j.main_type}/{j.sub_type}", j.client_name, j.salesman_name, j.status, j.current_location or "", j.created_at.isoformat() if j.created_at else ""])
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return Response(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=closed_jobs_{stamp}.csv"})
 
 # ---------- LISTS & LOCATION DASHBOARD ----------
 
@@ -1334,13 +1365,15 @@ async def api_lists(db: Session = Depends(get_db)):
 
 @app.get("/api/locations-board")
 async def api_locations_board(db: Session = Depends(get_db)):
-    jobs = db.query(models.JobCard).filter(
-        models.JobCard.status != "Delivered / Closed"
-    ).all()
+    jobs = db.query(models.JobCard).order_by(models.JobCard.created_at.desc()).all()
     board = {loc: [] for loc in LOCATIONS}
     board["Unspecified"] = []
+    board["Delivered / Out"] = []
     for j in jobs:
-        loc = j.current_location if j.current_location in board else "Unspecified"
+        if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
+            loc = "Delivered / Out"
+        else:
+            loc = j.current_location if j.current_location in board else "Unspecified"
         board[loc].append({
             "id": j.id,
             "job_number": j.job_number,

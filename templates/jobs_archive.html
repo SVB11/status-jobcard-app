@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Closed Job Cards{% endblock %}
+
+{% block header_right %}
+<div class="flex items-center gap-3">
+    <span id="userInfo" class="text-sm text-gray-600"></span>
+    <button onclick="logout()" class="text-sm text-red-600 hover:underline">Logout</button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Closed / delivered</h1>
+    <p class="text-sm text-[#9aa6b4]">These jobs stay saved here for download. Only Admin can delete them.</p>
+</div>
+<div class="sticky-sub flex flex-wrap gap-2 mb-4">
+    <a href="/jobs" class="g-filter">Open jobs</a>
+    <button type="button" id="dlBtn" class="g-filter on">Download CSV</button>
+</div>
+<input id="wsSearch" type="search" placeholder="FIND WS / VEHICLE" class="w-full mb-5 px-3 py-3 rounded-lg bg-[#11151c] border border-[#2a3340] text-white uppercase text-sm">
+<div id="jobsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <p class="text-[#9aa6b4] text-sm col-span-full">Loading closed jobs...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.g-filter { padding: 8px 14px; border-radius: 999px; border: 1px solid #2a3340; background: #11151c; color: #d5dde6; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.g-filter.on { background: #025daa; border-color: #025daa; color: #fff; }
+.g-card { display: block; background: rgba(17,21,28,0.78); border: 1px solid #243040; border-radius: 14px; padding: 12px 16px 16px; color: #e8edf3; text-decoration: none; backdrop-filter: blur(12px); }
+</style>
+<script>
+    const token = localStorage.getItem('token');
+    const fullName = localStorage.getItem('full_name') || '';
+    const role = (localStorage.getItem('role') || '').toLowerCase();
+    if (!token) window.location.href = '/login';
+    if (role !== 'admin' && role !== 'accounts') window.location.href = '/jobs';
+    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+    function logout() { localStorage.clear(); window.location.href = '/login'; }
+
+    let allJobs = [];
+    function render() {
+        const q = (document.getElementById('wsSearch').value || '').toLowerCase().trim();
+        let rows = allJobs.slice();
+        if (q) {
+            rows = rows.filter(function(j) {
+                return (j.stock_number || '').toLowerCase().indexOf(q) !== -1
+                    || (j.vehicle_description || '').toLowerCase().indexOf(q) !== -1
+                    || (j.job_number || '').toLowerCase().indexOf(q) !== -1;
+            });
+        }
+        const box = document.getElementById('jobsContainer');
+        if (!rows.length) {
+            box.innerHTML = '<div class="col-span-full text-[#9aa6b4] text-sm p-6">No closed jobs saved</div>';
+            return;
+        }
+        box.innerHTML = rows.map(function(j) {
+            return '<div class="g-card">' +
+                (j.photo_url ? '<img class="stock-thumb mb-3" src="' + j.photo_url + '" alt="">' : '') +
+                '<a href="/jobs/' + j.id + '" class="text-lg font-bold tracking-wide block">' + (j.stock_number || j.job_number) + '</a>' +
+                '<div class="text-sm mt-1">' + (j.vehicle_description || '') + '</div>' +
+                '<div class="text-xs text-[#9aa6b4] mt-1 uppercase">' + (j.year || '') + ' · ' + (j.status || '') + '</div>' +
+                '<button type="button" data-id="' + j.id + '" class="del-btn mt-3 px-3 py-2 bg-red-800 text-white text-xs uppercase rounded">Delete from archive</button>' +
+                '</div>';
+        }).join('');
+        box.querySelectorAll('.del-btn').forEach(function(btn) {
+            btn.onclick = async function() {
+                if (!confirm('Delete this closed job permanently? Download first if you still need it.')) return;
+                const res = await fetch('/api/jobs/' + btn.getAttribute('data-id') + '/delete', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: parseInt(localStorage.getItem('user_id') || '0') })
+                });
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not delete'); return; }
+                loadJobs();
+            };
+        });
+    }
+    document.getElementById('wsSearch').addEventListener('input', render);
+    document.getElementById('dlBtn').onclick = async function() {
+        const res = await fetch('/api/admin/closed-jobs.csv', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) { alert('Could not download'); return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'closed_jobs.csv';
+        a.click();
+    };
+    async function loadJobs() {
+        const res = await fetch('/api/jobs?archived=1', { headers: { 'Authorization': 'Bearer ' + token } });
+        const data = await res.json();
+        allJobs = data.jobs || [];
+        render();
+    }
+    loadJobs();
+</script>
+{% endblock %}

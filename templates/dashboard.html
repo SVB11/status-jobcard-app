@@ -10,9 +10,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="mb-6">
-    <h1 class="text-2xl font-bold text-gray-800">Dashboard</h1>
-    <p class="text-gray-500">Welcome to the Status Truck Sales Job Card System</p>
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Dashboard</h1>
+    <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
 </div>
 
 <div id="pendingExtrasBox" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl shadow p-6 mb-8">
@@ -48,37 +48,42 @@
     </a>
 </div>
 
-<div id="supplierDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1 uppercase">Supplier updates</h2>
+<details id="supplierDashBox" class="hidden dash-fold">
+    <summary>Supplier updates</summary>
+    <h2 class="hidden">Supplier updates</h2>
     <p class="text-sm text-gray-500 mb-4">PFT / FK notes. Parts listed here are a workshop note only — not a Chantelle order.</p>
     <div id="supplierDashList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="workshopCountBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1 uppercase">Workshop update counts</h2>
+</details>
+<details id="workshopCountBox" class="hidden dash-fold">
+    <summary>Workshop update counts</summary>
+    <h2 class="hidden">Workshop update counts</h2>
     <p class="text-sm text-gray-500 mb-4">How many times each workshop user updated a job.</p>
     <div id="workshopCountList" class="space-y-3 text-sm">Loading...</div>
-</div>
+</details>
 
 
 
-<div id="myJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">My job cards</h2>
+<details id="myJobsBox" class="hidden dash-fold">
+    <summary>My job cards</summary>
+    <h2 class="hidden">My job cards</h2>
     <p class="text-sm text-gray-500 mb-4">Jobs you created. View activity here. After creation only Workshop updates the work. You complete and sign the PDI.</p>
     <div id="myJobsList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 
-<div id="allJobsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">All job cards</h2>
+<details id="allJobsBox" class="hidden dash-fold">
+    <summary>All job cards</summary>
+    <h2 class="hidden">All job cards</h2>
     <p class="text-sm text-gray-500 mb-4">Quick view of every job. Open a card for full info and PDI.</p>
     <div id="allJobsList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 
 <div id="pdiFailBox" class="hidden bg-red-50 border border-red-300 rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg text-red-700 mb-1">PDI failed — back to workshop</h2>
     <p class="text-sm text-red-600 mb-4">Fix these items, then retick Pass and sign PDI again.</p>
     <div id="pdiFailList" class="space-y-2 text-sm">Loading...</div>
 </div>
-<div id="jobBookingsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
+<details id="jobBookingsBox" class="hidden dash-fold">
+    <summary>Parts and extras by job</summary>
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
         <div>
             <h2 class="font-bold text-lg">Parts and extras by job</h2>
@@ -87,37 +92,42 @@
         <a href="/admin/print-bookings" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Print this list</a>
     </div>
     <div id="jobBookingsList" class="space-y-3 text-sm">Loading...</div>
-</div>
-<div id="suppliesDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">HOSES / COUPLERS / SUZI</h2>
+</details>
+<details id="suppliesDashBox" class="hidden dash-fold">
+    <summary>Hoses / couplers / suzi</summary>
+    <h2 class="hidden">HOSES / COUPLERS / SUZI</h2>
     <p class="text-sm text-gray-500 mb-4">Booked and completed supply items on open job cards.</p>
     <div id="suppliesDashList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="stockDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8 border-2 border-cyan-600">
-    <h2 class="font-bold text-lg mb-1">WORKSHOP STOCK TO ORDER</h2>
+</details>
+<details id="stockDashBox" class="hidden dash-fold">
+    <summary>Workshop stock to order</summary>
+    <h2 class="hidden">WORKSHOP STOCK TO ORDER</h2>
     <p class="text-sm text-gray-500 mb-4">Keep-on-hand items. Open the tab to update ordered / received and sign off.</p>
     <div id="stockDashList" class="space-y-2 text-sm">Loading...</div>
     <a href="/stock" class="inline-block mt-3 text-sm text-status-blue font-semibold">Open workshop stock tab</a>
-</div>
-<div id="partsDashBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">Parts to be ordered</h2>
+</details>
+<details id="partsDashBox" class="hidden dash-fold">
+    <summary>Parts to be ordered</summary>
+    <h2 class="hidden">Parts to be ordered</h2>
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
     <div id="partsDashList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 <div id="updateReqBox" class="hidden bg-white rounded-xl shadow p-6 mb-8 border-2 border-orange-500">
     <h2 class="font-bold text-lg mb-1 text-orange-500">SALES UPDATE REQUESTS</h2>
     <p class="text-sm text-gray-500 mb-4">Sales asked for an update because the job feels slow. Open the job and post current activity, then clear the request.</p>
     <div id="updateReqList" class="space-y-2 text-sm">Loading...</div>
 </div>
-<div id="notifyBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">Notifications</h2>
+<details id="notifyBox" class="hidden dash-fold">
+    <summary>Notifications</summary>
+    <h2 class="hidden">Notifications</h2>
     <div id="notifyList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="bookingsBox" class="hidden bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">3rd party bookings diary</h2>
+</details>
+<details id="bookingsBox" class="hidden dash-fold">
+    <summary>3rd party bookings diary</summary>
+    <h2 class="hidden">3rd party bookings diary</h2>
     <p class="text-sm text-gray-500 mb-4">Filled from Work / Prep Tasks (Pressure, Barrel, Calibration, Roadworthy, As Is). You do not need to type it again under 3rd Party Bookings.</p>
     <div id="bookingsList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 
 <div id="locationBoardWrap" class="bg-white rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-1">Vehicle Locations</h2>
