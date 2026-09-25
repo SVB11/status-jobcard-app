@@ -28,6 +28,7 @@ NEW_COLUMNS = {
         "empty_signed_sales": "BOOLEAN",
         "empty_signed_sales_by": "INTEGER",
         "empty_signed_sales_at": "DATETIME",
+        "job_purpose": "VARCHAR",
     },
     "part_items": {
         "quantity": "VARCHAR",

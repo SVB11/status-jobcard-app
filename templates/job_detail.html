@@ -673,6 +673,9 @@
             if (isWorkshop && j.update_requested_at) {
                 buttons += '<button onclick="clearUpdateRequest()" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Update sent / clear request</button>';
             }
+            if (isAdmin && j.status === 'Pending Admin Approval') {
+                buttons += '<button onclick="approveShowroomJob()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">Approve showroom job</button>';
+            }
             if (isAdmin) {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
@@ -852,6 +855,17 @@
         }
     }
 
+
+    async function approveShowroomJob() {
+        const res = await fetch('/api/jobs/' + jobId + '/approve-showroom', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.detail || 'Could not approve'); return; }
+        alert('Showroom job approved. Workshop can start.');
+        loadJob();
+    }
 
     async function signEmpty(party) {
         if (!confirm('Confirm this tanker is empty — no water or liquid in the compartments or pipeline to the APIs?')) return;

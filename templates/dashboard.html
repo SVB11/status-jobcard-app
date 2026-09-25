@@ -15,6 +15,11 @@
     <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
 </div>
 
+<div id="showroomBox" class="hidden mb-6 rounded-xl border-2 border-purple-500 p-4">
+    <h2 class="font-bold uppercase tracking-wide text-purple-300">Showroom jobs waiting approval</h2>
+    <p class="text-sm text-[#d5dde6] mb-3">Workshop created these for stock / showroom prep. Admin must approve before work starts.</p>
+    <div id="showroomList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="emptyCheckBox" class="hidden mb-6 rounded-xl border-2 border-orange-500 p-4">
     <h2 class="font-bold uppercase tracking-wide text-orange-300">Tanker empty check</h2>
     <p class="text-sm text-[#d5dde6] mb-3">Confirm compartments and pipelines to APIs are empty. Workshop and sales must both sign before ready / delivery.</p>
@@ -290,7 +295,7 @@
             show('bookingsBox');
             loadUpdateRequests();
             loadNotifications();
-            loadSignoffQueue(); loadEmptyCheckQueue();
+            loadSignoffQueue(); loadEmptyCheckQueue(); loadShowroomQueue(); loadShowroomQueue();
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
@@ -307,7 +312,7 @@
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
             loadNotifications();
-            loadSignoffQueue(); loadEmptyCheckQueue();
+            loadSignoffQueue(); loadEmptyCheckQueue(); loadShowroomQueue(); loadShowroomQueue();
         }
         if (role === 'marketing') {
             show('allJobsBox');
@@ -318,7 +323,7 @@
         if (role === 'workshop') {
             loadMorningLocations();
             loadWashRequests();
-            loadSignoffQueue(); loadEmptyCheckQueue();
+            loadSignoffQueue(); loadEmptyCheckQueue(); loadShowroomQueue(); loadShowroomQueue();
             show('workshopCard');
             show('createCard');
             show('stockCard');
@@ -703,6 +708,39 @@
     }
 
 
+
+
+    async function loadShowroomQueue() {
+        const box = document.getElementById('showroomBox');
+        if (!box) return;
+        const role = localStorage.getItem('role') || '';
+        if (role !== 'admin' && role !== 'accounts' && role !== 'workshop') { box.classList.add('hidden'); return; }
+        try {
+            const res = await fetch('/api/jobs/showroom-approval-queue', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            if (!res.ok) return;
+            const rows = (await res.json()).jobs || [];
+            if (!rows.length) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            const canApprove = (role === 'admin' || role === 'accounts');
+            document.getElementById('showroomList').innerHTML = rows.map(function(j) {
+                return '<div class="p-2 rounded border border-purple-600 bg-[#11151c]">' +
+                    '<a href="/jobs/' + j.id + '" class="font-semibold">' + j.stock_number + ' · ' + (j.vehicle_description||'') + '</a>' +
+                    '<div class="text-xs text-[#9aa6b4]">Created by ' + (j.created_by_name||'') + '</div>' +
+                    (canApprove ? '<button type="button" class="mt-2 px-3 py-1 bg-purple-600 text-white text-xs rounded" onclick="approveShowroom(' + j.id + ')">Approve</button>' : '<div class="text-xs text-orange-300">Waiting for admin</div>') +
+                    '</div>';
+            }).join('');
+        } catch (e) {}
+    }
+    async function approveShowroom(id) {
+        const res = await fetch('/api/jobs/' + id + '/approve-showroom', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.detail || 'Could not approve'); return; }
+        loadShowroomQueue();
+        if (typeof refreshBell === 'function') refreshBell();
+    }
 
     async function loadEmptyCheckQueue() {
         const box = document.getElementById('emptyCheckBox');

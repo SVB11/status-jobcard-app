@@ -83,6 +83,15 @@
             </div>
         </div>
 
+        <div id="purposeBox" class="hidden">
+            <h2 class="text-lg font-semibold text-status-blue border-b pb-2 mb-4">Job type</h2>
+            <select name="job_purpose" id="job_purpose" class="w-full px-3 py-2 border rounded-lg" onchange="togglePurpose()">
+                <option value="sold">Sold vehicle — ready for delivery</option>
+                <option value="showroom">Showroom stock — refurb / service to park on the floor</option>
+            </select>
+            <p id="purposeNote" class="hidden text-sm text-orange-400 mt-2">Showroom jobs wait for admin approval before workshop can start.</p>
+        </div>
+
         <!-- Client & Sales -->
         <div>
             <h2 class="text-lg font-semibold text-status-blue border-b pb-2 mb-4">Client & Sales</h2>
@@ -192,6 +201,30 @@
         document.getElementById('salesman_name').value = fullName;
         document.getElementById('salesman_name').readOnly = true;
         document.getElementById('salesman_name').classList.add('bg-gray-50');
+        const nm = (fullName || '').toLowerCase();
+        const canShowroom = role === 'workshop' || role === 'admin' || role === 'accounts'
+            || nm.indexOf('sebastian van biljon') !== -1
+            || nm.indexOf('siegfried van biljon') !== -1;
+        if (canShowroom) {
+            document.getElementById('purposeBox').classList.remove('hidden');
+        }
+    }
+
+    function togglePurpose() {
+        const purpose = document.getElementById('job_purpose').value;
+        const note = document.getElementById('purposeNote');
+        const btn = document.getElementById('submitBtn');
+        const client = document.querySelector('[name="client_name"]');
+        if (purpose === 'showroom') {
+            note.classList.remove('hidden');
+            btn.textContent = 'Submit showroom job for admin approval';
+            if (client && !client.value) client.value = 'Showroom';
+            client.required = false;
+        } else {
+            note.classList.add('hidden');
+            btn.textContent = 'Submit Job Card to Workshop';
+            client.required = true;
+        }
     }
 
     function logout() {
@@ -274,6 +307,7 @@
             vin_number: formData.get('vin_number'),
             registration_number: formData.get('registration_number'),
             other_instructions: formData.get('other_instructions'),
+            job_purpose: formData.get('job_purpose') || 'sold',
             selected_tasks: selected,
             user_id: userId ? parseInt(userId) : null
         };

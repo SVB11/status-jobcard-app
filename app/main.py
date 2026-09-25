@@ -243,6 +243,18 @@ async def api_create_job(
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    purpose = (body.get("job_purpose") or "sold").strip().lower()
+    if purpose not in ("sold", "showroom"):
+        purpose = "sold"
+    if purpose == "showroom":
+        body["client_name"] = body.get("client_name") or "Showroom"
+        body["salesman_name"] = body.get("salesman_name") or "Workshop"
+        body["quotation_invoice_number"] = body.get("quotation_invoice_number") or "SHOWROOM"
+        if not body.get("target_delivery_date"):
+            body["target_delivery_date"] = str(sast_today()) if "sast_today" in dir() else datetime.utcnow().date().isoformat()
+        if not body.get("priority"):
+            body["priority"] = "Normal"
+
     # Required fields
     required = ["stock_number", "vehicle_description", "year", "main_type",
                 "client_name", "salesman_name", "priority", "target_delivery_date",
@@ -256,6 +268,7 @@ async def api_create_job(
     created_by_id = body.get("user_id")  # passed from frontend for now
 
     job_number = generate_job_number(db)
+    start_status = "Pending Admin Approval" if purpose == "showroom" else "Submitted to Workshop"
 
     job = models.JobCard(
         job_number=job_number,
@@ -278,7 +291,8 @@ async def api_create_job(
         third_party_place=(body.get("third_party_place") or "").strip() or None,
         third_party_date=body.get("third_party_date") or None,
         parts_to_order=(body.get("parts_to_order") or "").strip() or None,
-        status="Submitted to Workshop"
+        job_purpose=purpose,
+        status=start_status
     )
     db.add(job)
     db.flush()  # get job.id
@@ -315,16 +329,24 @@ async def api_create_job(
     if created_by_id:
         log_audit(db, created_by_id, "Created Job Card", job.id,
                   f"Job {job_number} for {job.stock_number} – {job.vehicle_description}")
-    msg = f"New job card {job.stock_number} — {job.vehicle_description}"
-    notify_role(db, "workshop", msg, job.id)
-    notify_role(db, "admin", msg, job.id)
-    notify_role(db, "accounts", msg, job.id)
+    if purpose == "showroom":
+        msg = f"SHOWROOM job {job.stock_number} — {job.vehicle_description} needs admin approval"
+        notify_role(db, "admin", msg, job.id)
+        notify_role(db, "accounts", msg, job.id)
+        notify_role(db, "workshop", msg, job.id)
+        done_msg = f"Showroom job {job.job_number} created. Waiting for admin approval before work starts."
+    else:
+        msg = f"New job card {job.stock_number} — {job.vehicle_description}"
+        notify_role(db, "workshop", msg, job.id)
+        notify_role(db, "admin", msg, job.id)
+        notify_role(db, "accounts", msg, job.id)
+        done_msg = f"Job Card {job.job_number} submitted to Workshop successfully."
 
     return {
         "success": True,
         "job_number": job.job_number,
         "job_id": job.id,
-        "message": f"Job Card {job.job_number} submitted to Workshop successfully."
+        "message": done_msg
     }
 
 # ---------- LIST JOBS (basic) ----------
@@ -353,6 +375,7 @@ async def api_list_jobs(status: str = None, salesman: str = None, created_by: in
             "stock_number": j.stock_number,
             "vehicle_description": j.vehicle_description,
             "main_type": j.main_type,
+            "job_purpose": getattr(j, "job_purpose", None) or "sold",
             "client_name": j.client_name,
             "salesman_name": j.salesman_name,
             "priority": j.priority,
@@ -387,6 +410,42 @@ async def jobs_archive_page(request: Request):
 
 # ---------- ACCEPT JOB ----------
 
+@app.post("/api/jobs/{job_id}/approve-showroom")
+async def api_approve_showroom(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in ("admin", "accounts"):
+        raise HTTPException(status_code=403, detail="Admin must approve showroom jobs")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "Pending Admin Approval":
+        raise HTTPException(status_code=400, detail="This job is not waiting for approval")
+    job.status = "Submitted to Workshop"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Showroom job approved by {current_user.full_name}",
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    log_audit(db, current_user.id, "Approved showroom job", job.id, job.stock_number)
+    notify_role(db, "workshop", f"Showroom job approved: {job.stock_number} — {job.vehicle_description}", job.id)
+    db.commit()
+    return {"success": True, "status": job.status}
+
+@app.get("/api/jobs/showroom-approval-queue")
+async def api_showroom_approval_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in ("admin", "accounts", "workshop"):
+        return {"jobs": []}
+    jobs = db.query(models.JobCard).filter(models.JobCard.status == "Pending Admin Approval").order_by(models.JobCard.created_at.desc()).all()
+    return {"jobs": [{
+        "id": j.id,
+        "stock_number": j.stock_number,
+        "vehicle_description": j.vehicle_description,
+        "year": j.year,
+        "main_type": j.main_type,
+        "created_by_name": user_name(db, j.created_by),
+    } for j in jobs]}
+
 @app.post("/api/jobs/{job_id}/accept")
 async def api_accept_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     try:
@@ -398,6 +457,8 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    if job.status == "Pending Admin Approval":
+        raise HTTPException(status_code=400, detail="Admin must approve this showroom job before workshop can accept it")
     if job.status != "Submitted to Workshop":
         raise HTTPException(status_code=400, detail=f"Job is already in status: {job.status}")
 
@@ -508,6 +569,7 @@ async def api_get_job(job_id: int, db: Session = Depends(get_db)):
         "vehicle_description": job.vehicle_description,
         "year": job.year,
         "main_type": job.main_type,
+        "job_purpose": getattr(job, "job_purpose", None) or "sold",
         "sub_type": job.sub_type,
         "photo_url": match_stock_photo(job.vehicle_description, job.main_type, job.sub_type, job.year),
         "vin_number": getattr(job, "vin_number", None),
@@ -645,6 +707,8 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
         raise HTTPException(status_code=404, detail="Job not found")
 
     assert_editable(db, job, body.get("user_id"))
+    if job.status == "Pending Admin Approval":
+        raise HTTPException(status_code=400, detail="Admin must approve this showroom job before work can start")
 
     task = db.query(models.JobTask).filter(
         models.JobTask.id == task_id,

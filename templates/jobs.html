@@ -107,7 +107,8 @@
             return '<a class="g-card" href="/jobs/' + j.id + '">' +
                 (j.photo_url ? '<img class="stock-thumb mb-2" src="' + j.photo_url + '" alt="">' : '') +
                 '<div class="glass-inner">' +
-                '<div class="text-lg font-bold tracking-wide">' + (j.stock_number || j.job_number) + '</div>' +
+                '<div class="text-lg font-bold tracking-wide">' + (j.stock_number || j.job_number) +
+                (j.job_purpose === 'showroom' ? ' <span class="text-xs text-purple-300">SHOWROOM</span>' : '') + '</div>' +
                 '<div class="text-sm mt-1">' + (j.vehicle_description || '') + '</div>' +
                 '<div class="text-xs text-[#9aa6b4] mt-1 uppercase">' + (j.year || '') + (j.main_type ? ' · ' + j.main_type : '') + '</div>' +
                 '<div class="flex flex-wrap gap-2 mt-3">' +

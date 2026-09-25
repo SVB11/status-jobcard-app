@@ -97,6 +97,7 @@ class JobCard(Base):
     update_requested_at = Column(DateTime(timezone=True), nullable=True)
     update_requested_by = Column(String, nullable=True)
     update_request_note = Column(Text, nullable=True)
+    job_purpose = Column(String, default="sold")
 
     # Status & Tracking
     status = Column(String, default="Submitted to Workshop")
