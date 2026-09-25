@@ -15,6 +15,11 @@
     <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
 </div>
 
+<div id="signoffBox" class="hidden mb-6 rounded-xl border-2 border-green-600 p-4">
+    <h2 class="font-bold uppercase tracking-wide text-green-300">Sign off / mark ready</h2>
+    <p class="text-sm text-[#d5dde6] mb-3">Work is done. Sign the PDI and mark the job ready for delivery.</p>
+    <div id="signoffList" class="space-y-2 text-sm">Loading...</div>
+</div>
 <div id="washDashBox" class="hidden mb-6 rounded-xl border-2 border-cyan-500 p-4">
     <h2 class="font-bold uppercase tracking-wide text-cyan-300">Wash requests</h2>
     <p class="text-sm text-[#d5dde6] mb-3">Marketing / photos. Move to Wash Bay then mark done.</p>
@@ -238,6 +243,7 @@
             show('bookingsBox');
             loadUpdateRequests();
             loadNotifications();
+            loadSignoffQueue();
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
@@ -254,6 +260,7 @@
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
             loadNotifications();
+            loadSignoffQueue();
         }
         if (role === 'marketing') {
             show('allJobsBox');
@@ -264,6 +271,7 @@
         if (role === 'workshop') {
             loadMorningLocations();
             loadWashRequests();
+            loadSignoffQueue();
             show('workshopCard');
             show('createCard');
             show('stockCard');
@@ -645,6 +653,26 @@
         } catch (err) {
             document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
         }
+    }
+
+
+    async function loadSignoffQueue() {
+        const box = document.getElementById('signoffBox');
+        if (!box) return;
+        try {
+            const res = await fetch('/api/jobs/signoff-queue', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            if (!res.ok) return;
+            const data = await res.json();
+            const rows = data.jobs || [];
+            if (!rows.length) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            document.getElementById('signoffList').innerHTML = rows.map(function(j) {
+                const href = j.need_pdi ? ('/jobs/' + j.id + '/pdi') : ('/jobs/' + j.id);
+                return '<a href="' + href + '" class="block p-2 rounded border border-green-700 bg-[#11151c]">' +
+                    '<div class="font-semibold">' + j.stock_number + ' · ' + (j.vehicle_description||'') + '</div>' +
+                    '<div class="text-xs text-[#9aa6b4]">' + (j.status||'') + ' — ' + j.action + '</div></a>';
+            }).join('');
+        } catch (e) {}
     }
 
     async function loadWashRequests() {

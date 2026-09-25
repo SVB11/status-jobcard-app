@@ -726,11 +726,14 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     # Check if all tasks are completed → move job to Work Completed
     all_tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).all()
     if all_tasks and all(t.status == "Completed" for t in all_tasks):
-        job.status = "Work Completed"
-        job.work_completed_at = datetime.utcnow()
-        db.commit()
-        if user_id:
-            log_audit(db, user_id, "Work Completed", job.id, f"All tasks completed on {job.job_number}")
+        if job.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Delivered / Closed"):
+            job.status = "Work Completed"
+            job.work_completed_at = datetime.utcnow()
+            db.commit()
+            if user_id:
+                log_audit(db, user_id, "Work Completed", job.id, f"All tasks completed on {job.job_number}")
+            notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready for delivery")
+            db.commit()
 
     # Blocked notification placeholder
     if new_status == "Blocked" and user_id:
@@ -1022,6 +1025,13 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
 
     if user_id:
         log_audit(db, user_id, "Marked Ready for Delivery", job.id, f"Marked by {party}")
+    if job.ready_sales and job.ready_workshop:
+        notify_signoff(db, job, f"{job.stock_number} is ready for delivery")
+    elif party == "workshop" and not job.ready_sales:
+        notify_salesman(db, job, f"Workshop marked {job.stock_number} ready — sales must mark ready")
+    elif party == "sales" and not job.ready_workshop:
+        notify_role(db, "workshop", f"Sales marked {job.stock_number} ready — workshop must mark ready", job.id)
+    db.commit()
 
     return {
         "success": True,
@@ -1264,6 +1274,14 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
 
     if user_id:
         log_audit(db, user_id, "Signed PDI", job.id, f"PDI signed by {party}")
+    if job.pdi_signed_workshop and job.pdi_signed_sales:
+        notify_signoff(db, job, f"PDI signed off on {job.stock_number} — mark ready for delivery")
+    elif party == "workshop" and not job.pdi_signed_sales:
+        notify_salesman(db, job, f"Workshop signed PDI on {job.stock_number} — sales must sign and mark ready")
+        notify_role(db, "admin", f"Workshop signed PDI on {job.stock_number} — waiting for sales", job.id)
+    elif party == "sales" and not job.pdi_signed_workshop:
+        notify_role(db, "workshop", f"Sales signed PDI on {job.stock_number} — workshop must sign and mark ready", job.id)
+    db.commit()
 
     return {
         "success": True,
@@ -2222,6 +2240,23 @@ def notify_role(db, role, message, job_id=None):
         ids.append(u.id)
     send_web_push(db, ids, "Status Job Cards", message, f"/jobs/{job_id}" if job_id else "/dashboard")
 
+def notify_salesman(db, job, message):
+    q = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True)
+    if job.salesman_name:
+        q = q.filter(models.User.full_name == job.salesman_name)
+    users = q.all()
+    ids = []
+    for u in users:
+        db.add(models.Notification(user_id=u.id, job_card_id=job.id, message=message))
+        ids.append(u.id)
+    send_web_push(db, ids, "Status Job Cards", message, f"/jobs/{job.id}")
+
+def notify_signoff(db, job, message):
+    notify_salesman(db, job, message)
+    notify_role(db, "workshop", message, job.id)
+    notify_role(db, "admin", message, job.id)
+    notify_role(db, "accounts", message, job.id)
+
 @app.post("/api/jobs/{job_id}/request-update")
 async def api_request_update(job_id: int, request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -2726,6 +2761,43 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
             "year": job.year if job else "",
         })
     return {"parts": out}
+
+@app.get("/api/jobs/signoff-queue")
+async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    statuses = ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery")
+    jobs = db.query(models.JobCard).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
+    out = []
+    for j in jobs:
+        need_pdi = False
+        need_ready = False
+        if current_user.role == "sales":
+            if (j.salesman_name or "") != current_user.full_name:
+                continue
+            need_pdi = not bool(j.pdi_signed_sales)
+            need_ready = not bool(j.ready_sales)
+        elif current_user.role == "workshop":
+            need_pdi = not bool(j.pdi_signed_workshop)
+            need_ready = not bool(j.ready_workshop)
+        elif current_user.role in ("admin", "accounts"):
+            need_pdi = not (j.pdi_signed_sales and j.pdi_signed_workshop)
+            need_ready = not (j.ready_sales and j.ready_workshop)
+        else:
+            continue
+        if not (need_pdi or need_ready):
+            continue
+        action = "Sign PDI" if need_pdi else "Mark ready"
+        out.append({
+            "id": j.id,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "status": j.status,
+            "salesman_name": j.salesman_name,
+            "need_pdi": need_pdi,
+            "need_ready": need_ready,
+            "action": action,
+        })
+    return {"jobs": out}
 
 @app.get("/api/notifications")
 async def api_notifications(user_id: int, db: Session = Depends(get_db)):
