@@ -1865,24 +1865,26 @@ async def print_pdi_page(request: Request, job_id: int):
 async def client_report_page(request: Request, job_id: int):
     return render_template("client_report.html", request=request, job_id=job_id)
 
-def _client_report_payload(job_id: int, db: Session):
+def _client_report_payload(job_id: int, db: Session, current_user=None):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).all()
     parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).all()
     report = build_report(job, tasks, parts)
+    if not report.get("salesman_name") and current_user is not None:
+        report["salesman_name"] = current_user.full_name
     report["whatsapp"] = whatsapp_text(report)
     report["job_id"] = job.id
     return report
 
 @app.get("/api/jobs/{job_id}/client-report")
 async def api_client_report(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    return _client_report_payload(job_id, db)
+    return _client_report_payload(job_id, db, current_user)
 
 @app.get("/api/jobs/{job_id}/client-report.pdf")
 async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    report = _client_report_payload(job_id, db)
+    report = _client_report_payload(job_id, db, current_user)
     pdf = render_pdf(report)
     filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
     return Response(content=pdf, media_type="application/pdf", headers={

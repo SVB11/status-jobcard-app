@@ -10,7 +10,9 @@ STATUS_LINE = {
     "Submitted to Workshop": "Preparation has started",
     "Pending Admin Approval": "Preparation has started",
     "Accepted": "The vehicle is currently being prepared",
+    "Accepted by Workshop": "The vehicle is currently being prepared",
     "In Progress": "The vehicle is currently being prepared",
+    "PDI Failed - Returned to Workshop": "The vehicle is currently being prepared",
     "Work Completed": "Preparation is complete. Final inspection is under way",
     "PDI in Progress": "Preparation is complete. Final inspection is under way",
     "PDI Completed": "Preparation is complete. Final inspection is under way",
@@ -22,7 +24,9 @@ NEXT_STEP = {
     "Submitted to Workshop": "We will update you as preparation continues.",
     "Pending Admin Approval": "We will update you as preparation continues.",
     "Accepted": "We will confirm with you as soon as the next inspection is complete.",
+    "Accepted by Workshop": "We will confirm with you as soon as the next inspection is complete.",
     "In Progress": "We will confirm with you as soon as the next inspection is complete.",
+    "PDI Failed - Returned to Workshop": "Preparation is continuing. We will update you after the next inspection.",
     "Work Completed": "Final inspection is under way. We will contact you when the vehicle is ready.",
     "PDI in Progress": "Final inspection is under way. We will contact you when the vehicle is ready.",
     "PDI Completed": "Final inspection is under way. We will contact you when the vehicle is ready.",
@@ -137,21 +141,34 @@ _RANK = {
 }
 
 
+def _client_title(task_name, group):
+    raw = (task_name or "").strip()
+    low = _norm(raw)
+    for prefix in ("extra:", "other:", "parts:", "3rd party:", "3rd party :"):
+        if low.startswith(prefix):
+            rest = raw.split(":", 1)[1].strip()
+            return rest[:80] if rest else group["title"]
+    return group["title"]
+
+
 def build_report(job, tasks, parts=None):
     groups = {}
     for t in tasks or []:
         name = getattr(t, "task_name", "") or ""
         if _norm(getattr(t, "status", None)) in ("n/a", "na"):
             continue
+        if _norm(name).startswith("activity:"):
+            continue
         g = group_for_task(name)
         if not g:
             continue
         key = g["key"]
         line_status = client_status_for_task(t)
+        title = _client_title(name, g)
         cur = groups.get(key)
         if not cur or _RANK.get(line_status, 0) > _RANK.get(cur["status"], 0):
             groups[key] = {
-                "title": g["title"],
+                "title": title,
                 "note": g["note"],
                 "status": line_status,
             }
@@ -179,6 +196,20 @@ def build_report(job, tasks, parts=None):
     for key, row in groups.items():
         if key not in seen:
             items.append(row)
+
+    extra = (getattr(job, "other_instructions", None) or "").strip()
+    if extra and not any(i.get("title", "").lower() == extra.lower() for i in items):
+        items.append({
+            "title": extra[:80],
+            "note": "Additional preparation",
+            "status": "In progress" if (job.status or "") not in ("Work Completed", "PDI Completed", "Ready for Delivery", "Delivered / Closed") else "Completed",
+        })
+    if not items:
+        items.append({
+            "title": "Vehicle preparation",
+            "note": "Work logged on this job",
+            "status": "In progress" if (job.status or "") not in ("Ready for Delivery", "Delivered / Closed") else "Completed",
+        })
 
     job_status = job.status or ""
     return {
@@ -229,6 +260,26 @@ def whatsapp_text(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _wrap(text, font, size, max_w):
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    text = (text or "").strip()
+    if not text:
+        return [""]
+    words = text.split()
+    lines, line = [], ""
+    for w in words:
+        trial = (line + " " + w).strip()
+        if stringWidth(trial, font, size) <= max_w:
+            line = trial
+        else:
+            if line:
+                lines.append(line)
+            line = w
+    if line:
+        lines.append(line)
+    return lines or [""]
+
+
 def render_pdf(report: dict) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -245,6 +296,9 @@ def render_pdf(report: dict) -> bytes:
     ok = HexColor("#1f7a3f")
     mid = HexColor("#b45309")
     soft = HexColor("#f4f7fb")
+    left = 16 * mm
+    right = W - 16 * mm
+    width = right - left
 
     root = Path(__file__).resolve().parent.parent
     logo = root / "static" / "images" / "status_logo_th.png"
@@ -255,82 +309,109 @@ def render_pdf(report: dict) -> bytes:
                     mask="auto", preserveAspectRatio=True, anchor="w")
     c.setFillColor(white)
     c.setFont("Helvetica", 8)
-    c.drawRightString(W - 16 * mm, H - 12 * mm, WEBSITE)
+    c.drawRightString(right, H - 12 * mm, WEBSITE)
     c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(W - 16 * mm, H - 17.5 * mm, "VEHICLE PREPARATION UPDATE")
+    c.drawRightString(right, H - 17.5 * mm, "VEHICLE PREPARATION UPDATE")
     c.setFillColor(blue)
     c.rect(0, H - 30 * mm, W, 2 * mm, fill=1, stroke=0)
 
     c.setFillColor(navy)
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(16 * mm, H - 42 * mm, "Progress report")
+    c.drawString(left, H - 42 * mm, "Progress report")
     c.setFillColor(grey)
     c.setFont("Helvetica", 9)
-    c.drawString(16 * mm, H - 47 * mm, "Prepared for the client.")
+    c.drawString(left, H - 47 * mm, "Prepared for the client.")
 
     c.setFillColor(soft)
-    c.roundRect(16 * mm, H - 78 * mm, W - 32 * mm, 26 * mm, 3 * mm, fill=1, stroke=0)
+    c.roundRect(left, H - 80 * mm, width, 28 * mm, 3 * mm, fill=1, stroke=0)
     c.setFillColor(navy)
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(20 * mm, H - 56 * mm, "TO")
-    c.drawString(78 * mm, H - 56 * mm, "VEHICLE")
-    c.drawString(148 * mm, H - 56 * mm, "REFERENCE")
+    c.drawString(left + 4 * mm, H - 56 * mm, "TO")
+    c.drawString(left + 62 * mm, H - 56 * mm, "VEHICLE")
+    c.drawString(left + 128 * mm, H - 56 * mm, "REFERENCE")
     c.setFillColor(black)
     c.setFont("Helvetica", 9)
-    c.drawString(20 * mm, H - 62 * mm, (report.get("client_name") or "")[:34])
-    c.drawString(78 * mm, H - 62 * mm, (report.get("vehicle") or "")[:32])
-    c.drawString(148 * mm, H - 62 * mm, (("Quote " + report["quote"]) if report.get("quote") else "")[:28])
+    to_lines = _wrap(report.get("client_name") or "Client", "Helvetica", 9, 54 * mm)
+    veh_lines = _wrap(" ".join(x for x in [report.get("vehicle"), report.get("registration")] if x), "Helvetica", 9, 60 * mm)
+    ref_lines = _wrap(("Quote " + report["quote"]) if report.get("quote") else "", "Helvetica", 9, 42 * mm)
+    c.drawString(left + 4 * mm, H - 62 * mm, to_lines[0])
+    c.drawString(left + 62 * mm, H - 62 * mm, veh_lines[0])
+    c.drawString(left + 128 * mm, H - 62 * mm, ref_lines[0] if ref_lines[0] else "")
     c.setFillColor(grey)
     c.setFont("Helvetica", 8)
-    c.drawString(20 * mm, H - 68 * mm, "Client")
-    c.drawString(78 * mm, H - 68 * mm, (report.get("registration") or "")[:22])
-    c.drawString(148 * mm, H - 68 * mm, report.get("date") or "")
+    c.drawString(left + 4 * mm, H - 68 * mm, "Client")
+    c.drawString(left + 62 * mm, H - 68 * mm, (report.get("year") or "") + ((" · " + report.get("make_model")) if report.get("make_model") and report.get("year") else ""))
+    c.drawString(left + 128 * mm, H - 68 * mm, report.get("date") or "")
     if report.get("vin"):
-        c.drawString(78 * mm, H - 73.5 * mm, "VIN: " + report["vin"][:22])
+        c.drawString(left + 62 * mm, H - 73.5 * mm, "VIN: " + report["vin"])
     if report.get("stock_number"):
-        c.drawString(148 * mm, H - 73.5 * mm, "Internal ref " + report["stock_number"])
+        c.drawString(left + 128 * mm, H - 73.5 * mm, "Internal ref " + report["stock_number"])
 
+    status = report.get("status_line") or ""
+    status_lines = _wrap(status, "Helvetica-Bold", 9, width - 48 * mm)
+    box_h = max(12 * mm, 6 * mm + len(status_lines) * 4.2 * mm)
     c.setFillColor(HexColor("#e8f3ec"))
-    c.roundRect(16 * mm, H - 92 * mm, W - 32 * mm, 10 * mm, 2.5 * mm, fill=1, stroke=0)
+    c.roundRect(left, H - 82 * mm - box_h, width, box_h, 2.5 * mm, fill=1, stroke=0)
     c.setFillColor(ok)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(20 * mm, H - 88.2 * mm, "CURRENT STATUS")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(left + 4 * mm, H - 88 * mm, "STATUS")
     c.setFillColor(navy)
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(58 * mm, H - 88.2 * mm, (report.get("status_line") or "")[:62])
+    sy = H - 88 * mm
+    for i, ln in enumerate(status_lines):
+        c.drawString(left + 28 * mm, sy - i * 4.2 * mm, ln)
 
+    y = H - 82 * mm - box_h - 10 * mm
     c.setFillColor(black)
     c.setFont("Helvetica", 9.5)
-    y = H - 104 * mm
-    c.drawString(16 * mm, y, f"Dear {report.get('client_name') or 'Client'},")
-    y -= 6 * mm
-    c.drawString(16 * mm, y, f"Please find a short update on the preparation of your {report.get('vehicle') or 'vehicle'}.")
-    y -= 5 * mm
-    c.drawString(16 * mm, y, "Only the work that affects handover is shown below.")
+    dear = _wrap(f"Dear {report.get('client_name') or 'Client'},", "Helvetica", 9.5, width)
+    for ln in dear:
+        c.drawString(left, y, ln)
+        y -= 5 * mm
+    intro = _wrap(
+        f"Please find a short update on the preparation of your {report.get('vehicle') or 'vehicle'}. Only the work that affects handover is shown below.",
+        "Helvetica", 9.5, width
+    )
+    for ln in intro:
+        c.drawString(left, y, ln)
+        y -= 4.6 * mm
 
-    y -= 10 * mm
+    y -= 4 * mm
     c.setFillColor(blue)
-    c.rect(16 * mm, y, W - 32 * mm, 8 * mm, fill=1, stroke=0)
+    c.rect(left, y, width, 8 * mm, fill=1, stroke=0)
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(20 * mm, y + 2.6 * mm, "PREPARATION ITEM")
-    c.drawString(118 * mm, y + 2.6 * mm, "STATUS")
-    c.drawString(152 * mm, y + 2.6 * mm, "NOTE")
+    c.drawString(left + 4 * mm, y + 2.6 * mm, "PREPARATION ITEM")
+    c.drawString(left + width - 42 * mm, y + 2.6 * mm, "STATUS")
 
-    items = report.get("items") or []
-    if not items:
-        items = [{"title": "Preparation", "status": "In progress", "note": ""}]
+    items = report.get("items") or [{"title": "Vehicle preparation", "status": "In progress", "note": ""}]
     for i, it in enumerate(items):
-        y -= 9 * mm
-        if y < 40 * mm:
-            break
+        title = it.get("title") or "Preparation"
+        note = it.get("note") or ""
+        st = it.get("status") or ""
+        if st == "Completed":
+            note = ""
+        title_lines = _wrap(title, "Helvetica", 9, width - 50 * mm)
+        note_lines = _wrap(note, "Helvetica", 8, width - 50 * mm) if note else []
+        row_h = 6 * mm + (len(title_lines) + len(note_lines)) * 4.2 * mm
+        y -= row_h
+        if y < 36 * mm:
+            c.showPage()
+            y = H - 20 * mm
         if i % 2 == 0:
             c.setFillColor(HexColor("#f7f9fc"))
-            c.rect(16 * mm, y - 2 * mm, W - 32 * mm, 9 * mm, fill=1, stroke=0)
+            c.rect(left, y, width, row_h, fill=1, stroke=0)
         c.setFillColor(navy)
         c.setFont("Helvetica", 9)
-        c.drawString(20 * mm, y + 1.2 * mm, (it.get("title") or "")[:40])
-        st = it.get("status") or ""
+        ty = y + row_h - 5 * mm
+        for ln in title_lines:
+            c.drawString(left + 4 * mm, ty, ln)
+            ty -= 4.2 * mm
+        c.setFillColor(grey)
+        c.setFont("Helvetica", 8)
+        for ln in note_lines:
+            c.drawString(left + 4 * mm, ty, ln)
+            ty -= 4.2 * mm
         if st == "Completed":
             c.setFillColor(ok)
         elif st in ("In progress", "Delayed", "Still in preparation"):
@@ -338,45 +419,48 @@ def render_pdf(report: dict) -> bytes:
         else:
             c.setFillColor(grey)
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(118 * mm, y + 1.2 * mm, st[:22])
-        c.setFillColor(grey)
-        c.setFont("Helvetica", 8)
-        note = it.get("note") or ""
-        if st == "Completed":
-            note = ""
-        c.drawString(152 * mm, y + 1.2 * mm, note[:28])
+        c.drawRightString(right - 3 * mm, y + row_h - 5 * mm, st)
 
-    y -= 16 * mm
+    y -= 10 * mm
     c.setFillColor(navy)
     c.setFont("Helvetica-Bold", 10)
-    c.drawString(16 * mm, y, "NEXT STEP")
+    c.drawString(left, y, "NEXT STEP")
+    y -= 6 * mm
     c.setFillColor(black)
     c.setFont("Helvetica", 9.5)
-    c.drawString(16 * mm, y - 6 * mm, (report.get("next_step") or "")[:95])
+    for ln in _wrap(report.get("next_step") or "", "Helvetica", 9.5, width):
+        if y < 36 * mm:
+            c.showPage()
+            y = H - 20 * mm
+        c.drawString(left, y, ln)
+        y -= 4.6 * mm
 
-    y -= 22 * mm
+    y -= 8 * mm
     c.setStrokeColor(HexColor("#d7dde4"))
     c.setLineWidth(0.6)
-    c.line(16 * mm, y + 8 * mm, W - 16 * mm, y + 8 * mm)
+    c.line(left, y + 6 * mm, right, y + 6 * mm)
     c.setFillColor(grey)
     c.setFont("Helvetica", 8)
-    c.drawString(16 * mm, y + 2 * mm, "PREPARED BY")
+    c.drawString(left, y, "PREPARED BY")
+    y -= 6 * mm
     c.setFillColor(navy)
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(16 * mm, y - 5 * mm, (report.get("salesman_name") or "Status Truck Sales")[:40])
+    c.drawString(left, y, report.get("salesman_name") or "Status Truck Sales")
+    y -= 5.5 * mm
     c.setFillColor(black)
     c.setFont("Helvetica", 9)
-    c.drawString(16 * mm, y - 10.5 * mm, "Sales  ·  Status Truck Sales")
+    c.drawString(left, y, "Sales  ·  Status Truck Sales")
+    y -= 5 * mm
     c.setFillColor(blue)
-    c.drawString(16 * mm, y - 16 * mm, WEBSITE)
+    c.drawString(left, y, WEBSITE)
 
     c.setFillColor(blue)
     c.rect(0, 0, W, 16 * mm, fill=1, stroke=0)
     c.setFillColor(white)
     c.setFont("Helvetica", 8)
-    c.drawString(16 * mm, 7 * mm, "Status Truck Sales")
+    c.drawString(left, 7 * mm, "Status Truck Sales")
     c.drawCentredString(W / 2, 7 * mm, WEBSITE)
-    c.drawRightString(W - 16 * mm, 7 * mm, "Not a tax invoice")
+    c.drawRightString(right, 7 * mm, "Not a tax invoice")
     c.showPage()
     c.save()
     return buf.getvalue()

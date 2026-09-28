@@ -19,7 +19,7 @@
         .ok { color: #1f7a3f; font-weight: 700; }
         .mid { color: #b45309; font-weight: 700; }
         .grey { color: #5b6570; font-weight: 700; }
-        textarea { width: 100%; min-height: 180px; font-size: 14px; padding: 10px; border: 1px solid #d7dde4; border-radius: 8px; }
+        textarea { width: 100%; min-height: 280px; font-size: 14px; padding: 10px; border: 1px solid #d7dde4; border-radius: 8px; white-space: pre-wrap; overflow: auto; word-break: break-word; }
         @media print { .bar { display: none; } body { background: #fff; } .page { box-shadow: none; margin: 0; } }
     </style>
 </head>
@@ -65,8 +65,13 @@
     };
 
     fetch('/api/jobs/' + jobId + '/client-report', { headers: { 'Authorization': 'Bearer ' + token } })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
+        .then(function(r) { return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+        .then(function(res) {
+            const d = res.d || {};
+            if (!res.ok) {
+                document.getElementById('meta').innerHTML = '<p class="muted">Could not load report. ' + (d.detail || '') + '</p>';
+                return;
+            }
             document.getElementById('meta').innerHTML =
                 '<p><strong>To</strong> ' + (d.client_name||'') + '<br>' +
                 '<strong>Vehicle</strong> ' + (d.vehicle||'') +
