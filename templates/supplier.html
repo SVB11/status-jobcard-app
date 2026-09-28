@@ -8,8 +8,10 @@
 {% endblock %}
 {% block content %}
 <h1 class="text-2xl font-bold uppercase tracking-widest mb-1" id="pageTitle">My jobs</h1>
-<p class="text-sm text-[#9aa6b4] mb-6">You only see jobs booked to your company. Workshop still signs the task complete.</p>
-<div id="jobList" class="space-y-3 mb-8">Loading...</div>
+<p class="text-sm text-[#9aa6b4] mb-6">You only see jobs booked to your company. When you mark Completed it updates the Status job card and closes here.</p>
+<div id="jobList" class="space-y-3 mb-6">Loading...</div>
+<h2 class="font-bold uppercase tracking-widest text-sm text-[#9aa6b4] mb-2">Closed</h2>
+<div id="closedList" class="space-y-2 mb-8 text-sm text-[#9aa6b4]">None yet</div>
 <div id="updBox" class="hidden rounded-xl p-4 border border-[#2a3340] bg-[#12161c] space-y-3">
     <h2 class="font-bold uppercase tracking-widest" id="updTitle">Update</h2>
     <div class="task-label">Status</div>
@@ -51,9 +53,13 @@
         const data = await (await fetch('/api/supplier/jobs', { headers: { 'Authorization': 'Bearer ' + token } })).json();
         document.getElementById('pageTitle').textContent = 'MY JOBS — ' + (data.company || '');
         const jobs = data.jobs || [];
+        const closed = data.closed_jobs || [];
         document.getElementById('jobList').innerHTML = jobs.length ? jobs.map(function(j){
             return '<button type="button" onclick="openJob('+j.id+',\''+(j.stock_number||'')+'\',\''+(j.service||'').replace(/'/g,'')+'\')" class="block w-full text-left p-4 rounded-xl border border-[#2a3340] bg-[#12161c]"><div class="font-bold text-[#7ec2ff]">'+j.stock_number+'</div><div>'+(j.vehicle_description||'')+' '+(j.year||'')+'</div><div class="text-xs text-[#9aa6b4]">'+(j.service||'')+' · '+(j.booked_date||'no date')+' · '+(j.latest_status||'Booked')+'</div></button>';
-        }).join('') : '<p class="text-[#6b7683]">No jobs booked to your company yet</p>';
+        }).join('') : '<p class="text-[#6b7683]">No open jobs booked to your company</p>';
+        document.getElementById('closedList').innerHTML = closed.length ? closed.map(function(j){
+            return '<div class="p-3 rounded-lg border border-[#2a3340]">'+j.stock_number+' · '+(j.service||'')+' · Completed</div>';
+        }).join('') : 'None yet';
     }
     function openJob(id, stock, service) {
         jobId = id;
@@ -84,8 +90,14 @@
         document.getElementById('partsNeed').value = '';
         document.getElementById('supNote').value = '';
         document.getElementById('supPhoto').value = '';
+        if (chosenStatus === 'Completed') {
+            document.getElementById('updBox').classList.add('hidden');
+            jobId = null;
+            alert('Marked complete. The Status job card is updated and this job is closed on your list.');
+        } else {
+            alert('Update sent. The Status job card is updated.');
+        }
         loadJobs();
-        alert('Update sent to workshop');
     }
     function logout(){ localStorage.clear(); location.href='/login'; }
     loadJobs();

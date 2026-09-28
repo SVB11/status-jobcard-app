@@ -71,7 +71,9 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         if (data.user_id) localStorage.setItem('user_id', data.user_id);
         localStorage.setItem('must_change_password', data.must_change_password ? '1' : '0');
         if (data.supplier_company) localStorage.setItem('supplier_company', data.supplier_company);
-        window.location.href = data.role === 'supplier' ? '/supplier' : '/dashboard';
+        const next = new URLSearchParams(window.location.search).get('next') || '';
+        if (next && next.charAt(0) === '/' && next.indexOf('//') === -1) window.location.href = next;
+        else window.location.href = data.role === 'supplier' ? '/supplier' : '/dashboard';
     } catch (err) {
         errorMsg.textContent = 'Connection error. Please try again.';
         errorMsg.classList.remove('hidden');

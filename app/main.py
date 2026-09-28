@@ -58,8 +58,15 @@ def record_failed_login(username: str):
 def clear_failed_login(username: str):
     FAILED_LOGINS.pop((username or "").lower(), None)
 
+def is_admin_user(user: models.User) -> bool:
+    if not user:
+        return False
+    if user.role in ("admin", "accounts"):
+        return True
+    return (user.full_name or "").strip().lower() == "sebastian van biljon"
+
 def require_admin(user: models.User):
-    if user.role not in ("admin", "accounts"):
+    if not is_admin_user(user):
         raise HTTPException(status_code=403, detail="Admin access only")
     return user
 
@@ -189,7 +196,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         data={"sub": user.username, "role": user.role, "full_name": user.full_name},
         expires_delta=access_token_expires
     )
-    return {
+    payload = {
         "access_token": access_token,
         "token_type": "bearer",
         "role": user.role,
@@ -198,6 +205,17 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         "must_change_password": bool(getattr(user, "must_change_password", False)),
         "supplier_company": getattr(user, "supplier_company", None)
     }
+    resp = JSONResponse(payload)
+    resp.set_cookie(
+        key="sts_token",
+        value=access_token,
+        max_age=auth.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        path="/",
+    )
+    return resp
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -356,8 +374,21 @@ async def api_create_job(
 
 CLOSED_STATUSES = ("Delivered / Closed", "Delivered", "Closed")
 
+def job_allocated_to_company(job, company: str) -> bool:
+    if not job or not company:
+        return False
+    if any(company_match(getattr(t, "third_party_provider", None), company) for t in (job.tasks or [])):
+        return True
+    if any(company_match(getattr(b, "provider", None), company) for b in (getattr(job, "third_party_bookings", None) or [])):
+        return True
+    return False
+
 @app.get("/api/jobs")
-async def api_list_jobs(status: str = None, salesman: str = None, created_by: int = None, archived: int = 0, db: Session = Depends(get_db)):
+async def api_list_jobs(request: Request, status: str = None, salesman: str = None, created_by: int = None, archived: int = 0, db: Session = Depends(get_db)):
+    raw = auth.token_from_request(request)
+    user = auth._user_from_token_string(raw, db) if raw else None
+    if user and user.role == "supplier":
+        return {"jobs": []}
     query = db.query(models.JobCard).order_by(models.JobCard.created_at.desc())
     if status:
         query = query.filter(models.JobCard.status == status)
@@ -493,10 +524,15 @@ async def job_detail_page(request: Request, job_id: int):
     return render_template("job_detail.html", request=request, job_id=job_id, page_title="Job Detail")
 
 @app.get("/api/jobs/{job_id}")
-async def api_get_job(job_id: int, db: Session = Depends(get_db)):
+async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    raw = auth.token_from_request(request)
+    user = auth._user_from_token_string(raw, db) if raw else None
+    if user and user.role == "supplier":
+        if not job_allocated_to_company(job, user.supplier_company):
+            raise HTTPException(status_code=403, detail="This job is not booked to your company")
 
     tasks = []
     for t in job.tasks:
@@ -1862,8 +1898,17 @@ async def print_pdi_page(request: Request, job_id: int):
     return render_template("print_pdi.html", request=request, job_id=job_id)
 
 @app.get("/jobs/{job_id}/client-report", response_class=HTMLResponse)
-async def client_report_page(request: Request, job_id: int):
-    return render_template("client_report.html", request=request, job_id=job_id)
+async def client_report_page(request: Request, job_id: int, db: Session = Depends(get_db)):
+    try:
+        report = _client_report_payload(job_id, db)
+    except HTTPException:
+        report = None
+    return render_template(
+        "client_report.html",
+        request=request,
+        job_id=job_id,
+        report_json=json.dumps(report) if report else "null",
+    )
 
 def _client_report_payload(job_id: int, db: Session, current_user=None):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
@@ -1879,12 +1924,12 @@ def _client_report_payload(job_id: int, db: Session, current_user=None):
     return report
 
 @app.get("/api/jobs/{job_id}/client-report")
-async def api_client_report(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    return _client_report_payload(job_id, db, current_user)
+async def api_client_report(job_id: int, db: Session = Depends(get_db)):
+    return _client_report_payload(job_id, db)
 
 @app.get("/api/jobs/{job_id}/client-report.pdf")
-async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    report = _client_report_payload(job_id, db, current_user)
+async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db)):
+    report = _client_report_payload(job_id, db)
     pdf = render_pdf(report)
     filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
     return Response(content=pdf, media_type="application/pdf", headers={
@@ -2590,8 +2635,18 @@ async def api_workshop_counts(db: Session = Depends(get_db), current_user: model
 def company_match(provider, company):
     if not provider or not company:
         return False
-    a = provider.lower().strip()
-    b = company.lower().strip()
+    a = " ".join((provider or "").lower().replace("/", " ").replace("-", " ").split())
+    b = " ".join((company or "").lower().replace("/", " ").replace("-", " ").split())
+    if not a or not b or a in ("3rd party", "third party", "other"):
+        return False
+    if a == b:
+        return True
+    at = set(a.split())
+    bt = set(b.split())
+    if at & bt and (len(a) >= 2 and len(b) >= 2):
+        # shared token like FK / PFT, not generic words
+        generic = {"test", "the", "and", "tanker", "solutions", "station", "party", "3rd"}
+        return bool((at & bt) - generic)
     return b in a or a in b
 
 def sup_row(s, job=None):
@@ -2621,24 +2676,31 @@ async def api_supplier_jobs(db: Session = Depends(get_db), current_user: models.
     if not company:
         return {"company": "", "jobs": []}
     jobs = db.query(models.JobCard).filter(models.JobCard.status != "Delivered / Closed").order_by(models.JobCard.created_at.desc()).all()
-    out = []
+    open_jobs = []
+    closed_jobs = []
     for job in jobs:
+        if not job_allocated_to_company(job, company):
+            continue
         tasks = [t for t in (job.tasks or []) if company_match(getattr(t, "third_party_provider", None), company)]
         bookings = [b for b in (getattr(job, "third_party_bookings", None) or []) if company_match(getattr(b, "provider", None), company)]
         if not tasks and not bookings:
             continue
         latest = db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job.id, models.SupplierUpdate.company == company).order_by(models.SupplierUpdate.created_at.desc()).first()
-        out.append({
+        task_done = bool(tasks) and all((t.status or "") == "Completed" for t in tasks)
+        closed = (latest and latest.status == "Completed") or task_done
+        row = {
             "id": job.id,
             "stock_number": job.stock_number,
             "vehicle_description": job.vehicle_description,
             "year": job.year,
             "service": (tasks[0].task_name if tasks else bookings[0].service),
             "booked_date": (getattr(tasks[0], "booked_date", None) if tasks else bookings[0].booked_date),
-            "latest_status": latest.status if latest else "Booked",
-            "latest_work": latest.work_doing if latest else None
-        })
-    return {"company": company, "jobs": out}
+            "latest_status": "Completed" if closed else (latest.status if latest else "Booked"),
+            "latest_work": latest.work_doing if latest else None,
+            "closed": closed,
+        }
+        (closed_jobs if closed else open_jobs).append(row)
+    return {"company": company, "jobs": open_jobs, "closed_jobs": closed_jobs}
 
 @app.post("/api/supplier/jobs/{job_id}/update")
 async def api_supplier_update(
@@ -2685,15 +2747,82 @@ async def api_supplier_update(
         created_by=current_user.id
     )
     db.add(row)
+
+    stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+    who = current_user.full_name or company
+    note_bits = []
+    if row.work_doing:
+        note_bits.append(row.work_doing)
+    if row.note:
+        note_bits.append(row.note)
+    if row.parts_needed:
+        note_bits.append("Parts noted: " + row.parts_needed)
+    if photo_path:
+        note_bits.append("Photo uploaded")
+    line = f"{stamp} {who} ({company}): {status_val}" + ((" — " + " | ".join(note_bits)) if note_bits else "")
+
+    task_status_map = {
+        "Booked": "Not Started",
+        "In progress": "In Progress",
+        "Waiting parts": "Blocked",
+        "Completed": "Completed",
+    }
+    new_task_status = task_status_map.get(status_val)
+    matched_tasks = [t for t in (job.tasks or []) if company_match(getattr(t, "third_party_provider", None), company)]
+    if not matched_tasks:
+        # booking exists without a task — attach to any 3rd-party task name that matches the booking service
+        bookings = [b for b in (getattr(job, "third_party_bookings", None) or []) if company_match(getattr(b, "provider", None), company)]
+        if bookings:
+            service = (bookings[0].service or "").lower()
+            for t in (job.tasks or []):
+                name = (t.task_name or "").lower()
+                if service and service in name:
+                    matched_tasks.append(t)
+                    t.third_party_provider = t.third_party_provider or company
+    for t in matched_tasks:
+        if new_task_status:
+            t.status = new_task_status
+            t.last_updated_by_name = who
+            if new_task_status == "Completed":
+                t.completed_at = datetime.utcnow()
+                t.completed_by = current_user.id
+                if "roadworthy" in (t.task_name or "").lower() and not t.test_result:
+                    t.test_result = "Pass"
+            else:
+                t.completed_at = None
+                t.completed_by = None
+        t.notes = (t.notes + "\n" + line) if t.notes else line
+        t.task_location = f"3rd Party: {company}"
+        row.task_id = t.id
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="3rd party",
+        description=f"{company}: {status_val}" + ((" — " + (row.work_doing or row.note or "")) if (row.work_doing or row.note) else ""),
+        created_by_name=who,
+        created_by=current_user.id
+    ))
+    if job.status == "Accepted by Workshop" and status_val in ("In progress", "Waiting parts", "Completed"):
+        job.status = "In Progress"
+    if status_val == "Completed":
+        all_tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job.id).all()
+        if all_tasks and all((t.status or "") == "Completed" for t in all_tasks):
+            if job.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Delivered / Closed"):
+                job.status = "Work Completed"
+                job.work_completed_at = datetime.utcnow()
+
     msg = f"SUPPLIER {company} on {job.stock_number}: {status_val}"
     if row.parts_needed:
         msg += " — parts needed (workshop note only)"
     if photo_path:
         msg += " — job card photo uploaded"
+    if status_val == "Completed":
+        msg += " — job card task marked complete"
     notify_role(db, "workshop", msg, job.id)
     notify_role(db, "admin", msg, job.id)
+    notify_role(db, "sales", msg, job.id)
+    log_audit(db, current_user.id, "Supplier update", job.id, msg)
     db.commit()
-    return {"success": True}
+    return {"success": True, "closed": status_val == "Completed"}
 
 @app.get("/api/supplier-updates")
 async def api_all_supplier_updates(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):

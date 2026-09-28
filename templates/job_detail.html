@@ -228,6 +228,7 @@
     const token = localStorage.getItem('token');
     const fullName = localStorage.getItem('full_name') || '';
     const role = localStorage.getItem('role') || '';
+    if ((role || '').toLowerCase() === 'supplier') window.location.href = '/supplier';
     const isAdmin = (role === 'admin' || role === 'accounts');
     const isWorkshop = (role === 'workshop' || isAdmin);
     const userId = localStorage.getItem('user_id');

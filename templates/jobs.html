@@ -45,6 +45,7 @@
     const userId = localStorage.getItem('user_id');
     if (!token) window.location.href = '/login';
     if (role === 'stock') window.location.href = '/stock';
+    if (role === 'supplier') window.location.href = '/supplier';
     document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
     function logout() { localStorage.clear(); window.location.href = '/login'; }
 

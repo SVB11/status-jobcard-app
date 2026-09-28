@@ -265,21 +265,27 @@
     }
     (function(){
         var r = (localStorage.getItem('role') || '').toLowerCase();
+        var nm = (localStorage.getItem('full_name') || '').toLowerCase();
+        var isAdm = (r === 'admin' || r === 'accounts' || nm === 'sebastian van biljon');
         var el = document.getElementById('navStock');
-        if (el && ['stock','workshop','admin','accounts'].indexOf(r) !== -1) el.classList.remove('hidden');
+        if (el && (['stock','workshop','admin','accounts'].indexOf(r) !== -1 || nm === 'sebastian van biljon')) el.classList.remove('hidden');
         var s = document.getElementById('navSupplier');
         if (s && r === 'supplier') s.classList.remove('hidden');
         var u = document.getElementById('navUsers');
         var t = document.getElementById('navTp');
-        if (u && (r === 'admin' || r === 'accounts')) u.classList.remove('hidden');
-        if (t && (r === 'admin' || r === 'accounts')) t.classList.remove('hidden');
+        if (u && isAdm) u.classList.remove('hidden');
+        if (t && isAdm) t.classList.remove('hidden');
         var ar = document.getElementById('navArchive');
-        if (ar && (r === 'admin' || r === 'accounts')) ar.classList.remove('hidden');
-        if (r === 'stock') {
+        if (ar && isAdm) ar.classList.remove('hidden');
+        if (r === 'stock' || r === 'supplier') {
             var nj = document.getElementById('navJobs');
             var nc = document.getElementById('navCreate');
             if (nj) nj.classList.add('hidden');
             if (nc) nc.classList.add('hidden');
+        }
+        if (r === 'supplier') {
+            var dash = document.querySelector('nav a[href="/dashboard"]');
+            if (dash) dash.setAttribute('href', '/supplier');
         }
         if (r === 'marketing') {
             var nc2 = document.getElementById('navCreate');

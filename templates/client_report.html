@@ -49,13 +49,33 @@
     </div>
 <script>
     const jobId = {{ job_id }};
-    const token = localStorage.getItem('token');
-    if (!token) window.location.href = '/login';
-    document.getElementById('pdfLink').href = '/api/jobs/' + jobId + '/client-report.pdf';
+    const token = localStorage.getItem('token') || '';
+    const serverReport = {{ report_json | default('null') | safe }};
+
+    function paint(d) {
+        if (!d) return;
+        document.getElementById('meta').innerHTML =
+            '<p><strong>To</strong> ' + (d.client_name||'') + '<br>' +
+            '<strong>Vehicle</strong> ' + (d.vehicle||'') +
+            (d.registration ? ' · ' + d.registration : '') + '<br>' +
+            (d.quote ? '<strong>Reference</strong> ' + d.quote + '<br>' : '') +
+            '<span class="muted">' + (d.date||'') + (d.stock_number ? ' · Internal ref ' + d.stock_number : '') + '</span></p>';
+        document.getElementById('statusLine').textContent = d.status_line || '';
+        document.getElementById('nextStep').textContent = d.next_step || '';
+        document.getElementById('salesman').textContent = d.salesman_name || '';
+        document.getElementById('waText').value = d.whatsapp || '';
+        document.getElementById('rows').innerHTML = (d.items||[]).map(function(it) {
+            const cls = it.status === 'Completed' ? 'ok' : (it.status === 'In progress' || it.status === 'Delayed' || it.status === 'Still in preparation' ? 'mid' : 'grey');
+            const note = it.status === 'Completed' ? '' : (it.note||'');
+            return '<tr><td>' + it.title + '</td><td class="' + cls + '">' + it.status + '</td><td class="muted">' + note + '</td></tr>';
+        }).join('') || '<tr><td colspan="3">Preparation in progress</td></tr>';
+    }
+
     document.getElementById('pdfLink').onclick = async function(e) {
         e.preventDefault();
-        const res = await fetch('/api/jobs/' + jobId + '/client-report.pdf', { headers: { 'Authorization': 'Bearer ' + token } });
-        if (!res.ok) { alert('Could not build PDF'); return; }
+        const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+        const res = await fetch('/api/jobs/' + jobId + '/client-report.pdf', { headers: headers, credentials: 'same-origin' });
+        if (!res.ok) { alert('Could not build PDF. Sign in again and retry.'); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -64,30 +84,19 @@
         a.click();
     };
 
-    fetch('/api/jobs/' + jobId + '/client-report', { headers: { 'Authorization': 'Bearer ' + token } })
-        .then(function(r) { return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-        .then(function(res) {
-            const d = res.d || {};
-            if (!res.ok) {
-                document.getElementById('meta').innerHTML = '<p class="muted">Could not load report. ' + (d.detail || '') + '</p>';
-                return;
-            }
-            document.getElementById('meta').innerHTML =
-                '<p><strong>To</strong> ' + (d.client_name||'') + '<br>' +
-                '<strong>Vehicle</strong> ' + (d.vehicle||'') +
-                (d.registration ? ' · ' + d.registration : '') + '<br>' +
-                (d.quote ? '<strong>Reference</strong> ' + d.quote + '<br>' : '') +
-                '<span class="muted">' + (d.date||'') + (d.stock_number ? ' · Internal ref ' + d.stock_number : '') + '</span></p>';
-            document.getElementById('statusLine').textContent = d.status_line || '';
-            document.getElementById('nextStep').textContent = d.next_step || '';
-            document.getElementById('salesman').textContent = d.salesman_name || '';
-            document.getElementById('waText').value = d.whatsapp || '';
-            document.getElementById('rows').innerHTML = (d.items||[]).map(function(it) {
-                const cls = it.status === 'Completed' ? 'ok' : (it.status === 'In progress' || it.status === 'Delayed' || it.status === 'Still in preparation' ? 'mid' : 'grey');
-                const note = it.status === 'Completed' ? '' : (it.note||'');
-                return '<tr><td>' + it.title + '</td><td class="' + cls + '">' + it.status + '</td><td class="muted">' + note + '</td></tr>';
-            }).join('') || '<tr><td colspan="3">Preparation in progress</td></tr>';
-        });
+    if (serverReport && (serverReport.client_name || (serverReport.items && serverReport.items.length))) {
+        paint(serverReport);
+    } else {
+        fetch('/api/jobs/' + jobId + '/client-report', { credentials: 'same-origin' })
+            .then(function(r) { return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+            .then(function(res) {
+                if (!res.ok) {
+                    document.getElementById('meta').innerHTML = '<p class="muted">Could not load report.</p>';
+                    return;
+                }
+                paint(res.d);
+            });
+    }
 
     function shareWhatsApp() {
         const text = document.getElementById('waText').value || '';

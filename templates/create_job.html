@@ -201,6 +201,7 @@
     const userId = localStorage.getItem('user_id') || null;
 
     if ((role || '').toLowerCase() === 'stock') window.location.href = '/stock';
+    if ((role || '').toLowerCase() === 'supplier') window.location.href = '/supplier';
     if (!token) {
         window.location.href = '/login';
     } else {
