@@ -309,7 +309,7 @@
                 if (!rows.length) list.innerHTML = '<div class="text-[#9aa6b4]">No alerts</div>';
                 else list.innerHTML = rows.map(function(n) {
                     const href = n.job_card_id ? '/jobs/' + n.job_card_id : '/dashboard';
-                    return '<a href="' + href + '" class="block p-2 rounded ' + (n.is_read ? 'bg-[#1a2028]' : 'bg-[#025daa33] border border-[#025daa]') + '">' +
+                    return '<a href="' + href + '" onclick="markOneAlert(' + n.id + ',' + (n.job_card_id || 'null') + ')" class="block p-2 rounded ' + (n.is_read ? 'bg-[#1a2028]' : 'bg-[#025daa33] border border-[#025daa]') + '">' +
                         (n.is_read ? '' : '<span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-2"></span>') +
                         n.message + '<div class="text-[11px] text-[#9aa6b4] mt-1">' + (n.created_at || '').replace('T',' ').substring(0,16) + '</div></a>';
                 }).join('');
@@ -320,7 +320,9 @@
         const p = document.getElementById('bellPanel');
         if (!p) return;
         p.classList.toggle('hidden');
-        if (!p.classList.contains('hidden')) refreshBell();
+        if (!p.classList.contains('hidden')) {
+            refreshBell().then(function(){ markBellRead(); });
+        }
     }
     async function markBellRead() {
         const uid = localStorage.getItem('user_id');
@@ -329,9 +331,24 @@
         await fetch('/api/notifications/mark-read', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: parseInt(uid) })
+            body: JSON.stringify({ user_id: parseInt(uid, 10) })
         });
         refreshBell();
+    }
+    async function markOneAlert(id, jobId) {
+        const uid = localStorage.getItem('user_id');
+        const token = localStorage.getItem('token');
+        if (!uid || !token) return;
+        const body = { user_id: parseInt(uid, 10) };
+        if (id) body.id = id;
+        if (jobId) body.job_card_id = jobId;
+        try {
+            await fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        } catch (e) {}
     }
     refreshBell();
     setInterval(refreshBell, 20000);

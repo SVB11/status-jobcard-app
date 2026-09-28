@@ -417,7 +417,11 @@
     async function loadPendingExtras() {
         try {
             const res = await fetch('/api/admin/pending-extras', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
-            const data = await res.json();
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) {
+                document.getElementById('pendingExtrasList').innerHTML = '<p class="text-red-600">' + (data.detail || 'Could not load extras') + '</p>';
+                return;
+            }
             const rows = data.tasks || [];
             const box = document.getElementById('pendingExtrasList');
             const cnt = document.getElementById('pendingExtrasCount');

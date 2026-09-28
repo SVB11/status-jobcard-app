@@ -16,6 +16,7 @@ from .tasks_config import get_tasks_for_vehicle
 from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES, type_family
 from .migrate import migrate_schema
 from .stock_photos import match_stock_photo
+from .client_report import build_report, render_pdf, whatsapp_text
 
 # Create tables and seed
 Base.metadata.create_all(bind=engine)
@@ -300,11 +301,13 @@ async def api_create_job(
     # Add selected tasks
     selected_tasks = body.get("selected_tasks", [])
     for t in selected_tasks:
+        custom = bool(t.get("is_custom", False))
         task = models.JobTask(
             job_card_id=job.id,
             task_name=t.get("task_name"),
             description=t.get("description"),
-            is_custom=t.get("is_custom", False),
+            is_custom=custom,
+            needs_approval=custom,
             status="Not Started"
         )
         db.add(task)
@@ -852,7 +855,7 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
         status="Not Started",
         notes=body.get("notes") or None,
         task_location=body.get("task_location") or None,
-        needs_approval=not body.get("is_admin", False),
+        needs_approval=True,
         last_updated_by_name=body.get("full_name")
     )
     db.add(task)
@@ -918,12 +921,37 @@ async def api_admin_toggle_third_party(item_id: int, db: Session = Depends(get_d
 @app.get("/api/admin/pending-extras")
 async def api_admin_pending_extras(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
-    tasks = db.query(models.JobTask).filter(models.JobTask.needs_approval == True).order_by(models.JobTask.id.desc()).all()
+    from sqlalchemy import or_, and_
+    tasks = db.query(models.JobTask).filter(
+        or_(
+            models.JobTask.needs_approval == True,
+            and_(
+                models.JobTask.is_custom == True,
+                or_(models.JobTask.approved_by_name.is_(None), models.JobTask.approved_by_name == ""),
+                or_(
+                    models.JobTask.task_name.ilike("Extra:%"),
+                    models.JobTask.task_name.ilike("Other:%"),
+                    models.JobTask.task_name.ilike("Activity:%"),
+                    models.JobTask.task_name.ilike("Parts:%"),
+                    models.JobTask.task_name.ilike("3rd party:%"),
+                ),
+            ),
+        )
+    ).order_by(models.JobTask.id.desc()).all()
     out = []
+    seen = set()
     for t in tasks:
+        if getattr(t, "approved_by_name", None):
+            continue
         job = db.query(models.JobCard).filter(models.JobCard.id == t.job_card_id).first()
         if not job:
             continue
+        if job.status == "Delivered / Closed":
+            continue
+        key = (job.id, t.id)
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({
             "task_id": t.id,
             "job_id": job.id,
@@ -933,7 +961,7 @@ async def api_admin_pending_extras(db: Session = Depends(get_db), current_user: 
             "year": job.year,
             "task_name": t.task_name,
             "description": t.description,
-            "last_updated_by_name": t.last_updated_by_name
+            "last_updated_by_name": t.last_updated_by_name or job.salesman_name
         })
     return {"tasks": out}
 
@@ -1710,14 +1738,19 @@ async def api_add_update(job_id: int, request: Request, db: Session = Depends(ge
             "parts": "Parts",
             "third_party": "3rd party",
         }.get(category, "Extra")
-        db.add(models.JobTask(
+        extra_task = models.JobTask(
             job_card_id=job.id,
             task_name=f"{prefix}: {description}",
             description=body.get("notes") or None,
             is_custom=True,
+            needs_approval=True,
             status="Not Started",
-            notes=body.get("notes") or None
-        ))
+            notes=body.get("notes") or None,
+            last_updated_by_name=name
+        )
+        db.add(extra_task)
+        notify_role(db, "admin", f"EXTRA needs approval on {job.stock_number}: {description}", job.id)
+        notify_role(db, "accounts", f"EXTRA needs approval on {job.stock_number}: {description}", job.id)
     # Also persist latest 3rd party / parts onto the job card when provided
     if category == "third_party":
         if body.get("third_party_place"):
@@ -1827,6 +1860,34 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
 @app.get("/jobs/{job_id}/print-pdi", response_class=HTMLResponse)
 async def print_pdi_page(request: Request, job_id: int):
     return render_template("print_pdi.html", request=request, job_id=job_id)
+
+@app.get("/jobs/{job_id}/client-report", response_class=HTMLResponse)
+async def client_report_page(request: Request, job_id: int):
+    return render_template("client_report.html", request=request, job_id=job_id)
+
+def _client_report_payload(job_id: int, db: Session):
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).all()
+    parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).all()
+    report = build_report(job, tasks, parts)
+    report["whatsapp"] = whatsapp_text(report)
+    report["job_id"] = job.id
+    return report
+
+@app.get("/api/jobs/{job_id}/client-report")
+async def api_client_report(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    return _client_report_payload(job_id, db)
+
+@app.get("/api/jobs/{job_id}/client-report.pdf")
+async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    report = _client_report_payload(job_id, db)
+    pdf = render_pdf(report)
+    filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    })
 
 @app.get("/jobs/{job_id}/print-work", response_class=HTMLResponse)
 async def print_work_page(request: Request, job_id: int):
@@ -2988,7 +3049,16 @@ async def api_mark_notifications_read(request: Request, db: Session = Depends(ge
     uid = body.get("user_id")
     if not uid:
         raise HTTPException(status_code=400, detail="user_id required")
-    db.query(models.Notification).filter(models.Notification.user_id == uid, models.Notification.is_read == False).update({"is_read": True})
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="user_id required")
+    q = db.query(models.Notification).filter(models.Notification.user_id == uid, models.Notification.is_read == False)
+    if body.get("id"):
+        q = q.filter(models.Notification.id == int(body.get("id")))
+    if body.get("job_card_id"):
+        q = q.filter(models.Notification.job_card_id == int(body.get("job_card_id")))
+    q.update({"is_read": True}, synchronize_session=False)
     db.commit()
     return {"success": True}
 

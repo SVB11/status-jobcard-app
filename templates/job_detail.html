@@ -555,6 +555,15 @@
             if (!res.ok) throw new Error('Not found');
             const j = await res.json();
             currentJob = j;
+            if (typeof markOneAlert === 'function') markOneAlert(null, jobId);
+            else {
+                const uid = localStorage.getItem('user_id');
+                fetch('/api/notifications/mark-read', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: uid ? parseInt(uid, 10) : null, job_card_id: jobId })
+                }).catch(function(){});
+            }
 
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('content').classList.remove('hidden');
@@ -681,6 +690,9 @@
             }
             buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
             buttons += '<a href="/jobs/' + jobId + '/print-work" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print completed work</a>';
+            if (role === 'sales' || isAdmin) {
+                buttons += '<a href="/jobs/' + jobId + '/client-report" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Client report / WhatsApp</a>';
+            }
             document.getElementById('actionButtons').innerHTML = buttons;
             if ((role === 'sales' || role === 'marketing' || isAdmin) && j.status !== 'Delivered / Closed') {
                 document.getElementById('washReqBox').classList.remove('hidden');
