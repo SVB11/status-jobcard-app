@@ -809,8 +809,10 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
         change_bits.append(f"status {old_status} → {new_status}")
     if "task_location" in body:
         change_bits.append(f"location {task.task_location or '—'}")
+        apply_job_location(db, job, task.task_location, changer, user_id)
     if "third_party_provider" in body:
         change_bits.append(f"3rd party {task.third_party_provider or '—'}")
+        apply_job_location(db, job, task.task_location or ("3rd Party: " + (task.third_party_provider or "")), changer, user_id)
     if notes is not None:
         change_bits.append("note updated")
     if change_bits:
@@ -895,6 +897,8 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
         last_updated_by_name=body.get("full_name")
     )
     db.add(task)
+    if task.task_location:
+        apply_job_location(db, job, task.task_location, body.get("full_name"), user_id)
     db.commit()
     db.refresh(task)
     if task.needs_approval:
@@ -1607,6 +1611,45 @@ async def api_lists(db: Session = Depends(get_db)):
         "supply_categories": SUPPLY_CATEGORIES
     }
 
+def normalize_board_location(raw: str):
+    if not raw:
+        return None
+    s = " ".join(str(raw).strip().split())
+    low = s.lower()
+    if low.startswith("3rd") or low.startswith("third") or low.startswith("pft") or low.startswith("fk") or "testing station" in low:
+        return "3rd Party"
+    for loc in LOCATIONS:
+        if loc.lower() == low:
+            return loc
+    for loc in LOCATIONS:
+        if low in loc.lower() or loc.lower() in low:
+            return loc
+    return None
+
+def apply_job_location(db, job, raw_location, name=None, user_id=None):
+    """Last recorded task/activity location becomes the dashboard location."""
+    if not job or not raw_location:
+        return
+    display = " ".join(str(raw_location).strip().split())
+    bucket = normalize_board_location(display)
+    if bucket and bucket != "3rd Party":
+        display = bucket
+    elif bucket == "3rd Party" and not display.lower().startswith("3rd"):
+        display = "3rd Party: " + display
+    old = job.current_location
+    if (old or "") == display:
+        return
+    job.current_location = display
+    if bucket in WORKSHOP_BAYS and not job.workshop_entered_at:
+        job.workshop_entered_at = datetime.utcnow()
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="location",
+        description=f"Location changed: {old or '—'} → {display}",
+        created_by_name=name or "Workshop",
+        created_by=user_id
+    ))
+
 @app.get("/api/locations-board")
 async def api_locations_board(db: Session = Depends(get_db)):
     jobs = db.query(models.JobCard).order_by(models.JobCard.created_at.desc()).all()
@@ -1617,7 +1660,9 @@ async def api_locations_board(db: Session = Depends(get_db)):
         if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
             loc = "Delivered / Out"
         else:
-            loc = j.current_location if j.current_location in board else "Unspecified"
+            loc = j.current_location if j.current_location in board else (normalize_board_location(j.current_location) or "Unspecified")
+            if loc not in board:
+                loc = "Unspecified"
         board[loc].append({
             "id": j.id,
             "job_number": j.job_number,
@@ -2497,6 +2542,19 @@ def send_web_push(db, user_ids, title, body, url="/dashboard"):
             except Exception:
                 pass
 
+def notify_named_users(db, names, message, job_id=None, link="/stock"):
+    if not names:
+        return
+    wanted = [n.strip().lower() for n in names if n]
+    users = db.query(models.User).filter(models.User.is_active == True).all()
+    ids = []
+    for u in users:
+        blob = f"{u.username or ''} {u.full_name or ''}".lower()
+        if any(n in blob for n in wanted):
+            db.add(models.Notification(user_id=u.id, job_card_id=job_id, message=message))
+            ids.append(u.id)
+    send_web_push(db, ids, "Status Job Cards", message, link)
+
 def notify_role(db, role, message, job_id=None):
     users = db.query(models.User).filter(models.User.role == role, models.User.is_active == True).all()
     ids = []
@@ -2601,7 +2659,10 @@ def stock_row(s):
         "workshop_received_at": s.workshop_received_at.isoformat() if s.workshop_received_at else None,
         "last_updated_by": s.last_updated_by,
         "created_at": s.created_at.isoformat() if s.created_at else None,
-        "closed": s.status == "Closed"
+        "closed": s.status == "Closed",
+        "update_requested_at": s.update_requested_at.isoformat() if getattr(s, "update_requested_at", None) else None,
+        "update_requested_by": getattr(s, "update_requested_by", None),
+        "update_request_note": getattr(s, "update_request_note", None),
     }
 
 def section_label(cat):
@@ -2794,6 +2855,8 @@ async def api_supplier_update(
         t.notes = (t.notes + "\n" + line) if t.notes else line
         t.task_location = f"3rd Party: {company}"
         row.task_id = t.id
+    if matched_tasks:
+        apply_job_location(db, job, f"3rd Party: {company}", who, current_user.id)
     db.add(models.JobUpdate(
         job_card_id=job.id,
         category="3rd party",
@@ -2904,9 +2967,54 @@ async def api_stock_status(item_id: int, request: Request, db: Session = Depends
         row.ordered_date = body.get("ordered_date")
     if body.get("supplier_invoice") is not None:
         row.supplier_invoice = (body.get("supplier_invoice") or "").strip() or None
+    if role == "workshop" or (who or "").lower().find("louis") >= 0:
+        row.update_requested_at = None
+        row.update_requested_by = None
+        row.update_request_note = None
     msg = f"Workshop stock {status}: {row.description} x{row.quantity} — {who}"
     notify_role(db, "stock", msg)
     notify_role(db, "workshop", msg)
+    notify_role(db, "admin", msg)
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/stock-orders/{item_id}/request-update")
+async def api_stock_request_update(item_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    role = (body.get("role") or "").lower()
+    if role not in ("admin", "accounts", "stock"):
+        raise HTTPException(status_code=403, detail="Admin / stock can request an update from Louis")
+    row = db.query(models.WorkshopStockOrder).filter(models.WorkshopStockOrder.id == item_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if row.status == "Closed":
+        raise HTTPException(status_code=400, detail="Already closed")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Admin"
+    note = (body.get("note") or "").strip()
+    row.update_requested_at = datetime.utcnow()
+    row.update_requested_by = who
+    row.update_request_note = note or None
+    msg = f"STOCK UPDATE REQUEST for Louis: {row.description} x{row.quantity} — {who}"
+    if note:
+        msg += f" ({note})"
+    notify_named_users(db, ["louis", "louis koekemoer"], msg, link="/stock")
+    notify_role(db, "workshop", msg)
+    notify_role(db, "admin", msg)
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/stock-orders/{item_id}/clear-update-request")
+async def api_stock_clear_update(item_id: int, request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    row = db.query(models.WorkshopStockOrder).filter(models.WorkshopStockOrder.id == item_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    who = body.get("full_name") or user_name(db, body.get("user_id")) or "Workshop"
+    row.update_requested_at = None
+    row.update_requested_by = None
+    row.update_request_note = None
+    row.last_updated_by = who
+    notify_role(db, "admin", f"Louis updated stock order: {row.description}", None)
     db.commit()
     return {"success": True}
 
@@ -3010,9 +3118,7 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
     assert_editable(db, job, body.get("user_id"))
     location = body.get("location")
     if location:
-        job.current_location = location
-        if location in WORKSHOP_BAYS and not job.workshop_entered_at:
-            job.workshop_entered_at = datetime.utcnow()
+        apply_job_location(db, job, location, body.get("full_name"), body.get("user_id"))
     job.current_activity = (body.get("activity") or "").strip() or None
     job.current_activity_notes = (body.get("notes") or "").strip() or None
     job.current_activity_at = datetime.utcnow()

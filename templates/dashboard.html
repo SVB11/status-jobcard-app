@@ -618,10 +618,32 @@
             const box = document.getElementById('stockDashList');
             if (!box) return;
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open stock orders</p>'; return; }
+            const dashRole = (localStorage.getItem('role') || '').toLowerCase();
+            const canAsk = (dashRole === 'admin' || dashRole === 'accounts' || dashRole === 'stock');
             box.innerHTML = rows.map(function(r){
-                return '<a href="/stock" class="block p-3 bg-gray-50 rounded-lg"><div class="font-medium">' + r.description + ' × ' + (r.quantity||'1') + '</div><div class="text-xs text-gray-500">' + r.status + ' — ' + (r.created_by_name||'') + '</div></a>';
+                const ask = canAsk ? '<button type="button" onclick="askLouisDash('+r.id+')" class="mt-2 text-xs px-3 py-1 bg-orange-600 text-white rounded">Ask Louis for update</button>' : '';
+                const flag = r.update_requested_at ? '<div class="text-xs text-orange-300">Waiting on Louis' + (r.update_request_note ? ' — ' + r.update_request_note : '') + '</div>' : '';
+                return '<div class="p-3 bg-gray-50 rounded-lg"><a href="/stock" class="block"><div class="font-medium">' + r.description + ' × ' + (r.quantity||'1') + '</div><div class="text-xs text-gray-500">' + r.status + ' — ' + (r.created_by_name||'') + '</div></a>' + flag + ask + '</div>';
             }).join('');
         } catch (err) {}
+    }
+
+    async function askLouisDash(id) {
+        const note = prompt('Note for Louis (optional)') || '';
+        const res = await fetch('/api/stock-orders/'+id+'/request-update', {
+            method:'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                role: localStorage.getItem('role'),
+                user_id: localStorage.getItem('user_id') ? parseInt(localStorage.getItem('user_id')) : null,
+                full_name: localStorage.getItem('full_name'),
+                note: note
+            })
+        });
+        const data = await res.json().catch(function(){return {};});
+        if (!res.ok) { alert(data.detail || 'Could not send'); return; }
+        alert('Update request sent to Louis');
+        loadStockDash();
     }
 
     async function loadUpdateRequests() {

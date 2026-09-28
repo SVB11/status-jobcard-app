@@ -53,6 +53,11 @@ NEW_COLUMNS = {
     "supplier_updates": {
         "photo_path": "VARCHAR",
     },
+    "workshop_stock_orders": {
+        "update_requested_at": "DATETIME",
+        "update_requested_by": "VARCHAR",
+        "update_request_note": "TEXT",
+    },
 }
 
 def migrate_schema():

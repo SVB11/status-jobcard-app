@@ -56,6 +56,9 @@
         let html = '<div class="rounded-xl p-4 border border-[#2a3340] bg-[#12161c]">';
         html += '<div class="font-semibold">' + r.description + ' × ' + (r.quantity||'1') + '</div>';
         html += '<div class="text-xs text-[#9aa6b4] mb-2">Requested by ' + (r.created_by_name||'') + ' — ' + r.status + (r.notes ? ' — ' + r.notes : '') + '</div>';
+        if (r.update_requested_at) {
+            html += '<div class="mb-2 p-2 rounded border border-orange-500 text-orange-200 text-xs">UPDATE REQUEST for Louis from ' + (r.update_requested_by||'Admin') + (r.update_request_note ? ' — ' + r.update_request_note : '') + '</div>';
+        }
         if (canWs || canStock) {
             html += '<div class="flex flex-wrap gap-2 mb-2">';
             html += '<select id="st'+r.id+'" class="text-xs px-2 py-1 rounded bg-[#07090c] border border-[#2a3340]">';
@@ -71,6 +74,12 @@
         html += '<div class="text-xs mb-2">Stock signed received: ' + (r.stock_received_by || '—') + ' &nbsp;|&nbsp; Workshop signed received: ' + (r.workshop_received_by || '—') + '</div>';
         if (canStock && !r.stock_received_by) html += '<button type="button" onclick="signRecv('+r.id+')" class="text-xs px-3 py-1 bg-orange-600 text-white rounded mr-2">Stock controller sign received</button>';
         if (role === 'workshop' && !r.workshop_received_by) html += '<button type="button" onclick="signRecv('+r.id+')" class="text-xs px-3 py-1 bg-green-700 text-white rounded">Workshop sign received</button>';
+        if ((role === 'admin' || role === 'accounts' || role === 'stock') && r.status !== 'Closed') {
+            html += '<button type="button" onclick="askLouis('+r.id+')" class="text-xs px-3 py-1 bg-orange-600 text-white rounded mr-2">Ask Louis for update</button>';
+        }
+        if ((role === 'workshop' || role === 'admin') && r.update_requested_at) {
+            html += '<button type="button" onclick="clearLouis('+r.id+')" class="text-xs px-3 py-1 bg-[#2a3340] text-white rounded">Mark request seen / updated</button>';
+        }
         html += '</div>';
         return html;
     }
@@ -93,6 +102,18 @@
             ordered_date: document.getElementById('dt'+id).value,
             supplier_invoice: document.getElementById('inv'+id).value
         })});
+        loadStock();
+    }
+    async function askLouis(id) {
+        const note = prompt('Note for Louis (optional)') || '';
+        const res = await fetch('/api/stock-orders/'+id+'/request-update', { method:'POST', headers: auth(), body: bodyExtra({ note: note }) });
+        const data = await res.json().catch(function(){return {};});
+        if (!res.ok) { alert(data.detail || 'Could not send'); return; }
+        alert('Update request sent to Louis');
+        loadStock();
+    }
+    async function clearLouis(id) {
+        await fetch('/api/stock-orders/'+id+'/clear-update-request', { method:'POST', headers: auth(), body: bodyExtra({}) });
         loadStock();
     }
     async function signRecv(id) {

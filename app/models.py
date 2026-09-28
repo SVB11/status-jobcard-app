@@ -328,6 +328,9 @@ class WorkshopStockOrder(Base):
     workshop_received_by = Column(String, nullable=True)
     workshop_received_at = Column(DateTime(timezone=True), nullable=True)
     last_updated_by = Column(String, nullable=True)
+    update_requested_at = Column(DateTime(timezone=True), nullable=True)
+    update_requested_by = Column(String, nullable=True)
+    update_request_note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class WashRequest(Base):
