@@ -30,6 +30,33 @@
     <div id="content">Loading...</div>
 <script>
     const jobId = {{ job_id }};
+    function noiseText(s) {
+        s = (s || '').toLowerCase();
+        return s.indexOf('update request') !== -1 || s.indexOf('requested an update') !== -1
+            || s.indexOf('responded to sales update') !== -1 || s.indexOf('morning location') !== -1
+            || s.indexOf('ask louis') !== -1;
+    }
+    function isReportNoiseTask(t) {
+        const n = ((t && t.task_name) || '').toLowerCase();
+        return n.indexOf('activity:') === 0 || noiseText(n);
+    }
+    function cleanReportNote(s) {
+        return (s || '').split('\n').filter(function(line){ return line.trim() && !noiseText(line); }).join(' | ');
+    }
+    function isImportantUpdate(u) {
+        if (noiseText((u.description||'') + ' ' + (u.notes||'') + ' ' + (u.category||''))) return false;
+        const cat = (u.category || '').toLowerCase();
+        return ['parts','third_party','3rd party','extra_work','location','supplies','supply'].indexOf(cat) !== -1;
+    }
+    function reportType(cat) {
+        cat = (cat || '').toLowerCase();
+        if (cat.indexOf('part') !== -1) return 'Parts';
+        if (cat.indexOf('third') !== -1 || cat.indexOf('3rd') !== -1) return '3rd party';
+        if (cat.indexOf('supply') !== -1) return 'Supplies';
+        if (cat === 'location') return 'Location';
+        if (cat.indexOf('extra') !== -1) return 'Extra work';
+        return cat;
+    }
     async function load() {
         const j = await (await fetch('/api/jobs/' + jobId, { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') } })).json();
         document.title = (j.stock_number || '') + ' ' + (j.vehicle_description || '') + ' completed work';
@@ -43,21 +70,21 @@
         });
         html += '</table>';
 
-        const tasks = j.tasks || [];
+        const tasks = (j.tasks || []).filter(function(t){ return !isReportNoiseTask(t); });
         const completed = tasks.filter(function(t) { return t.status === 'Completed'; });
         const other = tasks.filter(function(t) { return t.status !== 'Completed'; });
 
         html += '<h2>Completed tasks</h2><table><tr><th>Task</th><th>Notes</th><th>Completed</th></tr>';
         if (!completed.length) html += '<tr><td colspan="3">None completed yet</td></tr>';
         completed.forEach(function(t) {
-            html += '<tr><td>' + t.task_name + '</td><td>' + (t.notes || t.description || '') + '</td><td>' + (t.completed_at ? t.completed_at.replace('T',' ').substring(0,16) : '') + '</td></tr>';
+            html += '<tr><td>' + t.task_name + '</td><td>' + cleanReportNote(t.notes || t.description || '') + '</td><td>' + (t.completed_at ? t.completed_at.replace('T',' ').substring(0,16) : '') + '</td></tr>';
         });
         html += '</table>';
 
         html += '<h2>Other tasks (not completed)</h2><table><tr><th>Task</th><th>Status</th><th>Notes</th></tr>';
         if (!other.length) html += '<tr><td colspan="3">None</td></tr>';
         other.forEach(function(t) {
-            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + (t.notes || t.description || '') + '</td></tr>';
+            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + cleanReportNote(t.notes || t.description || '') + '</td></tr>';
         });
         html += '</table>';
 
@@ -85,11 +112,11 @@
         });
         html += '</table>';
 
-        html += '<h2>All notes & updates</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>Notes</th><th>By</th></tr>';
-        const ups = j.updates || [];
-        if (!ups.length) html += '<tr><td colspan="5">None</td></tr>';
+        html += '<h2>Important notes</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>By</th></tr>';
+        const ups = (j.updates || []).filter(isImportantUpdate);
+        if (!ups.length) html += '<tr><td colspan="4">None</td></tr>';
         ups.forEach(function(u) {
-            html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + u.category + '</td><td>' + u.description + '</td><td>' + (u.notes || '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
+            html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + reportType(u.category) + '</td><td>' + u.description + (u.notes ? ' — ' + u.notes : '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
         });
         html += '</table>';
         document.getElementById('content').innerHTML = html;

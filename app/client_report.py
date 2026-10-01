@@ -100,7 +100,7 @@ def group_for_task(task_name: str):
         if any(m in name for m in g["match"]):
             return g
     return {
-        "key": "other_" + name[:24],
+        "key": "other_prep",
         "title": "Additional preparation",
         "note": "Extra work agreed before handover",
         "match": [],
@@ -141,13 +141,19 @@ _RANK = {
 }
 
 
-def _client_title(task_name, group):
+def _looks_internal(task_name: str) -> bool:
     raw = (task_name or "").strip()
-    low = _norm(raw)
-    for prefix in ("extra:", "other:", "parts:", "3rd party:", "3rd party :"):
-        if low.startswith(prefix):
-            rest = raw.split(":", 1)[1].strip()
-            return rest[:80] if rest else group["title"]
+    n = _norm(raw)
+    if len(raw) > 42:
+        return True
+    return any(x in n for x in (
+        "workshop", "double check", "already through", "just check",
+        "trailer sto", "please", "make sure", "as discussed",
+    ))
+
+def _client_title(task_name, group):
+    if (group or {}).get("key") == "other_prep" or _looks_internal(task_name):
+        return "Additional preparation"
     return group["title"]
 
 
@@ -159,9 +165,18 @@ def build_report(job, tasks, parts=None):
             continue
         if _norm(name).startswith("activity:"):
             continue
+        if any(x in _norm(name) for x in ("update request", "requested an update", "morning location")):
+            continue
         g = group_for_task(name)
         if not g:
             continue
+        if _looks_internal(name):
+            g = {
+                "key": "other_prep",
+                "title": "Additional preparation",
+                "note": "Extra work agreed before handover",
+                "match": [],
+            }
         key = g["key"]
         line_status = client_status_for_task(t)
         title = _client_title(name, g)
@@ -186,7 +201,7 @@ def build_report(job, tasks, parts=None):
             }
 
     # stable display order
-    order = [g["key"] for g in GROUPS] + ["parts"]
+    order = [g["key"] for g in GROUPS] + ["parts", "other_prep"]
     items = []
     seen = set()
     for key in order:
@@ -197,13 +212,6 @@ def build_report(job, tasks, parts=None):
         if key not in seen:
             items.append(row)
 
-    extra = (getattr(job, "other_instructions", None) or "").strip()
-    if extra and not any(i.get("title", "").lower() == extra.lower() for i in items):
-        items.append({
-            "title": extra[:80],
-            "note": "Additional preparation",
-            "status": "In progress" if (job.status or "") not in ("Work Completed", "PDI Completed", "Ready for Delivery", "Delivered / Closed") else "Completed",
-        })
     if not items:
         items.append({
             "title": "Vehicle preparation",

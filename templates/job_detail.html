@@ -43,7 +43,7 @@
         <a href="#tasksList" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Work / Prep Tasks</a>
         <a href="#partsSection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Parts</a>
         <a href="#suppliesSection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Hoses / Couplers / Suzi</a>
-        <a href="#thirdPartySection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">3rd Party Bookings</a>
+        <a href="#thirdPartySection" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Other outside 3rd party bookings</a>
         <a href="#workshopExtras" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Current activity</a>
     </div>
 
@@ -163,35 +163,26 @@
 
 <div id="thirdPartySection" class="bg-white rounded-xl shadow">
         <div class="glass-inner">
-        <h2 class="font-semibold text-status-blue mb-3">3rd Party Bookings</h2>
+        <h2 class="font-semibold text-status-blue mb-1">Other outside 3rd party bookings</h2>
+        <p class="text-xs text-[#9aa6b4] mb-3">For companies that are not on the system list. System bookings (PFT, FK, STT, ITL, East Rand, Liquid Flow) stay on Work / Prep Tasks.</p>
         <div id="tpList" class="space-y-2 mb-4 text-sm"></div>
         <div id="tpForm" class="hidden space-y-3 p-3 bg-gray-50 rounded-lg">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                    <label class="block text-xs font-medium mb-1">Service</label>
-                    <select id="tpService" class="w-full px-2 py-2 border rounded text-sm" onchange="fillProviders()"></select>
+                    <label class="block text-xs font-medium mb-1">Service / work *</label>
+                    <input type="text" id="tpService" class="w-full px-2 py-2 border rounded text-sm" placeholder="e.g. Sandblast, lining, spray">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium mb-1">Company</label>
-                    <select id="tpProvider" class="w-full px-2 py-2 border rounded text-sm"></select>
+                    <label class="block text-xs font-medium mb-1">Company name *</label>
+                    <input type="text" id="tpProvider" class="w-full px-2 py-2 border rounded text-sm" placeholder="Company not on the list">
                 </div>
                 <div>
                     <label class="block text-xs font-medium mb-1">Date booked</label>
                     <input type="date" id="tpDate" class="w-full px-2 py-2 border rounded text-sm">
                 </div>
-                <div id="tpIntervalWrap" class="hidden md:col-span-3">
-                    <label class="block text-xs font-medium mb-1">Barrel test interval</label>
-                    <select id="tpInterval" class="w-full px-2 py-2 border rounded text-sm">
-                        <option value="3 year">3 year</option>
-                        <option value="6 year">6 year</option>
-                        <option value="3 and 6 year">3 and 6 year</option>
-                        <option value="15 year">15 year</option>
-                    </select>
-                    <p id="tp15note" class="hidden text-xs text-orange-600 mt-1">Vehicle is 15 years or older — 15 year is auto-selected. You can still also book 3 / 6 year.</p>
-                </div>
             </div>
             <input type="text" id="tpNotes" placeholder="Notes (optional)" class="w-full px-3 py-2 border rounded text-sm">
-            <button type="button" onclick="saveThirdParty()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Add 3rd party booking</button>
+            <button type="button" onclick="saveThirdParty()" class="px-4 py-2 bg-status-blue text-white text-sm rounded">Add outside 3rd party</button>
         </div>
         </div>
     </div>
@@ -968,15 +959,6 @@
             if (currentJob && currentJob.main_type !== 'Tanker') {
                 window.tpServices = window.tpServices.filter(function(s) { return s.service === 'Roadworthy'; });
             }
-            const svc = document.getElementById('tpService');
-            if (svc) {
-                svc.innerHTML = '<option value="">Select service...</option>';
-                window.tpServices.forEach(function(s) {
-                    svc.innerHTML += '<option value="' + s.service + '">' + s.service + '</option>';
-                });
-                svc.onchange = function() { fillProviders(); };
-                fillProviders();
-            }
         } catch (err) {
             window.tpServices = [
                 {service: "Barrel Test", providers: ["STT", "ITL"]},
@@ -985,44 +967,10 @@
                 {service: "Roadworthy", providers: ["East Rand Testing Station"]},
                 {service: "Auto Electrical", providers: ["MAN Auto (Scotty)"]}
             ];
-            const svc = document.getElementById('tpService');
-            if (svc) {
-                svc.innerHTML = '<option value="">Select service...</option>';
-                window.tpServices.forEach(function(s) {
-                    svc.innerHTML += '<option value="' + s.service + '">' + s.service + '</option>';
-                });
-                svc.onchange = function() { fillProviders(); };
-            }
         }
     }
 
-    function fillProviders() {
-        const svcName = document.getElementById('tpService').value;
-        const sel = document.getElementById('tpProvider');
-        sel.innerHTML = '';
-        const found = (window.tpServices || []).find(function(s) { return s.service === svcName; });
-        const providers = found ? found.providers : [];
-        if (!providers.length) sel.innerHTML = '<option value="">Select service first</option>';
-        providers.forEach(function(p) { sel.innerHTML += '<option value="' + p + '">' + p + '</option>'; });
-        const wrap = document.getElementById('tpIntervalWrap');
-        const note = document.getElementById('tp15note');
-        const interval = document.getElementById('tpInterval');
-        if (svcName === 'Barrel Test') {
-            wrap.classList.remove('hidden');
-            const yr = currentJob && currentJob.year ? parseInt(currentJob.year, 10) : 0;
-            const age = yr ? (new Date().getFullYear() - yr) : 0;
-            if (age >= 15) {
-                interval.value = '15 year';
-                note.classList.remove('hidden');
-            } else {
-                interval.value = '3 and 6 year';
-                note.classList.add('hidden');
-            }
-        } else {
-            wrap.classList.add('hidden');
-            if (note) note.classList.add('hidden');
-        }
-    }
+    function fillProviders() { /* outside 3rd party tab is free text only */ }
 
 
     window.supplyCats = {
@@ -1185,7 +1133,7 @@
         const box = document.getElementById('tpList');
         const items = j.third_party_bookings || [];
         if (!items.length) {
-            box.innerHTML = '<p class="text-gray-400 text-sm">No 3rd party bookings yet</p>';
+            box.innerHTML = '<p class="text-gray-400 text-sm">No outside 3rd party bookings yet</p>';
             return;
         }
         let html = '';
@@ -1198,20 +1146,21 @@
     }
 
     async function saveThirdParty() {
-        const service = document.getElementById('tpService').value;
-        const provider = document.getElementById('tpProvider').value;
+        const service = (document.getElementById('tpService').value || '').trim();
+        const provider = (document.getElementById('tpProvider').value || '').trim();
         const booked_date = document.getElementById('tpDate').value;
         const notes = document.getElementById('tpNotes').value;
-        if (!service || !provider) { alert('Select service and company'); return; }
-        if (!booked_date) { alert('Select the booked date'); return; }
+        if (!service || !provider) { alert('Type the service and the company name'); return; }
         try {
             const res = await fetch('/api/jobs/' + jobId + '/third-party', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ service: service, provider: provider, booked_date: booked_date, notes: notes, interval: (document.getElementById('tpInterval') ? document.getElementById('tpInterval').value : null), user_id: userId ? parseInt(userId) : null, full_name: fullName })
+                body: JSON.stringify({ service: service, provider: provider, booked_date: booked_date, notes: notes, outside: true, user_id: userId ? parseInt(userId) : null, full_name: fullName })
             });
             const data = await res.json();
             if (!res.ok) { alert(data.detail || 'Failed'); return; }
+            document.getElementById('tpService').value = '';
+            document.getElementById('tpProvider').value = '';
             document.getElementById('tpNotes').value = '';
             loadJob();
         } catch (err) { alert('Connection error'); }

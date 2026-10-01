@@ -30,6 +30,33 @@
     <div id="content">Loading...</div>
 <script>
     const jobId = {{ job_id }};
+    function noiseText(s) {
+        s = (s || '').toLowerCase();
+        return s.indexOf('update request') !== -1 || s.indexOf('requested an update') !== -1
+            || s.indexOf('responded to sales update') !== -1 || s.indexOf('morning location') !== -1
+            || s.indexOf('ask louis') !== -1;
+    }
+    function isReportNoiseTask(t) {
+        const n = ((t && t.task_name) || '').toLowerCase();
+        return n.indexOf('activity:') === 0 || noiseText(n) || noiseText(t && t.notes);
+    }
+    function cleanReportNote(s) {
+        return (s || '').split('\n').filter(function(line){ return line.trim() && !noiseText(line); }).join(' | ');
+    }
+    function isImportantUpdate(u) {
+        if (noiseText((u.description||'') + ' ' + (u.notes||'') + ' ' + (u.category||''))) return false;
+        const cat = (u.category || '').toLowerCase();
+        return ['parts','third_party','3rd party','extra_work','location','supplies','supply'].indexOf(cat) !== -1;
+    }
+    function reportType(cat) {
+        cat = (cat || '').toLowerCase();
+        if (cat.indexOf('part') !== -1) return 'Parts';
+        if (cat.indexOf('third') !== -1 || cat.indexOf('3rd') !== -1) return '3rd party';
+        if (cat.indexOf('supply') !== -1) return 'Supplies';
+        if (cat === 'location') return 'Location';
+        if (cat.indexOf('extra') !== -1) return 'Extra work';
+        return cat;
+    }
     async function load() {
         const jobRes = await fetch('/api/jobs/' + jobId);
         const pdiRes = await fetch('/api/jobs/' + jobId + '/pdi');
@@ -49,14 +76,15 @@
         ];
         rows.forEach(function(r) { html += '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>'; });
         html += '</table><h2>Tasks</h2><table><tr><th>Task</th><th>Status</th><th>Notes</th></tr>';
-        (j.tasks || []).forEach(function(t) {
-            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + (t.notes || '') + '</td></tr>';
+        (j.tasks || []).filter(function(t){ return !isReportNoiseTask(t); }).forEach(function(t) {
+            html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + cleanReportNote(t.notes || t.description || '') + '</td></tr>';
         });
         html += '</table>';
-        if (j.updates && j.updates.length) {
-            html += '<h2>Updates (permanent)</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>By</th></tr>';
-            j.updates.forEach(function(u) {
-                html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + u.category + '</td><td>' + u.description + (u.notes ? ' — ' + u.notes : '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
+        const important = (j.updates || []).filter(isImportantUpdate);
+        if (important.length) {
+            html += '<h2>Important notes</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>By</th></tr>';
+            important.forEach(function(u) {
+                html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + reportType(u.category) + '</td><td>' + u.description + (u.notes ? ' — ' + u.notes : '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
             });
             html += '</table>';
         }

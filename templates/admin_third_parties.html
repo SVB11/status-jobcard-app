@@ -50,7 +50,8 @@
 {% block scripts %}
 <script>
     const token = localStorage.getItem('token');
-    const role = localStorage.getItem('role') || '';
+    const role = (localStorage.getItem('role') || '').toLowerCase();
+    const isAdminOnly = role === 'admin';
     if (!token) window.location.href = '/login';
     if (role !== 'admin' && role !== 'accounts') window.location.href = '/dashboard';
     document.getElementById('userInfo').textContent = (localStorage.getItem('full_name') || '') + ' (admin)';
@@ -68,7 +69,10 @@
                 '<td class="py-2">' + r.category + '</td>' +
                 '<td>' + r.name + '</td>' +
                 '<td>' + (r.is_active ? '<span class="text-green-700">Active</span>' : '<span class="text-gray-400">Off</span>') + '</td>' +
-                '<td><button onclick="toggleCo(' + r.id + ')" class="text-xs px-2 py-1 border rounded">' + (r.is_active ? 'Turn off' : 'Turn on') + '</button></td></tr>';
+                '<td class="text-right whitespace-nowrap">' +
+                '<button onclick="toggleCo(' + r.id + ')" class="text-xs px-2 py-1 border rounded mr-1">' + (r.is_active ? 'Turn off' : 'Turn on') + '</button>' +
+                (isAdminOnly ? '<button onclick="deleteCo(' + r.id + ', \'' + String(r.name||'').replace(/'/g, '') + '\')" class="text-xs px-2 py-1 border border-red-400 text-red-600 rounded">Delete</button>' : '') +
+                '</td></tr>';
         });
         html += '</table>';
         box.innerHTML = html;
@@ -76,6 +80,13 @@
 
     async function toggleCo(id) {
         await fetch('/api/admin/third-parties/' + id + '/toggle', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+        loadList();
+    }
+    async function deleteCo(id, name) {
+        if (!confirm('Delete 3rd party "' + name + '" from the list? Jobs already booked to them stay on those job cards.')) return;
+        const res = await fetch('/api/admin/third-parties/' + id + '/delete', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Could not delete'); return; }
         loadList();
     }
 

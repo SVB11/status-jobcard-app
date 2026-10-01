@@ -958,6 +958,18 @@ async def api_admin_toggle_third_party(item_id: int, db: Session = Depends(get_d
     db.commit()
     return {"success": True, "is_active": row.is_active}
 
+@app.post("/api/admin/third-parties/{item_id}/delete")
+async def api_admin_delete_third_party(item_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if (current_user.role or "").lower() != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete 3rd parties")
+    row = db.query(models.ThirdPartyCompany).filter(models.ThirdPartyCompany.id == item_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    name = row.name
+    db.delete(row)
+    db.commit()
+    return {"success": True, "deleted": name}
+
 @app.get("/api/admin/pending-extras")
 async def api_admin_pending_extras(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
@@ -1650,6 +1662,21 @@ def apply_job_location(db, job, raw_location, name=None, user_id=None):
         created_by=user_id
     ))
 
+def _board_bucket(board, raw):
+    if raw in board:
+        return raw
+    mapped = normalize_board_location(raw)
+    if mapped in board:
+        return mapped
+    return "Unspecified"
+
+def _board_push(board, loc, item):
+    bucket = _board_bucket(board, loc)
+    key = (item.get("id"), item.get("label"), bucket)
+    if any((x.get("id"), x.get("label"), bucket) == key for x in board[bucket]):
+        return
+    board[bucket].append(item)
+
 @app.get("/api/locations-board")
 async def api_locations_board(db: Session = Depends(get_db)):
     jobs = db.query(models.JobCard).order_by(models.JobCard.created_at.desc()).all()
@@ -1657,23 +1684,51 @@ async def api_locations_board(db: Session = Depends(get_db)):
     board["Unspecified"] = []
     board["Delivered / Out"] = []
     for j in jobs:
-        if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
-            loc = "Delivered / Out"
-        else:
-            loc = j.current_location if j.current_location in board else (normalize_board_location(j.current_location) or "Unspecified")
-            if loc not in board:
-                loc = "Unspecified"
-        board[loc].append({
+        base = {
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
             "vehicle_description": j.vehicle_description,
             "year": j.year,
-            "label": f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip(),
             "status": j.status,
             "priority": j.priority,
             "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
-        })
+        }
+        vehicle = f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip()
+        if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
+            item = dict(base)
+            item["label"] = vehicle
+            _board_push(board, "Delivered / Out", item)
+            continue
+        # Current vehicle location
+        item = dict(base)
+        item["label"] = vehicle
+        _board_push(board, j.current_location or "Unspecified", item)
+        # Every work / prep task that has a location or 3rd party
+        for t in (j.tasks or []):
+            if (t.status or "") == "Completed":
+                continue
+            raw = t.task_location or (f"3rd Party: {t.third_party_provider}" if t.third_party_provider else None)
+            if not raw:
+                continue
+            extra = t.task_name or "Task"
+            if t.third_party_provider:
+                extra += f" @ {t.third_party_provider}"
+            if t.booked_date:
+                extra += f" ({t.booked_date})"
+            row = dict(base)
+            row["label"] = f"{vehicle} — {extra}"
+            row["task"] = extra
+            _board_push(board, raw, row)
+        # Outside / listed 3rd party bookings
+        for b in (getattr(j, "third_party_bookings", None) or []):
+            extra = f"{b.service} @ {b.provider}"
+            if b.booked_date:
+                extra += f" ({b.booked_date})"
+            row = dict(base)
+            row["label"] = f"{vehicle} — {extra}"
+            row["task"] = extra
+            _board_push(board, f"3rd Party: {b.provider}", row)
     return {"board": board}
 
 @app.post("/api/jobs/{job_id}/location")
@@ -1867,15 +1922,17 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
     provider = (body.get("provider") or "").strip()
     booked_date = body.get("booked_date") or None
     interval = (body.get("interval") or "").strip()
+    outside = bool(body.get("outside"))
     if not service or not provider:
         raise HTTPException(status_code=400, detail="Service and provider are required")
-    allowed = {s["service"]: s["providers"] for s in THIRD_PARTY_SERVICES}
-    if service not in allowed or provider not in allowed[service]:
-        raise HTTPException(status_code=400, detail="Invalid service or provider")
-    if service == "Barrel Test":
-        if interval not in BARREL_INTERVALS:
-            raise HTTPException(status_code=400, detail="Select barrel test interval: 3 year, 6 year, 3 and 6 year, or 15 year")
-        service = f"Barrel Test ({interval})"
+    if not outside:
+        allowed = {s["service"]: s["providers"] for s in THIRD_PARTY_SERVICES}
+        if service not in allowed or provider not in allowed[service]:
+            raise HTTPException(status_code=400, detail="Invalid service or provider")
+        if service == "Barrel Test":
+            if interval not in BARREL_INTERVALS:
+                raise HTTPException(status_code=400, detail="Select barrel test interval: 3 year, 6 year, 3 and 6 year, or 15 year")
+            service = f"Barrel Test ({interval})"
     user_id = body.get("user_id")
     name = body.get("full_name") or "Staff"
     booking = models.ThirdPartyBooking(
@@ -1897,10 +1954,29 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
         created_by_name=name,
         created_by=user_id
     ))
-    # Fill the matching Work / Prep task with provider + date
+    # System list bookings fill the matching Work / Prep task.
+    # Outside companies get their own extra task so they stay separate.
     match_key = service.lower()
     matched = False
+    if outside:
+        db.add(models.JobTask(
+            job_card_id=job.id,
+            task_name=f"Outside 3rd party: {service} — {provider}",
+            description=body.get("notes"),
+            is_custom=True,
+            needs_approval=False,
+            status="Not Started",
+            notes=body.get("notes"),
+            task_location=f"3rd Party: {provider}",
+            third_party_provider=provider,
+            booked_date=booked_date,
+            last_updated_by_name=name
+        ))
+        apply_job_location(db, job, f"3rd Party: {provider}", name, user_id)
+        matched = True
     for t in job.tasks:
+        if outside:
+            break
         name = (t.task_name or "").lower()
         hit = False
         if "barrel" in match_key and "barrel" in name:
@@ -1975,6 +2051,36 @@ async def api_client_report(job_id: int, db: Session = Depends(get_db)):
 @app.get("/api/jobs/{job_id}/client-report.pdf")
 async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db)):
     report = _client_report_payload(job_id, db)
+    pdf = render_pdf(report)
+    filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    })
+
+@app.post("/api/jobs/{job_id}/client-report.pdf")
+async def api_client_report_pdf_selected(job_id: int, request: Request, db: Session = Depends(get_db)):
+    report = _client_report_payload(job_id, db)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    chosen = body.get("items")
+    if isinstance(chosen, list) and chosen:
+        cleaned = []
+        for it in chosen:
+            if not isinstance(it, dict):
+                continue
+            title = (it.get("title") or "").strip()
+            if not title:
+                continue
+            cleaned.append({
+                "title": title[:80],
+                "status": (it.get("status") or "").strip() or "In progress",
+                "note": (it.get("note") or "").strip(),
+            })
+        if cleaned:
+            report["items"] = cleaned
+            report["whatsapp"] = whatsapp_text(report)
     pdf = render_pdf(report)
     filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
     return Response(content=pdf, media_type="application/pdf", headers={

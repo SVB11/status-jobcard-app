@@ -20,7 +20,14 @@
         .mid { color: #b45309; font-weight: 700; }
         .grey { color: #5b6570; font-weight: 700; }
         textarea { width: 100%; min-height: 280px; font-size: 14px; padding: 10px; border: 1px solid #d7dde4; border-radius: 8px; white-space: pre-wrap; overflow: auto; word-break: break-word; }
-        @media print { .bar { display: none; } body { background: #fff; } .page { box-shadow: none; margin: 0; } }
+        @media print {
+            .bar { display: none; }
+            body { background: #fff; }
+            .page { box-shadow: none; margin: 0; }
+            #rows input.pick { display: none; }
+            #rows tr:has(input.pick:not(:checked)) { display: none; }
+            textarea { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -34,11 +41,11 @@
         <img src="/static/images/status_logo_th.png" alt="Status Truck Sales" style="height:48px">
         <div class="muted">www.statustrucksales.co.za</div>
         <h1>Progress report</h1>
-        <p class="muted">Client wording only. Workshop names are not shown.</p>
+        <p class="muted">Tick only the items you want the client to see. Wording stays client-safe.</p>
         <div id="meta"></div>
         <div class="status" id="statusLine"></div>
         <table>
-            <thead><tr><th>Preparation item</th><th>Status</th><th>Note</th></tr></thead>
+            <thead><tr><th></th><th>Preparation item</th><th>Status</th><th>Note</th></tr></thead>
             <tbody id="rows"></tbody>
         </table>
         <p><strong>Next step</strong><br><span id="nextStep"></span></p>
@@ -52,8 +59,39 @@
     const token = localStorage.getItem('token') || '';
     const serverReport = {{ report_json | default('null') | safe }};
 
+    let fullReport = null;
+
+    function selectedItems() {
+        if (!fullReport) return [];
+        const boxes = document.querySelectorAll('#rows input.pick:checked');
+        const titles = {};
+        boxes.forEach(function(b){ titles[b.getAttribute('data-i')] = true; });
+        return (fullReport.items || []).filter(function(it, i){ return titles[String(i)]; });
+    }
+
+    function rebuildWhatsApp() {
+        if (!fullReport) return;
+        const d = Object.assign({}, fullReport, { items: selectedItems() });
+        const lines = [
+            'Status Truck Sales — vehicle preparation update',
+            '',
+            'Dear ' + (d.client_name||'Client') + ',',
+            '',
+            (d.vehicle||'') + (d.registration ? ' · ' + d.registration : '')
+        ];
+        if (d.quote) lines.push('Reference: ' + d.quote);
+        lines.push('', 'Current status: ' + (d.status_line||''), '');
+        (d.items||[]).forEach(function(it){
+            const extra = (it.note && it.status !== 'Completed') ? ' (' + it.note + ')' : '';
+            lines.push('- ' + it.title + ': ' + it.status + extra);
+        });
+        lines.push('', 'Next step: ' + (d.next_step||''), '', d.salesman_name || 'Status Truck Sales', 'Sales · Status Truck Sales', 'www.statustrucksales.co.za');
+        document.getElementById('waText').value = lines.join('\n');
+    }
+
     function paint(d) {
         if (!d) return;
+        fullReport = d;
         document.getElementById('meta').innerHTML =
             '<p><strong>To</strong> ' + (d.client_name||'') + '<br>' +
             '<strong>Vehicle</strong> ' + (d.vehicle||'') +
@@ -63,18 +101,25 @@
         document.getElementById('statusLine').textContent = d.status_line || '';
         document.getElementById('nextStep').textContent = d.next_step || '';
         document.getElementById('salesman').textContent = d.salesman_name || '';
-        document.getElementById('waText').value = d.whatsapp || '';
-        document.getElementById('rows').innerHTML = (d.items||[]).map(function(it) {
+        document.getElementById('rows').innerHTML = (d.items||[]).map(function(it, i) {
             const cls = it.status === 'Completed' ? 'ok' : (it.status === 'In progress' || it.status === 'Delayed' || it.status === 'Still in preparation' ? 'mid' : 'grey');
             const note = it.status === 'Completed' ? '' : (it.note||'');
-            return '<tr><td>' + it.title + '</td><td class="' + cls + '">' + it.status + '</td><td class="muted">' + note + '</td></tr>';
-        }).join('') || '<tr><td colspan="3">Preparation in progress</td></tr>';
+            const on = (it.status === 'Completed' || it.status === 'In progress' || it.status === 'Delayed' || it.status === 'Still in preparation') ? ' checked' : '';
+            return '<tr><td><input type="checkbox" class="pick" data-i="'+i+'"'+on+' onchange="rebuildWhatsApp()"></td><td>' + it.title + '</td><td class="' + cls + '">' + it.status + '</td><td class="muted">' + note + '</td></tr>';
+        }).join('') || '<tr><td colspan="4">Preparation in progress</td></tr>';
+        rebuildWhatsApp();
     }
 
     document.getElementById('pdfLink').onclick = async function(e) {
         e.preventDefault();
-        const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
-        const res = await fetch('/api/jobs/' + jobId + '/client-report.pdf', { headers: headers, credentials: 'same-origin' });
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch('/api/jobs/' + jobId + '/client-report.pdf', {
+            method: 'POST',
+            headers: headers,
+            credentials: 'same-origin',
+            body: JSON.stringify({ items: selectedItems() })
+        });
         if (!res.ok) { alert('Could not build PDF. Sign in again and retry.'); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
