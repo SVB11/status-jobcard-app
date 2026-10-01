@@ -337,7 +337,10 @@ class WashRequest(Base):
     __tablename__ = "wash_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=True)
+    stock_number = Column(String, nullable=True)
+    make = Column(String, nullable=True)
+    vehicle_type = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String, default="Requested")
     requested_by_name = Column(String, nullable=True)

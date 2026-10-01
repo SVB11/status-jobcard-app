@@ -686,7 +686,8 @@
                 buttons += '<a href="/jobs/' + jobId + '/client-report" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Client report / WhatsApp</a>';
             }
             document.getElementById('actionButtons').innerHTML = buttons;
-            if ((role === 'sales' || role === 'marketing' || isAdmin) && j.status !== 'Delivered / Closed') {
+            const canWash = role === 'sales' || role === 'marketing' || isAdmin || (fullName || '').toLowerCase().indexOf('damian') === 0;
+            if (canWash && j.status !== 'Delivered / Closed') {
                 document.getElementById('washReqBox').classList.remove('hidden');
             }
             const emptyBox = document.getElementById('emptyCheckJobBox');

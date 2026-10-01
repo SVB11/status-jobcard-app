@@ -58,6 +58,11 @@ NEW_COLUMNS = {
         "update_requested_by": "VARCHAR",
         "update_request_note": "TEXT",
     },
+    "wash_requests": {
+        "stock_number": "VARCHAR",
+        "make": "VARCHAR",
+        "vehicle_type": "VARCHAR",
+    },
 }
 
 def migrate_schema():
@@ -71,3 +76,31 @@ def migrate_schema():
             for col, coltype in cols.items():
                 if col not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+        if "wash_requests" in tables:
+            info = conn.execute(text("PRAGMA table_info(wash_requests)")).fetchall()
+            job_col = next((row for row in info if row[1] == "job_card_id"), None)
+            # SQLite cannot drop NOT NULL. Rebuild so showroom washes need no job card.
+            if job_col and job_col[3] == 1:
+                conn.execute(text("""
+                    CREATE TABLE wash_requests_new (
+                        id INTEGER PRIMARY KEY,
+                        job_card_id INTEGER,
+                        stock_number VARCHAR,
+                        make VARCHAR,
+                        vehicle_type VARCHAR,
+                        notes TEXT,
+                        status VARCHAR,
+                        requested_by_name VARCHAR,
+                        requested_by INTEGER,
+                        updated_by_name VARCHAR,
+                        created_at DATETIME
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO wash_requests_new
+                    (id, job_card_id, notes, status, requested_by_name, requested_by, updated_by_name, created_at)
+                    SELECT id, job_card_id, notes, status, requested_by_name, requested_by, updated_by_name, created_at
+                    FROM wash_requests
+                """))
+                conn.execute(text("DROP TABLE wash_requests"))
+                conn.execute(text("ALTER TABLE wash_requests_new RENAME TO wash_requests"))

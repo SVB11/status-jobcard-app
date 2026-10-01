@@ -32,7 +32,16 @@
 </div>
 <div id="washDashBox" class="hidden mb-6 rounded-xl border-2 border-cyan-500 p-4">
     <h2 class="font-bold uppercase tracking-wide text-cyan-300">Wash requests</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Marketing / photos. Move to Wash Bay then mark done.</p>
+    <p class="text-sm text-[#d5dde6] mb-3">Marketing photos. Book a vehicle and workshop will move it to Wash Bay.</p>
+    <div id="washBookForm" class="hidden mb-4 p-3 rounded border border-[#025daa] bg-[#025daa22]">
+        <div class="text-xs uppercase font-semibold mb-2">Book a wash — showroom or yard stock</div>
+        <p class="text-xs text-[#9aa6b4] mb-2">No job card needed. Type the WS number, make and type.</p>
+        <input id="washStock" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="WS number *">
+        <input id="washMake" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Make *  e.g. GRW, Volvo, Afrit">
+        <input id="washType" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Type *  e.g. 50000Lt fuel tanker, truck tractor">
+        <input id="washDashNote" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Note — photos / marketing">
+        <button type="button" onclick="bookWashFromDash()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded uppercase">Send wash request</button>
+    </div>
     <div id="washDashList" class="space-y-2 text-sm">Loading...</div>
 </div>
 <div id="morningLocBox" class="hidden mb-6 rounded-xl border-2 border-[#025daa] bg-[#025daa22] p-4">
@@ -314,11 +323,12 @@
             loadNotifications();
             loadSignoffQueue(); loadEmptyCheckQueue(); loadShowroomQueue(); loadShowroomQueue();
         }
-        if (role === 'marketing') {
+        if (role === 'marketing' || (name || '').toLowerCase().indexOf('damian') === 0) {
             show('allJobsBox');
             show('notifyBox');
             loadJobList('/api/jobs', 'allJobsList');
             loadNotifications();
+            loadWashRequests();
         }
         if (role === 'workshop') {
             loadMorningLocations();
@@ -805,10 +815,36 @@
         } catch (e) {}
     }
 
+    async function bookWashFromDash() {
+        const stock = (document.getElementById('washStock').value || '').trim();
+        const make = (document.getElementById('washMake').value || '').trim();
+        const vehicle_type = (document.getElementById('washType').value || '').trim();
+        if (!stock || !make || !vehicle_type) { alert('Type WS number, make and type'); return; }
+        const notes = (document.getElementById('washDashNote').value || '').trim() || 'Wash for marketing photos';
+        const res = await fetch('/api/wash-requests', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token'), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_number: stock, make: make, vehicle_type: vehicle_type, notes: notes })
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Could not send wash request'); return; }
+        document.getElementById('washStock').value = '';
+        document.getElementById('washMake').value = '';
+        document.getElementById('washType').value = '';
+        document.getElementById('washDashNote').value = '';
+        alert('Wash request sent to workshop.');
+        loadWashRequests();
+    }
     async function loadWashRequests() {
         const box = document.getElementById('washDashBox');
         if (!box) return;
         box.classList.remove('hidden');
+        const role = (localStorage.getItem('role') || '').toLowerCase();
+        const name = (localStorage.getItem('full_name') || '').toLowerCase();
+        const canBook = role === 'marketing' || name.indexOf('damian') === 0;
+        const canUpdate = role === 'workshop' || role === 'admin' || role === 'accounts';
+        const form = document.getElementById('washBookForm');
+        if (canBook && form) form.classList.remove('hidden');
         try {
             const res = await fetch('/api/wash-requests', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             const data = await res.json();
@@ -816,16 +852,23 @@
             const list = document.getElementById('washDashList');
             if (!rows.length) { list.innerHTML = '<div class="text-[#9aa6b4]">No open wash requests</div>'; return; }
             list.innerHTML = rows.map(function(r) {
+                const buttons = canUpdate
+                    ? '<div class="flex gap-2 mt-2">' +
+                      '<button type="button" class="px-2 py-1 bg-[#025daa] text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'At wash bay\')">At wash bay</button>' +
+                      '<button type="button" class="px-2 py-1 bg-green-700 text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'Done\')">Done</button>' +
+                      '</div>'
+                    : '';
+                const link = r.job_id ? '<a href="/jobs/' + r.job_id + '" class="font-semibold">' : '<div class="font-semibold">';
+                const end = r.job_id ? '</a>' : '</div>';
                 return '<div class="p-2 rounded border border-[#2a3340] bg-[#11151c]">' +
-                    '<a href="/jobs/' + r.job_id + '" class="font-semibold">' + r.stock_number + ' · ' + (r.vehicle_description||'') + '</a>' +
+                    link + (r.stock_number || '') + ' · ' + (r.make || '') + ' ' + (r.vehicle_type || r.vehicle_description || '') + end +
                     '<div class="text-xs text-[#9aa6b4]">' + (r.requested_by_name||'') + ' · ' + (r.status||'') + ' · ' + (r.location||'') + '</div>' +
-                    '<div class="text-xs">' + (r.notes||'') + '</div>' +
-                    '<div class="flex gap-2 mt-2">' +
-                    '<button type="button" class="px-2 py-1 bg-[#025daa] text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'At wash bay\')">At wash bay</button>' +
-                    '<button type="button" class="px-2 py-1 bg-green-700 text-white text-xs rounded" onclick="setWashStatus(' + r.id + ',\'Done\')">Done</button>' +
-                    '</div></div>';
+                    '<div class="text-xs">' + (r.notes||'') + '</div>' + buttons + '</div>';
             }).join('');
-        } catch (e) {}
+        } catch (e) {
+            const list = document.getElementById('washDashList');
+            if (list) list.innerHTML = '<div class="text-red-400">Could not load wash requests</div>';
+        }
     }
     async function setWashStatus(id, status) {
         const res = await fetch('/api/wash-requests/' + id + '/status', {

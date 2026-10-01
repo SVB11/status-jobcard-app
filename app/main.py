@@ -191,6 +191,9 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
     clear_failed_login(username)
+    if (user.username or "").lower() == "damian" and (user.role or "") != "marketing":
+        user.role = "marketing"
+        db.commit()
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username, "role": user.role, "full_name": user.full_name},
@@ -3444,9 +3447,17 @@ async def api_pdi_fails(db: Session = Depends(get_db)):
         })
     return {"jobs": out}
 
+def can_book_wash(user) -> bool:
+    if not user:
+        return False
+    role = (user.role or "").lower()
+    name = (user.full_name or "").strip().lower()
+    uname = (user.username or "").strip().lower()
+    return role in ("sales", "admin", "accounts", "marketing") or uname == "damian" or name == "damian" or name.startswith("damian ")
+
 @app.post("/api/jobs/{job_id}/wash-request")
 async def api_wash_request(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    if current_user.role not in ("sales", "admin", "accounts", "marketing"):
+    if not can_book_wash(current_user):
         raise HTTPException(status_code=403, detail="Sales / marketing can request a wash")
     try:
         body = await request.json()
@@ -3477,6 +3488,49 @@ async def api_wash_request(job_id: int, request: Request, db: Session = Depends(
     notify_role(db, "admin", f"Wash requested for {job.stock_number}", job.id)
     return {"success": True}
 
+@app.post("/api/wash-requests")
+async def api_book_showroom_wash(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if not can_book_wash(current_user):
+        raise HTTPException(status_code=403, detail="Sales / marketing can request a wash")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    stock = (body.get("stock_number") or "").strip().upper()
+    make = (body.get("make") or "").strip()
+    vehicle_type = (body.get("vehicle_type") or body.get("type") or "").strip()
+    notes = (body.get("notes") or "Wash for marketing photos").strip()
+    if not stock or not make or not vehicle_type:
+        raise HTTPException(status_code=400, detail="WS number, make and type are required")
+    job = db.query(models.JobCard).filter(
+        models.JobCard.stock_number == stock,
+        ~models.JobCard.status.in_(CLOSED_STATUSES),
+    ).order_by(models.JobCard.created_at.desc()).first()
+    wr = models.WashRequest(
+        job_card_id=job.id if job else None,
+        stock_number=stock,
+        make=make,
+        vehicle_type=vehicle_type,
+        notes=notes,
+        status="Requested",
+        requested_by_name=current_user.full_name,
+        requested_by=current_user.id,
+    )
+    db.add(wr)
+    if job:
+        db.add(models.JobUpdate(
+            job_card_id=job.id,
+            category="wash_request",
+            description="Wash requested for marketing / photos",
+            notes=f"{stock} {make} {vehicle_type}. {notes}",
+            created_by_name=current_user.full_name,
+            created_by=current_user.id,
+        ))
+    db.commit()
+    notify_role(db, "workshop", f"Wash requested for {stock} — {make} {vehicle_type}", job.id if job else None)
+    notify_role(db, "admin", f"Wash requested for {stock} — {make} {vehicle_type}", job.id if job else None)
+    return {"success": True, "stock_number": stock}
+
 @app.get("/api/wash-requests")
 async def api_list_wash_requests(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     rows = db.query(models.WashRequest).order_by(models.WashRequest.created_at.desc()).limit(80).all()
@@ -3484,16 +3538,21 @@ async def api_list_wash_requests(db: Session = Depends(get_db), current_user: mo
     for r in rows:
         if r.status == "Done":
             continue
-        job = db.query(models.JobCard).filter(models.JobCard.id == r.job_card_id).first()
-        if not job or job.status in CLOSED_STATUSES:
+        job = db.query(models.JobCard).filter(models.JobCard.id == r.job_card_id).first() if r.job_card_id else None
+        if job and job.status in CLOSED_STATUSES:
             continue
+        stock = r.stock_number or (job.stock_number if job else "")
+        make = r.make or ""
+        vehicle_type = r.vehicle_type or (job.vehicle_description if job else "")
         out.append({
             "id": r.id,
-            "job_id": job.id,
-            "stock_number": job.stock_number,
-            "vehicle_description": job.vehicle_description,
-            "year": job.year,
-            "location": job.current_location,
+            "job_id": job.id if job else None,
+            "stock_number": stock,
+            "make": make,
+            "vehicle_type": vehicle_type,
+            "vehicle_description": " ".join(x for x in [make, vehicle_type, job.vehicle_description if job else ""] if x).strip(),
+            "year": job.year if job else "",
+            "location": job.current_location if job else "Showroom / not on job card",
             "notes": r.notes,
             "status": r.status,
             "requested_by_name": r.requested_by_name,
@@ -3517,16 +3576,23 @@ async def api_wash_status(item_id: int, request: Request, db: Session = Depends(
         raise HTTPException(status_code=400, detail="Invalid status")
     wr.status = status
     wr.updated_by_name = current_user.full_name
-    job = db.query(models.JobCard).filter(models.JobCard.id == wr.job_card_id).first()
+    job = db.query(models.JobCard).filter(models.JobCard.id == wr.job_card_id).first() if wr.job_card_id else None
+    if not job and wr.stock_number:
+        job = db.query(models.JobCard).filter(
+            models.JobCard.stock_number == wr.stock_number,
+            ~models.JobCard.status.in_(CLOSED_STATUSES),
+        ).order_by(models.JobCard.created_at.desc()).first()
     if job and status == "At wash bay" and "Wash Bay" in LOCATIONS:
         job.current_location = "Wash Bay"
-    db.add(models.JobUpdate(
-        job_card_id=wr.job_card_id,
-        category="wash_request",
-        description=f"Wash request {status}",
-        notes=wr.notes,
-        created_by_name=current_user.full_name,
-        created_by=current_user.id,
-    ))
+        wr.job_card_id = job.id
+    if wr.job_card_id:
+        db.add(models.JobUpdate(
+            job_card_id=wr.job_card_id,
+            category="wash_request",
+            description=f"Wash request {status}",
+            notes=wr.notes,
+            created_by_name=current_user.full_name,
+            created_by=current_user.id,
+        ))
     db.commit()
     return {"success": True}
