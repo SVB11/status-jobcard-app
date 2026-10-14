@@ -313,6 +313,77 @@ async def api_create_job(
     # In production we would decode the JWT properly here
     created_by_id = body.get("user_id")  # passed from frontend for now
 
+    convert_id = body.get("convert_job_id")
+    if purpose == "sold" and convert_id:
+        job = db.query(models.JobCard).filter(models.JobCard.id == int(convert_id)).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Showroom job not found")
+        if (getattr(job, "job_purpose", None) or "sold") != "showroom":
+            raise HTTPException(status_code=400, detail="Only a showroom job can be converted to sales")
+        if job.status in CLOSED_STATUSES:
+            raise HTTPException(status_code=400, detail="That showroom job is already closed")
+        job.job_purpose = "sold"
+        job.client_name = body["client_name"].strip()
+        job.salesman_name = body["salesman_name"]
+        job.priority = body.get("priority") or job.priority
+        job.target_delivery_date = body.get("target_delivery_date") or job.target_delivery_date
+        job.quotation_invoice_number = body.get("quotation_invoice_number") or job.quotation_invoice_number
+        if (body.get("vin_number") or "").strip():
+            job.vin_number = body["vin_number"].strip()
+        if (body.get("registration_number") or "").strip():
+            job.registration_number = body["registration_number"].strip().upper()
+        if (body.get("vehicle_description") or "").strip():
+            job.vehicle_description = body["vehicle_description"].strip()
+        if body.get("year"):
+            job.year = str(body["year"]).strip()
+        if body.get("main_type"):
+            job.main_type = body["main_type"]
+        if body.get("sub_type"):
+            job.sub_type = body["sub_type"]
+        if body.get("internal_notes"):
+            job.internal_notes = body.get("internal_notes")
+        if job.status == "Pending Admin Approval":
+            job.status = "Submitted to Workshop"
+        existing_names = {(t.task_name or "").strip().lower() for t in (job.tasks or [])}
+        for t in body.get("selected_tasks") or []:
+            name = (t.get("task_name") or "").strip()
+            if not name or name.lower() in existing_names:
+                continue
+            db.add(models.JobTask(
+                job_card_id=job.id,
+                task_name=name,
+                description=t.get("description"),
+                is_custom=False,
+                needs_approval=False,
+                status="Not Started",
+            ))
+            existing_names.add(name.lower())
+        other_text = (body.get("other_instructions") or "").strip()
+        if other_text:
+            db.add(models.JobTask(
+                job_card_id=job.id,
+                task_name="Other: " + other_text[:80],
+                description=other_text,
+                is_custom=True,
+                needs_approval=True,
+                status="Not Started",
+            ))
+        add_update(db, job.id, "progress", "Showroom job converted to sales. Showroom tasks kept.", created_by_name=body.get("salesman_name"), created_by=created_by_id)
+        db.commit()
+        if created_by_id:
+            log_audit(db, created_by_id, "Converted showroom to sales", job.id, job.stock_number)
+        msg = f"{job.stock_number} showroom job is now a sales job for {job.client_name}"
+        notify_role(db, "workshop", msg, job.id)
+        notify_role(db, "admin", msg, job.id)
+        notify_role(db, "accounts", msg, job.id)
+        return {
+            "success": True,
+            "converted": True,
+            "job_number": job.job_number,
+            "job_id": job.id,
+            "message": f"{job.job_number} converted from showroom to sales. Showroom tasks kept.",
+        }
+
     job_number = generate_job_number(db)
     start_status = "Pending Admin Approval" if purpose == "showroom" else "Submitted to Workshop"
 

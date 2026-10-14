@@ -369,14 +369,26 @@
 
         try {
             const stock = (formData.get('stock_number') || '').trim();
+            const purpose = formData.get('job_purpose') || 'sold';
             if (stock) {
                 const check = await fetch('/api/jobs/open-ws?stock=' + encodeURIComponent(stock), { headers: { 'Authorization': 'Bearer ' + token } });
                 const open = await check.json();
-                if ((open.open || []).length) {
-                    const lines = open.open.map(function(j){ return j.job_number + ' (' + j.status + ')'; }).join(', ');
+                const rows = open.open || [];
+                const showroom = rows.filter(function(j){ return j.job_purpose === 'showroom'; });
+                const others = rows.filter(function(j){ return j.job_purpose !== 'showroom'; });
+                if (purpose === 'sold' && showroom.length) {
+                    const s = showroom[0];
+                    if (!confirm(stock + ' already has showroom job ' + s.job_number + '. Convert it to this sales job? The showroom tasks stay on the card.')) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Submit Job Card to Workshop';
+                        return;
+                    }
+                    payload.convert_job_id = s.id;
+                } else if (others.length) {
+                    const lines = others.map(function(j){ return j.job_number + ' (' + j.status + ')'; }).join(', ');
                     if (!confirm(stock + ' already has an open job: ' + lines + '. Create another card anyway?')) {
                         submitBtn.disabled = false;
-                        submitBtn.textContent = document.getElementById('job_purpose').value === 'showroom' ? 'Submit showroom job for admin approval' : 'Submit Job Card to Workshop';
+                        submitBtn.textContent = purpose === 'showroom' ? 'Submit showroom job for admin approval' : 'Submit Job Card to Workshop';
                         return;
                     }
                 }
@@ -402,8 +414,8 @@
 
             document.getElementById('formBox').classList.add('hidden');
             document.getElementById('successBox').classList.remove('hidden');
-            document.getElementById('successTitle').textContent = 'Job Card Created Successfully';
-            document.getElementById('successMsg').textContent = data.message + ' Status: Submitted to Workshop.';
+            document.getElementById('successTitle').textContent = data.converted ? 'Showroom job converted to sales' : 'Job Card Created Successfully';
+            document.getElementById('successMsg').textContent = data.message;
 
         } catch (err) {
             errorBox.textContent = 'Connection error. Please try again.';
