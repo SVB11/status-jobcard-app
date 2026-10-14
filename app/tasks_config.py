@@ -3,6 +3,30 @@ Sales-facing Work / Prep instructions.
 These are the company pre-approved options a salesman ticks on create.
 """
 
+def get_showroom_tasks(main_type: str = None) -> list:
+    """Yard / showroom condition. No sold-job tests."""
+    from .lists_config import type_family
+    family = type_family(main_type or "")
+    tasks = [
+        {"task_name": "Wash for photos / showroom", "description": "Wash the vehicle for photos or the showroom floor"},
+        {"task_name": "Polish cab and body", "description": "Polish cab and body for presentation"},
+        {"task_name": "Touch-ups", "description": "Paint / body touch-ups as needed"},
+        {"task_name": "Spray rims", "description": "Spray or clean rims"},
+        {"task_name": "Cab clean", "description": "Clean cab interior"},
+        {"task_name": "Tyre check and pressure", "description": "Check tyres and set pressure"},
+        {"task_name": "Lights and electrics check", "description": "Check lights and basic electrics"},
+        {"task_name": "Remove stickers / branding", "description": "Remove old company stickers or branding"},
+        {"task_name": "Undercarriage service", "description": "Service or tidy the undercarriage"},
+        {"task_name": "Mudguards and mudflaps", "description": "Fit, repair or tidy mudguards and mudflaps"},
+        {"task_name": "Full respray", "description": "Full respray. Add the colour for chassis, barrel, cab or body"},
+        {"task_name": "Present on yard", "description": "Park and present the unit on the yard"},
+    ]
+    if family == "tanker":
+        tasks.append({"task_name": "Confirm barrel empty for display", "description": "Barrel empty and sealed for showroom display. No formal empty-check sign-off"})
+    if family == "trailer":
+        tasks.append({"task_name": "Tarp / curtain tidy", "description": "Tidy tarps, curtains or sails for display"})
+    return tasks
+
 def get_tasks_for_vehicle(main_type: str, year: str = None) -> list:
     main_type = (main_type or "").strip()
 

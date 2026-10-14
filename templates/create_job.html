@@ -230,15 +230,16 @@
             btn.textContent = 'Submit showroom job for admin approval';
             if (client && !client.value) client.value = 'Showroom';
             client.required = false;
-            show.className = 'min-h-[64px] rounded-xl border-2 border-[#025daa] bg-[#025daa] text-white font-semibold uppercase tracking-wide px-4 py-3';
+            show.className = 'min-h-[64px] rounded-xl border-2 border-purple-500 bg-purple-700 text-white font-semibold uppercase tracking-wide px-4 py-3';
             sold.className = 'min-h-[64px] rounded-xl border-2 border-[#7ec2ff] bg-transparent text-[#7ec2ff] font-semibold uppercase tracking-wide px-4 py-3';
         } else {
             note.classList.add('hidden');
             btn.textContent = 'Submit Job Card to Workshop';
             client.required = true;
             sold.className = 'min-h-[64px] rounded-xl border-2 border-[#025daa] bg-[#025daa] text-white font-semibold uppercase tracking-wide px-4 py-3';
-            show.className = 'min-h-[64px] rounded-xl border-2 border-[#7ec2ff] bg-transparent text-[#7ec2ff] font-semibold uppercase tracking-wide px-4 py-3';
+            show.className = 'min-h-[64px] rounded-xl border-2 border-purple-400 bg-transparent text-purple-300 font-semibold uppercase tracking-wide px-4 py-3';
         }
+        loadTasks();
     }
     function togglePurpose() { setPurpose(document.getElementById('job_purpose').value); }
 
@@ -250,6 +251,7 @@
     async function loadTasks() {
         const mainType = document.getElementById('main_type').value;
         const year = document.getElementById('year').value;
+        const purpose = document.getElementById('job_purpose').value || 'sold';
         const container = document.getElementById('tasksContainer');
 
         if (!mainType) {
@@ -260,7 +262,7 @@
         container.innerHTML = '<p class="text-sm text-gray-500">Loading tasks...</p>';
 
         try {
-            const res = await fetch('/api/tasks-for-type?main_type=' + encodeURIComponent(mainType) + '&year=' + encodeURIComponent(year || ''));
+            const res = await fetch('/api/tasks-for-type?main_type=' + encodeURIComponent(mainType) + '&year=' + encodeURIComponent(year || '') + '&purpose=' + encodeURIComponent(purpose));
             const data = await res.json();
             const tasks = data.tasks || [];
 
@@ -271,16 +273,32 @@
 
             let html = '';
             tasks.forEach(function(t) {
+                const isSpray = (t.task_name || '').toLowerCase().indexOf('full respray') !== -1;
                 html += '<label class="flex items-start gap-3 p-2 hover:bg-white rounded cursor-pointer">' +
-                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '">' +
+                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '"' + (isSpray ? ' data-spray="1" onchange="toggleSprayColours(this)"' : '') + '>' +
                     '<div><div class="text-sm font-medium text-gray-800">' + t.task_name + '</div>' +
                     (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
                     '</div></label>';
+                if (isSpray) {
+                    html += '<div id="sprayColours" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-2 pl-8 pb-2">' +
+                        '<input id="colourChassis" class="border rounded px-2 py-1 text-sm" placeholder="Chassis colour">' +
+                        '<input id="colourBarrel" class="border rounded px-2 py-1 text-sm" placeholder="Barrel / tank colour">' +
+                        '<input id="colourCab" class="border rounded px-2 py-1 text-sm" placeholder="Cab colour">' +
+                        '<input id="colourBody" class="border rounded px-2 py-1 text-sm" placeholder="Body / bin colour">' +
+                        '<input id="colourOther" class="sm:col-span-2 border rounded px-2 py-1 text-sm" placeholder="Other colour note">' +
+                        '</div>';
+                }
             });
             container.innerHTML = html;
         } catch (err) {
             container.innerHTML = '<p class="text-sm text-red-500">Could not load tasks.</p>';
         }
+    }
+
+    function toggleSprayColours(box) {
+        const panel = document.getElementById('sprayColours');
+        if (!panel) return;
+        panel.classList.toggle('hidden', !box.checked);
     }
 
     document.getElementById('main_type').addEventListener('change', loadTasks);
@@ -299,9 +317,31 @@
 
         const selected = [];
         document.querySelectorAll('.task-checkbox:checked').forEach(function(cb) {
+            let desc = cb.dataset.desc || null;
+            if (cb.dataset.spray === '1') {
+                const bits = [];
+                const chassis = (document.getElementById('colourChassis').value || '').trim();
+                const barrel = (document.getElementById('colourBarrel').value || '').trim();
+                const cab = (document.getElementById('colourCab').value || '').trim();
+                const body = (document.getElementById('colourBody').value || '').trim();
+                const other = (document.getElementById('colourOther').value || '').trim();
+                if (chassis) bits.push('Chassis: ' + chassis);
+                if (barrel) bits.push('Barrel: ' + barrel);
+                if (cab) bits.push('Cab: ' + cab);
+                if (body) bits.push('Body: ' + body);
+                if (other) bits.push(other);
+                if (!bits.length) {
+                    errorBox.textContent = 'Full respray needs at least one colour — chassis, barrel, cab or body.';
+                    errorBox.classList.remove('hidden');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Job Card to Workshop';
+                    throw new Error('colour');
+                }
+                desc = 'Full respray. ' + bits.join(' · ');
+            }
             selected.push({
                 task_name: cb.dataset.name,
-                description: cb.dataset.desc || null,
+                description: desc,
                 is_custom: false
             });
         });
@@ -328,6 +368,19 @@
         };
 
         try {
+            const stock = (formData.get('stock_number') || '').trim();
+            if (stock) {
+                const check = await fetch('/api/jobs/open-ws?stock=' + encodeURIComponent(stock), { headers: { 'Authorization': 'Bearer ' + token } });
+                const open = await check.json();
+                if ((open.open || []).length) {
+                    const lines = open.open.map(function(j){ return j.job_number + ' (' + j.status + ')'; }).join(', ');
+                    if (!confirm(stock + ' already has an open job: ' + lines + '. Create another card anyway?')) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = document.getElementById('job_purpose').value === 'showroom' ? 'Submit showroom job for admin approval' : 'Submit Job Card to Workshop';
+                        return;
+                    }
+                }
+            }
             const res = await fetch('/api/jobs/create', {
                 method: 'POST',
                 headers: {

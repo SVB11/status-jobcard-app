@@ -80,14 +80,6 @@
             html += '<tr><td>' + t.task_name + '</td><td>' + t.status + '</td><td>' + cleanReportNote(t.notes || t.description || '') + '</td></tr>';
         });
         html += '</table>';
-        const important = (j.updates || []).filter(isImportantUpdate);
-        if (important.length) {
-            html += '<h2>Important notes</h2><table><tr><th>When</th><th>Type</th><th>Description</th><th>By</th></tr>';
-            important.forEach(function(u) {
-                html += '<tr><td>' + (u.created_at || '').replace('T',' ').substring(0,16) + '</td><td>' + reportType(u.category) + '</td><td>' + u.description + (u.notes ? ' — ' + u.notes : '') + '</td><td>' + (u.created_by_name || '') + '</td></tr>';
-            });
-            html += '</table>';
-        }
         html += '<h2>PDI</h2><table><tr><th>#</th><th>Item</th><th>Result</th><th>Notes</th></tr>';
         (p.items || []).forEach(function(it) {
             html += '<tr><td>' + (it.item_number || '') + '</td><td>' + it.check_item + '</td><td>' + (it.status || '') + '</td><td>' + (it.notes || '') + '</td></tr>';

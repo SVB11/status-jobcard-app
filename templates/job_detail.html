@@ -32,7 +32,7 @@
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-white uppercase tracking-wide" id="jobNumber"></h1>
-            <p class="text-[#9aa6b4]" id="vehicleLine"></p>
+            <p class="text-[#9aa6b4]"><span id="jobTypeBadge" class="text-xs px-2 py-1 rounded bg-[#025daa] text-white mr-2">SOLD</span><span id="vehicleLine"></span></p>
         </div>
         <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
     </div>
@@ -208,7 +208,10 @@
         </div>
         <div id="supplierProgressBox" class="mt-4 p-3 rounded-lg border border-[#2a3340]"></div>
         <h3 class="text-sm font-semibold mb-2">Updates log</h3>
-<div id="updatesList" class="space-y-2 text-sm"></div>
+        <details id="updatesFold" class="text-sm">
+            <summary class="cursor-pointer text-[#7ec2ff] mb-2">Show latest updates</summary>
+            <div id="updatesList" class="space-y-2"></div>
+        </details>
         <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
     </div></div>
 </div>
@@ -425,6 +428,60 @@
         loadJob();
     }
 
+    function taskCard(t, canEdit) {
+        let html = '<div class="p-3 bg-[#1a1f27] rounded-lg border border-[#2a3340] text-white mb-2">' +
+            '<div class="flex flex-col gap-2">' +
+            '<div class="flex-1">' +
+            '<div class="text-sm font-bold uppercase tracking-wide">' + t.task_name +
+            (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + (t.needs_approval ? ' <span class="text-xs text-red-600">(awaiting admin approval)</span>' : '') + '</div>' +
+            (t.description && t.description !== t.task_name ? '<div class="text-xs text-[#9aa6b4]">' + t.description + '</div>' : '') +
+            (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') + (t.needs_approval && isAdmin ? '<div class="mt-1"><button type="button" onclick="approveTask(' + t.id + ')" class="text-xs px-2 py-1 bg-purple-700 text-white rounded">Approve extra task</button></div>' : '') +
+            partStatusControls(t) +
+            '</div>';
+        html += statusButtons(t, canEdit);
+        html += '</div>';
+        if (t.notes) {
+            html += '<div class="mt-2 text-xs text-orange-300 whitespace-pre-wrap">Notes:\n' + t.notes + '</div>';
+        }
+        if (canEdit) {
+            html += '<div class="mt-2"><div class="task-label">Add another note</div><div class="flex gap-2">' +
+                '<input type="text" id="note-' + t.id + '" value="" placeholder="New note...">' +
+                '<button type="button" onclick="saveNote(' + t.id + ')">SAVE NOTE</button>' +
+                '</div></div>';
+            const name = (t.task_name || '').toLowerCase();
+            const isTest = name.indexOf('roadworthy') !== -1 || name.indexOf('pressure') !== -1 || name.indexOf('barrel') !== -1 || name.indexOf('calibration') !== -1 || name.indexOf('as is') !== -1;
+            html += '<div class="mt-2"><div class="task-label">Location / bay</div>' +
+                '<select id="loc-' + t.id + '" onchange="saveTaskLocation(' + t.id + ')">' +
+                locationOptions(t) + '</select></div>';
+            const providers = (function() {
+                const all = t.providers || [];
+                if (!isTest) return [];
+                if (name.indexOf('roadworthy') !== -1) return all.length ? all : ['East Rand Testing Station'];
+                return all;
+            })();
+            if (providers.length) {
+                html += '<div class="mt-2"><div class="task-label">3rd party company</div>' +
+                    '<select id="prov-' + t.id + '" onchange="saveTaskProvider(' + t.id + ')">' +
+                    '<option value="">Select company</option>';
+                providers.forEach(function(pr) {
+                    html += '<option value="' + pr + '"' + (t.third_party_provider === pr ? ' selected' : '') + '>' + pr + '</option>';
+                });
+                html += '</select></div>';
+                html += '<div class="mt-2"><div class="task-label">Booked date</div>' +
+                    '<input type="date" id="bdate-' + t.id + '" value="' + (t.booked_date || '') + '" onchange="saveTaskProvider(' + t.id + ')"></div>';
+            }
+        } else if (t.task_location || t.third_party_provider || t.booked_date) {
+            html += '<div class="mt-1 text-xs text-gray-600">Location: ' + (t.task_location || '—') +
+                (t.third_party_provider ? ' | ' + t.third_party_provider : '') +
+                (t.booked_date ? ' | ' + t.booked_date : '') + '</div>';
+        }
+        if ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1) {
+            html += roadworthyBlock(t, canEdit);
+        }
+        html += '</div>';
+        return html;
+    }
+
     function renderTasks(tasks) {
         const canEdit = canEditTasks() && currentJob && 
             !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
@@ -435,64 +492,14 @@
         if (!tasks || tasks.length === 0) {
             html = '<p class="text-sm text-gray-400">No tasks listed</p>';
         } else {
-            tasks.forEach(function(t) {
-                if (t.status === 'Completed') completed++;
-                html += '<div class="p-3 bg-[#1a1f27] rounded-lg border border-[#2a3340] text-white">' +
-                    '<div class="flex flex-col gap-2">' +
-                    '<div class="flex-1">' +
-                    '<div class="text-sm font-bold uppercase tracking-wide">' + t.task_name + 
-                    (t.is_custom ? ' <span class="text-xs text-purple-600">(extra)</span>' : '') + (t.needs_approval ? ' <span class="text-xs text-red-600">(awaiting admin approval)</span>' : '') + '</div>' +
-                    (t.description && t.description !== t.task_name ? '<div class="text-xs text-[#9aa6b4]">' + t.description + '</div>' : '') +
-                    (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') + (t.needs_approval && isAdmin ? '<div class="mt-1"><button type="button" onclick="approveTask(' + t.id + ')" class="text-xs px-2 py-1 bg-purple-700 text-white rounded">Approve extra task</button></div>' : '') +
-                    partStatusControls(t) +
-                    '</div>';
-
-                html += statusButtons(t, canEdit);
-                html += '</div>';
-
-                // Notes
-                if (t.notes) {
-                    html += '<div class="mt-2 text-xs text-orange-300 whitespace-pre-wrap">Notes:\n' + t.notes + '</div>';
-                }
-                if (canEdit) {
-                    html += '<div class="mt-2"><div class="task-label">Add another note</div><div class="flex gap-2">' +
-                        '<input type="text" id="note-' + t.id + '" value="" placeholder="New note...">' +
-                        '<button type="button" onclick="saveNote(' + t.id + ')">SAVE NOTE</button>' +
-                        '</div></div>';
-                }
-                if (canEdit) {
-                    const name = (t.task_name || '').toLowerCase();
-                    const isTest = name.indexOf('roadworthy') !== -1 || name.indexOf('pressure') !== -1 || name.indexOf('barrel') !== -1 || name.indexOf('calibration') !== -1 || name.indexOf('as is') !== -1;
-                    html += '<div class="mt-2"><div class="task-label">Location / bay</div>' +
-                        '<select id="loc-' + t.id + '" onchange="saveTaskLocation(' + t.id + ')">' +
-                        locationOptions(t) + '</select></div>';
-                    const providers = (function() {
-                    const all = t.providers || [];
-                    if (!isTest) return [];
-                    if (name.indexOf('roadworthy') !== -1) return all.length ? all : ['East Rand Testing Station'];
-                    return all;
-                })();
-                    if (providers.length) {
-                        html += '<div class="mt-2"><div class="task-label">3rd party company</div>' +
-                            '<select id="prov-' + t.id + '" onchange="saveTaskProvider(' + t.id + ')">' +
-                            '<option value="">Select company</option>';
-                        providers.forEach(function(pr) {
-                            html += '<option value="' + pr + '"' + (t.third_party_provider === pr ? ' selected' : '') + '>' + pr + '</option>';
-                        });
-                        html += '</select></div>';
-                        html += '<div class="mt-2"><div class="task-label">Booked date</div>' +
-                            '<input type="date" id="bdate-' + t.id + '" value="' + (t.booked_date || '') + '" onchange="saveTaskProvider(' + t.id + ')"></div>';
-                    }
-                } else if (t.task_location || t.third_party_provider || t.booked_date) {
-                    html += '<div class="mt-1 text-xs text-gray-600">Location: ' + (t.task_location || '—') +
-                        (t.third_party_provider ? ' | ' + t.third_party_provider : '') +
-                        (t.booked_date ? ' | ' + t.booked_date : '') + '</div>';
-                }
-                if ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1) {
-                    html += roadworthyBlock(t, canEdit);
-                }
-                html += '</div>';
-            });
+            const open = tasks.filter(function(t){ return t.status !== 'Completed'; });
+            const done = tasks.filter(function(t){ return t.status === 'Completed'; });
+            completed = done.length;
+            html += open.map(function(t){ return taskCard(t, canEdit); }).join('');
+            if (done.length) {
+                html += '<details class="mt-2"><summary class="cursor-pointer text-sm text-[#7ec2ff] py-2">Completed tasks (' + done.length + ') — tap to open</summary>' +
+                    done.map(function(t){ return taskCard(t, canEdit); }).join('') + '</details>';
+            }
         }
 
         document.getElementById('tasksList').innerHTML = html;
@@ -562,6 +569,12 @@
 
             document.getElementById('jobNumber').textContent = j.job_number;
             document.getElementById('vehicleLine').textContent = j.stock_number + ' — ' + j.vehicle_description;
+            const typeBadge = document.getElementById('jobTypeBadge');
+            if (typeBadge) {
+                const show = (j.job_purpose || 'sold') === 'showroom';
+                typeBadge.textContent = show ? 'SHOWROOM' : 'SOLD';
+                typeBadge.className = 'text-xs px-2 py-1 rounded ' + (show ? 'bg-purple-700 text-white' : 'bg-[#025daa] text-white');
+            }
             if (j.photo_url) {
                 document.getElementById('stockPhoto').src = j.photo_url;
                 document.getElementById('stockPhotoWrap').classList.remove('hidden');
@@ -650,21 +663,20 @@
             if (isWorkshop && j.status === 'Submitted to Workshop') {
                 buttons += '<button onclick="acceptJob()" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm hover:bg-blue-800">Accept Job</button>';
             }
-            // Ready for Delivery - both parties
+            const isShowroom = (j.job_purpose || 'sold') === 'showroom';
+            // Ready for Delivery - both parties. Showroom skips PDI.
             if (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery') {
-                if (role === 'sales' || isAdmin) {
+                if (!isShowroom && (role === 'sales' || isAdmin)) {
                     buttons += '<button onclick="markReady(\x27sales\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Sales)</button>';
                 }
                 if (isWorkshop) {
-                    buttons += '<button onclick="markReady(\x27workshop\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Workshop)</button>';
+                    buttons += '<button onclick="markReady(\x27workshop\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">' + (isShowroom ? 'Workshop sign off' : 'Mark Ready (Workshop)') + '</button>';
                 }
             }
-            // PDI button - available once work is done, including after delivery
-            if (['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery', 'Delivered / Closed'].includes(j.status)) {
+            if (!isShowroom && ['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery', 'Delivered / Closed'].includes(j.status)) {
                 buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">View PDI Checklist</a>';
             }
-            // Close - Salesman only
-            if ((role === 'sales' || isAdmin) && j.status === 'Ready for Delivery') {
+            if ((role === 'sales' || isAdmin || (isShowroom && isWorkshop)) && j.status === 'Ready for Delivery') {
                 buttons += '<button onclick="closeJob()" class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900">Close / Delivered</button>';
             }
             // Delete - Admin only
@@ -680,7 +692,9 @@
             if (isAdmin) {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
-            buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
+            if (!isShowroom) {
+                buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
+            }
             buttons += '<a href="/jobs/' + jobId + '/print-work" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print completed work</a>';
             if (role === 'sales' || isAdmin) {
                 buttons += '<a href="/jobs/' + jobId + '/client-report" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Client report / WhatsApp</a>';
@@ -691,7 +705,7 @@
                 document.getElementById('washReqBox').classList.remove('hidden');
             }
             const emptyBox = document.getElementById('emptyCheckJobBox');
-            if (j.is_tanker && j.status !== 'Delivered / Closed') {
+            if (!isShowroom && j.is_tanker && j.status !== 'Delivered / Closed') {
                 emptyBox.classList.remove('hidden');
                 document.getElementById('emptyCheckStatus').textContent =
                     'Workshop: ' + (j.empty_signed_workshop ? ('signed' + (j.empty_signed_workshop_by_name ? ' by ' + j.empty_signed_workshop_by_name : '')) : 'not signed') +
@@ -1170,21 +1184,29 @@
     function renderUpdates(j) {
         const list = document.getElementById('updatesList');
         const extra = document.getElementById('partsThirdParty');
+        const fold = document.getElementById('updatesFold');
         extra.innerHTML = (j.parts_to_order ? '<div><strong>Parts:</strong> ' + j.parts_to_order + '</div>' : '') +
             (j.third_party_place ? '<div><strong>3rd party:</strong> ' + j.third_party_place + (j.third_party_date ? ' on ' + j.third_party_date : '') + '</div>' : '');
         const updates = j.updates || [];
+        const summary = fold ? fold.querySelector('summary') : null;
+        if (summary) summary.textContent = 'Updates log (' + updates.length + ') — latest only';
         if (!updates.length) {
             list.innerHTML = '<p class="text-gray-400 text-sm">No extras or updates yet</p>';
             return;
         }
-        let html = '';
-        updates.forEach(function(u) {
-            html += '<div class="p-2 bg-gray-50 rounded border"><div class="font-medium">' + u.description +
+        function line(u) {
+            return '<div class="p-2 bg-gray-50 rounded border"><div class="font-medium">' + u.description +
                 ' <span class="text-xs text-gray-400">(' + u.category + ')</span></div>' +
                 (u.notes ? '<div class="text-xs text-gray-600">' + u.notes + '</div>' : '') +
                 '<div class="text-xs text-gray-400">' + (u.created_by_name || '') + ' — ' +
                 (u.created_at ? u.created_at.replace('T',' ').substring(0,16) : '') + '</div></div>';
-        });
+        }
+        const latest = updates.slice(0, 5);
+        let html = latest.map(line).join('');
+        if (updates.length > 5) {
+            html += '<details class="mt-2"><summary class="cursor-pointer text-xs text-[#7ec2ff]">Older updates (' + (updates.length - 5) + ')</summary>' +
+                updates.slice(5).map(line).join('') + '</details>';
+        }
         list.innerHTML = html;
     }
 

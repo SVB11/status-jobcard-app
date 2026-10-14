@@ -12,7 +12,7 @@ import uuid
 from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
 from .seed import seed_database
-from .tasks_config import get_tasks_for_vehicle
+from .tasks_config import get_tasks_for_vehicle, get_showroom_tasks
 from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES, type_family
 from .migrate import migrate_schema
 from .stock_photos import match_stock_photo
@@ -230,6 +230,10 @@ async def home(request: Request):
 
 # ---------- DASHBOARD ----------
 
+@app.get("/locations", response_class=HTMLResponse)
+async def locations_page(request: Request):
+    return render_template("locations.html", request=request, page_title="Locations")
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     return render_template("dashboard.html", request=request, page_title="Dashboard")
@@ -249,10 +253,30 @@ async def create_job_page(request: Request):
     return render_template("create_job.html", request=request, page_title="Create Job Card")
 
 @app.get("/api/tasks-for-type")
-async def api_tasks_for_type(main_type: str, year: str = None):
+async def api_tasks_for_type(main_type: str, year: str = None, purpose: str = "sold"):
     """Return the standard tasks for a vehicle type (used by frontend)."""
+    if (purpose or "").strip().lower() == "showroom":
+        return {"tasks": get_showroom_tasks(main_type)}
     tasks = get_tasks_for_vehicle(main_type, year)
     return {"tasks": tasks}
+
+@app.get("/api/jobs/open-ws")
+async def api_open_ws(stock: str, db: Session = Depends(get_db)):
+    key = "".join((stock or "").split()).upper()
+    if not key:
+        return {"open": []}
+    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    open_jobs = []
+    for j in jobs:
+        if "".join((j.stock_number or "").split()).upper() == key:
+            open_jobs.append({
+                "id": j.id,
+                "job_number": j.job_number,
+                "stock_number": j.stock_number,
+                "status": j.status,
+                "job_purpose": getattr(j, "job_purpose", None) or "sold",
+            })
+    return {"open": open_jobs}
 
 @app.post("/api/jobs/create")
 async def api_create_job(
@@ -321,6 +345,8 @@ async def api_create_job(
 
     # Add selected tasks
     selected_tasks = body.get("selected_tasks", [])
+    if purpose == "showroom" and not selected_tasks:
+        selected_tasks = get_showroom_tasks(body.get("main_type"))
     for t in selected_tasks:
         custom = bool(t.get("is_custom", False))
         task = models.JobTask(
@@ -819,13 +845,12 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     if notes is not None:
         change_bits.append("note updated")
     if change_bits:
-        db.add(models.JobUpdate(
-            job_card_id=job.id,
-            category="progress",
-            description=f"{task.task_name}: " + "; ".join(change_bits),
+        add_update(
+            db, job.id, "progress",
+            f"{task.task_name}: " + "; ".join(change_bits),
             created_by_name=changer,
-            created_by=user_id
-        ))
+            created_by=user_id,
+        )
 
     # If job was only Accepted, move to In Progress when first task is worked on
     if job.status == "Accepted by Workshop" and new_status in ("In Progress", "Completed", "Blocked"):
@@ -847,9 +872,12 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
             db.commit()
             if user_id:
                 log_audit(db, user_id, "Work Completed", job.id, f"All tasks completed on {job.job_number}")
-            notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready for delivery")
-            if type_family(job.main_type) == "tanker":
-                notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
+            if is_showroom(job):
+                notify_signoff(db, job, f"Showroom work completed on {job.stock_number} — workshop mark ready. No sales sign-off, PDI or empty check")
+            else:
+                notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready for delivery")
+                if type_family(job.main_type) == "tanker":
+                    notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
             db.commit()
 
     # Blocked notification placeholder
@@ -1139,6 +1167,9 @@ async def api_change_own_password(request: Request, db: Session = Depends(get_db
 
 # ---------- READY FOR DELIVERY & CLOSE ----------
 
+def is_showroom(job) -> bool:
+    return (getattr(job, "job_purpose", None) or "sold").strip().lower() == "showroom"
+
 @app.post("/api/jobs/{job_id}/ready")
 async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(get_db)):
     try:
@@ -1150,7 +1181,7 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
+    if not is_showroom(job) and type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
         raise HTTPException(status_code=400, detail="Tanker empty check must be signed by workshop and sales before marking ready")
     if job.status not in ("PDI Completed", "Work Completed", "Ready for Delivery"):
         # Allow from Work Completed for now (PDI can be added later)
@@ -1167,12 +1198,17 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
             detail="Cannot close / mark ready. Add Chantelle order numbers for: " + ", ".join(p.description for p in missing)
         )
 
+    if is_showroom(job) and party == "sales":
+        raise HTTPException(status_code=400, detail="Showroom jobs are signed off by workshop only")
     if party == "sales":
         job.ready_sales = True
         job.ready_for_delivery_sales_at = datetime.utcnow()
     elif party == "workshop":
         job.ready_workshop = True
         job.ready_for_delivery_workshop_at = datetime.utcnow()
+        if is_showroom(job):
+            job.ready_sales = True
+            job.ready_for_delivery_sales_at = datetime.utcnow()
     else:
         raise HTTPException(status_code=400, detail="party must be 'sales' or 'workshop'")
 
@@ -1183,7 +1219,10 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
 
     if user_id:
         log_audit(db, user_id, "Marked Ready for Delivery", job.id, f"Marked by {party}")
-    if job.ready_sales and job.ready_workshop:
+    if is_showroom(job) and party == "workshop":
+        notify_role(db, "workshop", f"Showroom job {job.stock_number} signed off by workshop", job.id)
+        notify_role(db, "admin", f"Showroom job {job.stock_number} signed off by workshop", job.id)
+    elif job.ready_sales and job.ready_workshop:
         notify_signoff(db, job, f"{job.stock_number} is ready for delivery")
     elif party == "workshop" and not job.ready_sales:
         notify_salesman(db, job, f"Workshop marked {job.stock_number} ready — sales must mark ready")
@@ -1207,6 +1246,8 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if is_showroom(job):
+        raise HTTPException(status_code=400, detail="Showroom jobs do not need a tanker empty check")
     if type_family(job.main_type) != "tanker":
         raise HTTPException(status_code=400, detail="Empty check is only for tankers")
     if job.status in ("Delivered / Closed",):
@@ -1250,7 +1291,7 @@ async def api_empty_check_queue(db: Session = Depends(get_db), current_user: mod
     jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
     out = []
     for j in jobs:
-        if type_family(j.main_type) != "tanker":
+        if is_showroom(j) or type_family(j.main_type) != "tanker":
             continue
         if j.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery"):
             continue
@@ -1291,7 +1332,7 @@ async def api_close_job(job_id: int, request: Request, db: Session = Depends(get
 
     if job.status != "Ready for Delivery":
         raise HTTPException(status_code=400, detail="Job must be Ready for Delivery before closing")
-    if type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
+    if not is_showroom(job) and type_family(job.main_type) == "tanker" and not (job.empty_signed_workshop and job.empty_signed_sales):
         raise HTTPException(status_code=400, detail="Tanker empty check must be signed by workshop and sales before delivery")
     missing = parts_missing_order_numbers(db, job_id)
     if missing:
@@ -1641,6 +1682,31 @@ def normalize_board_location(raw: str):
             return loc
     return None
 
+def add_update(db, job_id, category, description, notes=None, created_by_name=None, created_by=None):
+    """One save is one line. Skip the same line if it was written in the last 20 seconds."""
+    text = (description or "").strip()
+    if not text:
+        return None
+    cutoff = datetime.utcnow() - timedelta(seconds=20)
+    recent = db.query(models.JobUpdate).filter(
+        models.JobUpdate.job_card_id == job_id,
+        models.JobUpdate.category == category,
+        models.JobUpdate.description == text,
+        models.JobUpdate.created_at >= cutoff,
+    ).first()
+    if recent:
+        return recent
+    row = models.JobUpdate(
+        job_card_id=job_id,
+        category=category,
+        description=text,
+        notes=notes,
+        created_by_name=created_by_name,
+        created_by=created_by,
+    )
+    db.add(row)
+    return row
+
 def apply_job_location(db, job, raw_location, name=None, user_id=None):
     """Last recorded task/activity location becomes the dashboard location."""
     if not job or not raw_location:
@@ -1657,13 +1723,7 @@ def apply_job_location(db, job, raw_location, name=None, user_id=None):
     job.current_location = display
     if bucket in WORKSHOP_BAYS and not job.workshop_entered_at:
         job.workshop_entered_at = datetime.utcnow()
-    db.add(models.JobUpdate(
-        job_card_id=job.id,
-        category="location",
-        description=f"Location changed: {old or '—'} → {display}",
-        created_by_name=name or "Workshop",
-        created_by=user_id
-    ))
+    add_update(db, job.id, "location", f"Location changed: {old or '—'} → {display}", created_by_name=name or "Workshop", created_by=user_id)
 
 def _board_bucket(board, raw):
     if raw in board:
@@ -1695,7 +1755,8 @@ async def api_locations_board(db: Session = Depends(get_db)):
             "year": j.year,
             "status": j.status,
             "priority": j.priority,
-            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
+            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year),
+            "job_purpose": getattr(j, "job_purpose", None) or "sold",
         }
         vehicle = f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip()
         if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
@@ -1752,18 +1813,10 @@ async def api_update_location(job_id: int, request: Request, db: Session = Depen
         job.workshop_entered_at = datetime.utcnow()
     user_id = body.get("user_id")
     name = body.get("full_name") or "Staff"
-    update = models.JobUpdate(
-        job_card_id=job.id,
-        category="location",
-        description=f"Location changed: {old or '—'} → {location}",
-        notes=body.get("notes"),
-        created_by_name=name,
-        created_by=user_id
-    )
-    db.add(update)
+    add_update(db, job.id, "location", f"Location changed: {old or '—'} → {location}", notes=body.get("notes"), created_by_name=name, created_by=user_id)
     db.commit()
     if user_id:
-        log_audit(db, user_id, "Changed Location", job.id, update.description)
+        log_audit(db, user_id, "Changed Location", job.id, f"Location changed: {old or '—'} → {location}")
     return {"success": True, "current_location": job.current_location}
 
 def sast_today():
@@ -2802,6 +2855,45 @@ async def api_workshop_counts(db: Session = Depends(get_db), current_user: model
     rows.sort(key=lambda x: -x["total"])
     return {"workshop": rows}
 
+@app.get("/api/admin/sales-counts")
+async def api_sales_counts(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role != "admin" or (current_user.full_name or "").strip().lower() != "sebastian van biljon":
+        raise HTTPException(status_code=403, detail="Only Sebastian can view sales counts")
+    sales = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True).all()
+    names = [u.full_name for u in sales]
+    sold = {n: {"booked": 0, "open": 0, "delivered": 0} for n in names}
+    showroom = {"booked": 0, "open": 0, "delivered": 0, "by": {}}
+    jobs = db.query(models.JobCard).all()
+    for j in jobs:
+        purpose = (getattr(j, "job_purpose", None) or "sold").strip().lower()
+        closed = j.status in CLOSED_STATUSES
+        if purpose == "showroom":
+            showroom["booked"] += 1
+            showroom["delivered" if closed else "open"] += 1
+            who = (j.salesman_name or "Workshop").strip() or "Workshop"
+            slot = showroom["by"].setdefault(who, {"booked": 0, "open": 0})
+            slot["booked"] += 1
+            if not closed:
+                slot["open"] += 1
+            continue
+        who = (j.salesman_name or "").strip()
+        if who not in sold:
+            sold[who or "Unassigned"] = {"booked": 0, "open": 0, "delivered": 0}
+            who = who or "Unassigned"
+        sold[who]["booked"] += 1
+        sold[who]["delivered" if closed else "open"] += 1
+    sold_rows = [{"name": n, **v} for n, v in sold.items()]
+    sold_rows.sort(key=lambda x: -x["booked"])
+    show_rows = [{"name": n, **v} for n, v in showroom["by"].items()]
+    show_rows.sort(key=lambda x: -x["booked"])
+    return {
+        "sold": sold_rows,
+        "showroom_booked": showroom["booked"],
+        "showroom_open": showroom["open"],
+        "showroom_delivered": showroom["delivered"],
+        "showroom": show_rows,
+    }
+
 def company_match(provider, company):
     if not provider or not company:
         return False
@@ -3232,26 +3324,14 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
     job.current_activity_notes = (body.get("notes") or "").strip() or None
     job.current_activity_at = datetime.utcnow()
     job.current_activity_by = body.get("full_name") or "Workshop"
-    db.add(models.JobUpdate(
-        job_card_id=job.id,
-        category="activity",
-        description=f"{job.current_location or ''} — {job.current_activity or ''}".strip(" —"),
+    add_update(
+        db, job.id, "activity",
+        f"{job.current_location or ''} — {job.current_activity or ''}".strip(" —"),
         notes=job.current_activity_notes,
         created_by_name=job.current_activity_by,
-        created_by=body.get("user_id")
-    ))
-    if job.current_activity:
-        db.add(models.JobTask(
-            job_card_id=job.id,
-            task_name="Activity: " + job.current_activity[:80],
-            description=job.current_activity_notes,
-            is_custom=True,
-            needs_approval=False,
-            status="In Progress",
-            task_location=job.current_location,
-            notes=job.current_activity_notes,
-            last_updated_by_name=job.current_activity_by
-        ))
+        created_by=body.get("user_id"),
+    )
+    # Current activity is a note only. A real extra job is added under Work / Prep Tasks.
     msg = f"Update on {job.stock_number}: {job.current_location or ''} {job.current_activity or ''}".strip()
     sales = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True, models.User.full_name == job.salesman_name).all()
     for u in sales:
@@ -3334,17 +3414,20 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
     for j in jobs:
         need_pdi = False
         need_ready = False
+        showroom = is_showroom(j)
+        if showroom and current_user.role == "sales":
+            continue
         if current_user.role == "sales":
             if (j.salesman_name or "") != current_user.full_name:
                 continue
             need_pdi = not bool(j.pdi_signed_sales)
             need_ready = not bool(j.ready_sales)
         elif current_user.role == "workshop":
-            need_pdi = not bool(j.pdi_signed_workshop)
+            need_pdi = (not showroom) and (not bool(j.pdi_signed_workshop))
             need_ready = not bool(j.ready_workshop)
         elif current_user.role in ("admin", "accounts"):
-            need_pdi = not (j.pdi_signed_sales and j.pdi_signed_workshop)
-            need_ready = not (j.ready_sales and j.ready_workshop)
+            need_pdi = (not showroom) and (not (j.pdi_signed_sales and j.pdi_signed_workshop))
+            need_ready = not (j.ready_workshop if showroom else (j.ready_sales and j.ready_workshop))
         else:
             continue
         if not (need_pdi or need_ready):
@@ -3594,5 +3677,19 @@ async def api_wash_status(item_id: int, request: Request, db: Session = Depends(
             created_by_name=current_user.full_name,
             created_by=current_user.id,
         ))
+    label = wr.stock_number or (job.stock_number if job else "vehicle")
+    detail = " ".join(x for x in [wr.make, wr.vehicle_type] if x).strip()
+    if status == "Done":
+        msg = f"Wash completed for {label}" + (f" — {detail}" if detail else "")
+    elif status == "At wash bay":
+        msg = f"Wash started at wash bay for {label}" + (f" — {detail}" if detail else "")
+    else:
+        msg = f"Wash request {status} for {label}"
+    notify_role(db, "marketing", msg, job.id if job else None)
+    if wr.requested_by:
+        who = db.query(models.User).filter(models.User.id == wr.requested_by, models.User.is_active == True).first()
+        if who and (who.role or "") != "marketing":
+            db.add(models.Notification(user_id=who.id, job_card_id=job.id if job else None, message=msg))
+            send_web_push(db, [who.id], "Status Job Cards", msg, "/dashboard")
     db.commit()
     return {"success": True}

@@ -138,6 +138,12 @@
     <p class="text-sm text-gray-500 mb-4">How many times each workshop user updated a job.</p>
     <div id="workshopCountList" class="space-y-3 text-sm">Loading...</div>
 </details>
+<details id="salesCountBox" class="hidden dash-fold">
+    <summary>Sales and showroom job counts</summary>
+    <h2 class="hidden">Sales and showroom job counts</h2>
+    <p class="text-sm text-gray-500 mb-2">Sold jobs stay separate from showroom jobs.</p>
+    <div id="salesCountList" class="space-y-3 text-sm">Loading...</div>
+</details>
 
 
 
@@ -284,6 +290,8 @@
             if ((name || '').toLowerCase() === 'sebastian van biljon') {
                 show('workshopCountBox');
                 loadWorkshopCounts();
+                show('salesCountBox');
+                loadSalesCounts();
             }
             show('jobBookingsBox');
             show('partsDashBox');
@@ -305,6 +313,7 @@
             loadUpdateRequests();
             loadNotifications();
             loadSignoffQueue(); loadEmptyCheckQueue(); loadShowroomQueue(); loadShowroomQueue();
+            loadWashRequests();
             loadJobList('/api/jobs?salesman=' + encodeURIComponent(name), 'myJobsList');
             loadJobList('/api/jobs', 'allJobsList');
             loadBookings();
@@ -620,6 +629,27 @@
         } catch (err) {}
     }
 
+    async function loadSalesCounts() {
+        try {
+            const res = await fetch('/api/admin/sales-counts', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            const data = await res.json();
+            const box = document.getElementById('salesCountList');
+            if (!box) return;
+            const sold = data.sold || [];
+            const show = data.showroom || [];
+            let html = '<div class="font-semibold uppercase text-xs tracking-wide text-[#7ec2ff]">Sold jobs</div>';
+            html += sold.map(function(u) {
+                return '<div class="p-3 rounded-lg border border-[#2a3340]"><div class="font-semibold">' + u.name + '</div><div class="text-xs text-[#9aa6b4]">Booked ' + u.booked + ' · Open ' + u.open + ' · Delivered ' + u.delivered + '</div></div>';
+            }).join('') || '<p class="text-gray-400">No sold jobs</p>';
+            html += '<div class="font-semibold uppercase text-xs tracking-wide text-purple-300 mt-3">Showroom jobs</div>';
+            html += '<div class="p-3 rounded-lg border border-purple-700"><div class="font-semibold">Showroom total</div><div class="text-xs text-[#9aa6b4]">Booked ' + (data.showroom_booked || 0) + ' · Open ' + (data.showroom_open || 0) + ' · Delivered ' + (data.showroom_delivered || 0) + '</div></div>';
+            html += show.map(function(u) {
+                return '<div class="p-3 rounded-lg border border-[#2a3340]"><div class="font-semibold">' + u.name + '</div><div class="text-xs text-[#9aa6b4]">Showroom booked ' + u.booked + ' · Open ' + u.open + '</div></div>';
+            }).join('');
+            box.innerHTML = html;
+        } catch (err) {}
+    }
+
     async function loadStockDash() {
         try {
             const res = await fetch('/api/stock-orders', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
@@ -731,9 +761,11 @@
                 html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2 uppercase tracking-wide">' + icon + ' ' + loc +
                     ' <span class="text-gray-400">(' + items.length + ')</span></div>';
                 items.forEach(function(j) {
+                    const show = (j.job_purpose || 'sold') === 'showroom';
+                    const tag = show ? '<span class="text-[10px] px-1 rounded bg-purple-700 text-white">SHOWROOM</span> ' : '<span class="text-[10px] px-1 rounded bg-[#025daa] text-white">SOLD</span> ';
                     html += '<a href="/jobs/' + j.id + '" class="flex items-center gap-2 text-xs py-1 hover:underline">' +
                         (j.photo_url ? '<img src="' + j.photo_url + '" alt="" class="h-8 w-12 object-contain rounded bg-black/20">' : '') +
-                        '<span>' + (j.label || (j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || ''))) + '</span></a>';
+                        '<span>' + tag + (j.label || (j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || ''))) + '</span></a>';
                 });
                 html += '</div>';
             });

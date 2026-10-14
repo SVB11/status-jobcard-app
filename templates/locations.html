@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Locations{% endblock %}
+{% block content %}
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Locations</h1>
+    <p class="text-sm text-[#9aa6b4]">Where every vehicle is now, including open tasks and 3rd party bookings.</p>
+</div>
+<div class="bg-white rounded-xl shadow p-4">
+    <div class="glass-inner">
+        <div id="locationBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <p class="text-sm text-gray-400">Loading locations...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const token = localStorage.getItem('token');
+    const role = (localStorage.getItem('role') || '').toLowerCase();
+    const name = (localStorage.getItem('full_name') || '').toLowerCase();
+    if (!token) window.location.href = '/login';
+    if (role !== 'workshop' && role !== 'admin' && role !== 'accounts' && name !== 'sebastian van biljon') {
+        window.location.href = '/dashboard';
+    }
+    async function loadLocationBoard() {
+        try {
+            const res = await fetch('/api/locations-board', { headers: { 'Authorization': 'Bearer ' + token } });
+            const data = await res.json();
+            const board = data.board || {};
+            let html = '';
+            Object.keys(board).forEach(function(loc) {
+                const items = board[loc] || [];
+                if (!items.length) return;
+                html += '<div class="border rounded-lg p-3 bg-gray-50"><div class="font-semibold text-sm mb-2 uppercase tracking-wide">' + loc +
+                    ' <span class="text-gray-400">(' + items.length + ')</span></div>';
+                items.forEach(function(j) {
+                    const show = (j.job_purpose || 'sold') === 'showroom';
+                    const tag = show ? '<span class="text-[10px] px-1 rounded bg-purple-700 text-white">SHOWROOM</span> ' : '<span class="text-[10px] px-1 rounded bg-[#025daa] text-white">SOLD</span> ';
+                    html += '<a href="/jobs/' + j.id + '" class="flex items-center gap-2 text-xs py-1 hover:underline">' +
+                        (j.photo_url ? '<img src="' + j.photo_url + '" alt="" class="h-8 w-12 object-contain rounded bg-black/20">' : '') +
+                        '<span>' + tag + (j.label || (j.stock_number + ' ' + (j.vehicle_description || '') + ' ' + (j.year || ''))) + '</span></a>';
+                });
+                html += '</div>';
+            });
+            document.getElementById('locationBoard').innerHTML = html || '<p class="text-sm text-gray-400">No vehicles on the board</p>';
+        } catch (err) {
+            document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
+        }
+    }
+    loadLocationBoard();
+    setInterval(loadLocationBoard, 60000);
+</script>
+{% endblock %}

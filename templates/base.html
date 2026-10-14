@@ -35,9 +35,9 @@
             z-index: 0;
             pointer-events: none;
             background-color: #07090c;
-            background-image: url('/static/images/yard_dusk.jpg');
+            background-image: url('/static/images/status_sunset.jpg');
             background-repeat: no-repeat;
-            background-position: center top;
+            background-position: center center;
             background-size: cover;
         }
         #pageBg::after {
@@ -198,6 +198,7 @@
             <nav class="nav-scroll">
                 <a href="/dashboard">Dashboard</a>
                 <a href="/jobs" id="navJobs">Jobs</a>
+                <a href="/locations" id="navLocations" class="hidden">Locations</a>
                 <a href="/jobs/archive" id="navArchive" class="hidden">Closed</a>
                 <a href="/admin/users" id="navUsers" class="hidden">Users</a>
                 <a href="/admin/third-parties" id="navTp" class="hidden">3rd Parties</a>
@@ -275,7 +276,8 @@
         var t = document.getElementById('navTp');
         if (u && isAdm) u.classList.remove('hidden');
         if (t && isAdm) t.classList.remove('hidden');
-        var ar = document.getElementById('navArchive');
+        var locNav = document.getElementById('navLocations');
+        if (locNav && (r === 'workshop' || r === 'admin' || r === 'accounts' || nm === 'sebastian van biljon')) locNav.classList.remove('hidden');
         if (ar && isAdm) ar.classList.remove('hidden');
         if (r === 'stock' || r === 'supplier') {
             var nj = document.getElementById('navJobs');
