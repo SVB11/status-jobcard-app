@@ -248,51 +248,111 @@
         window.location.href = '/login';
     }
 
-    async function loadTasks() {
-        const mainType = document.getElementById('main_type').value;
-        const year = document.getElementById('year').value;
-        const purpose = document.getElementById('job_purpose').value || 'sold';
-        const container = document.getElementById('tasksContainer');
+    function fallbackTasks(mainType, purpose) {
+        const low = (mainType || '').toLowerCase();
+        const tanker = low.indexOf('tanker') !== -1 || low.indexOf('rigid') !== -1 || low.indexOf('drawbar') !== -1 || low.indexOf('water') !== -1;
+        const trailer = low.indexOf('tipper') !== -1 || low.indexOf('tautliner') !== -1 || low.indexOf('flatdeck') !== -1 || low.indexOf('trailer') !== -1;
+        if (purpose === 'showroom') {
+            const rows = [
+                ['Wash for photos / showroom', 'Wash the vehicle for photos or the showroom floor'],
+                ['Polish cab and body', 'Polish cab and body for presentation'],
+                ['Touch-ups', 'Paint / body touch-ups as needed'],
+                ['Spray rims', 'Spray or clean rims'],
+                ['Cab clean', 'Clean cab interior'],
+                ['Tyre check and pressure', 'Check tyres and set pressure'],
+                ['Lights and electrics check', 'Check lights and basic electrics'],
+                ['Remove stickers / branding', 'Remove old company stickers or branding'],
+                ['Undercarriage service', 'Service or tidy the undercarriage'],
+                ['Mudguards and mudflaps', 'Fit, repair or tidy mudguards and mudflaps'],
+                ['Full respray', 'Full respray. Add the colour for chassis, barrel, cab or body'],
+                ['Present on yard', 'Park and present the unit on the yard']
+            ];
+            if (tanker) rows.push(['Confirm barrel empty for display', 'Barrel empty and sealed for showroom display']);
+            if (trailer) rows.push(['Tarp / curtain tidy', 'Tidy tarps, curtains or sails for display']);
+            return rows.map(function(r){ return { task_name: r[0], description: r[1] }; });
+        }
+        const rows = [
+            ['Roadworthy', 'Prepare and take the vehicle for roadworthy'],
+            ['Brake tests', 'Brake test to be done before delivery'],
+            ['Wash / clean for delivery', 'Wash and present the vehicle for handover'],
+            ['Touch-ups', 'Paint / body touch-ups as needed'],
+            ['Polish', 'Polish cab / body for delivery'],
+            ['Spray rims', 'Spray or refurbish rims']
+        ];
+        if (tanker) {
+            rows.unshift(
+                ['Pressure test (SLP)', 'Book SLP pressure test before delivery'],
+                ['Barrel test - 3 year', '3-year barrel test required'],
+                ['Barrel test - 6 year', '6-year barrel test required'],
+                ['Barrel test - 3 and 6 year', 'Both 3-year and 6-year barrel tests'],
+                ['Calibration (if fitted with meters)', 'Calibrate meters if fitted'],
+                ['DEKRA spec', 'Prepare to DEKRA spec']
+            );
+            const y = parseInt(document.getElementById('year').value, 10);
+            if (y && (new Date().getFullYear() - y) >= 15) {
+                rows.splice(3, 0, ['Barrel test - 15 year', 'Vehicle is 15 years or older — 15-year barrel test applies']);
+            }
+        } else if (trailer) {
+            rows.push(
+                ['Full refurbishment', 'Full workshop refurbishment before delivery'],
+                ['Side tipper tarps', 'Side tipper tarps to be fitted, repaired or checked'],
+                ['Crack repairs', 'Crack repairs on bin / body / chassis as required']
+            );
+        } else {
+            rows.push(
+                ['Fuel Spec', 'Prepare truck tractor to fuel spec'],
+                ['DEKRA Spec', 'Prepare truck tractor to DEKRA spec'],
+                ['Service before delivery', 'Workshop service before handover']
+            );
+        }
+        rows.push(['As Is – with Roadworthy only', 'Sell as is. Only roadworthy to be done']);
+        rows.push(['As Is – without Roadworthy', 'Sell as is. No roadworthy']);
+        return rows.map(function(r){ return { task_name: r[0], description: r[1] }; });
+    }
 
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+    }
+
+    function renderTasks(tasks) {
+        const container = document.getElementById('tasksContainer');
+        if (!container) return;
+        if (!tasks || !tasks.length) {
+            container.innerHTML = '<p class="text-sm text-gray-500">No standard tasks for this type.</p>';
+            return;
+        }
+        let html = '';
+        tasks.forEach(function(t) {
+            const isSpray = (t.task_name || '').toLowerCase().indexOf('full respray') !== -1;
+            html += '<label class="flex items-start gap-3 p-2 hover:bg-white rounded cursor-pointer">' +
+                '<input type="checkbox" class="task-checkbox mt-1" data-name="' + esc(t.task_name) + '" data-desc="' + esc(t.description) + '"' + (isSpray ? ' data-spray="1" onchange="toggleSprayColours(this)"' : '') + '>' +
+                '<div><div class="text-sm font-medium text-gray-800">' + esc(t.task_name) + '</div>' +
+                (t.description ? '<div class="text-xs text-gray-500">' + esc(t.description) + '</div>' : '') +
+                '</div></label>';
+            if (isSpray) {
+                html += '<div id="sprayColours" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-2 pl-8 pb-2">' +
+                    '<input id="colourChassis" class="border rounded px-2 py-1 text-sm" placeholder="Chassis colour">' +
+                    '<input id="colourBarrel" class="border rounded px-2 py-1 text-sm" placeholder="Barrel / tank colour">' +
+                    '<input id="colourCab" class="border rounded px-2 py-1 text-sm" placeholder="Cab colour">' +
+                    '<input id="colourBody" class="border rounded px-2 py-1 text-sm" placeholder="Body / bin colour">' +
+                    '<input id="colourOther" class="sm:col-span-2 border rounded px-2 py-1 text-sm" placeholder="Other colour note">' +
+                    '</div>';
+            }
+        });
+        container.innerHTML = html;
+    }
+
+    function loadTasks() {
+        const mainType = document.getElementById('main_type').value;
+        const purpose = (document.getElementById('job_purpose') || {}).value || 'sold';
+        const container = document.getElementById('tasksContainer');
+        if (!container) return;
         if (!mainType) {
             container.innerHTML = '<p class="text-sm text-gray-400">Select a Main Type above to load available tasks...</p>';
             return;
         }
-
-        container.innerHTML = '<p class="text-sm text-gray-500">Loading tasks...</p>';
-
-        try {
-            const res = await fetch('/api/tasks-for-type?main_type=' + encodeURIComponent(mainType) + '&year=' + encodeURIComponent(year || '') + '&purpose=' + encodeURIComponent(purpose));
-            const data = await res.json();
-            const tasks = data.tasks || [];
-
-            if (tasks.length === 0) {
-                container.innerHTML = '<p class="text-sm text-gray-500">No standard tasks for this type.</p>';
-                return;
-            }
-
-            let html = '';
-            tasks.forEach(function(t) {
-                const isSpray = (t.task_name || '').toLowerCase().indexOf('full respray') !== -1;
-                html += '<label class="flex items-start gap-3 p-2 hover:bg-white rounded cursor-pointer">' +
-                    '<input type="checkbox" class="task-checkbox mt-1" data-name="' + t.task_name + '" data-desc="' + (t.description || '') + '"' + (isSpray ? ' data-spray="1" onchange="toggleSprayColours(this)"' : '') + '>' +
-                    '<div><div class="text-sm font-medium text-gray-800">' + t.task_name + '</div>' +
-                    (t.description ? '<div class="text-xs text-gray-500">' + t.description + '</div>' : '') +
-                    '</div></label>';
-                if (isSpray) {
-                    html += '<div id="sprayColours" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-2 pl-8 pb-2">' +
-                        '<input id="colourChassis" class="border rounded px-2 py-1 text-sm" placeholder="Chassis colour">' +
-                        '<input id="colourBarrel" class="border rounded px-2 py-1 text-sm" placeholder="Barrel / tank colour">' +
-                        '<input id="colourCab" class="border rounded px-2 py-1 text-sm" placeholder="Cab colour">' +
-                        '<input id="colourBody" class="border rounded px-2 py-1 text-sm" placeholder="Body / bin colour">' +
-                        '<input id="colourOther" class="sm:col-span-2 border rounded px-2 py-1 text-sm" placeholder="Other colour note">' +
-                        '</div>';
-                }
-            });
-            container.innerHTML = html;
-        } catch (err) {
-            container.innerHTML = '<p class="text-sm text-red-500">Could not load tasks.</p>';
-        }
+        // Tasks are on the page. Sales does not wait for the server.
+        renderTasks(fallbackTasks(mainType, purpose));
     }
 
     function toggleSprayColours(box) {

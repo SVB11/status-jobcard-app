@@ -255,10 +255,21 @@ async def create_job_page(request: Request):
 @app.get("/api/tasks-for-type")
 async def api_tasks_for_type(main_type: str, year: str = None, purpose: str = "sold"):
     """Return the standard tasks for a vehicle type (used by frontend)."""
-    if (purpose or "").strip().lower() == "showroom":
-        return {"tasks": get_showroom_tasks(main_type)}
-    tasks = get_tasks_for_vehicle(main_type, year)
-    return {"tasks": tasks}
+    try:
+        if (purpose or "").strip().lower() == "showroom":
+            return {"tasks": get_showroom_tasks(main_type)}
+        return {"tasks": get_tasks_for_vehicle(main_type, year)}
+    except Exception as exc:
+        # Never leave sales with an empty task list.
+        return {"tasks": [
+            {"task_name": "Roadworthy", "description": "Prepare and take the vehicle for roadworthy"},
+            {"task_name": "Brake tests", "description": "Brake test to be done before delivery"},
+            {"task_name": "Wash / clean for delivery", "description": "Wash and present the vehicle for handover"},
+            {"task_name": "Touch-ups", "description": "Paint / body touch-ups as needed"},
+            {"task_name": "Polish", "description": "Polish cab / body for delivery"},
+            {"task_name": "Spray rims", "description": "Spray or refurbish rims"},
+            {"task_name": "As Is – with Roadworthy only", "description": "Sell as is. Only roadworthy to be done"},
+        ], "warning": str(exc)}
 
 @app.get("/api/jobs/open-ws")
 async def api_open_ws(stock: str, db: Session = Depends(get_db)):
