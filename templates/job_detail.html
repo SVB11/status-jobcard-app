@@ -694,8 +694,10 @@
             }
             if (!isShowroom) {
                 buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
+                buttons += '<button type="button" onclick="downloadPdf(\'pdf-pdi\')" class="px-4 py-2 bg-[#0c1015] text-white rounded-lg text-sm">Download PDI PDF</button>';
             }
             buttons += '<a href="/jobs/' + jobId + '/print-work" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print completed work</a>';
+            buttons += '<button type="button" onclick="downloadPdf(\'pdf-work\')" class="px-4 py-2 bg-[#0c1015] text-white rounded-lg text-sm">Download work PDF</button>';
             if (role === 'sales' || isAdmin) {
                 buttons += '<a href="/jobs/' + jobId + '/client-report" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Client report / WhatsApp</a>';
             }
@@ -913,6 +915,16 @@
         if (typeof refreshBell === 'function') refreshBell();
     }
 
+    async function downloadPdf(kind) {
+        const res = await fetch('/api/jobs/' + jobId + '/' + kind, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) { alert('Could not make the PDF'); return; }
+        const blob = await res.blob();
+        const name = (res.headers.get('Content-Disposition') || '').split('filename="')[1];
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (name || 'jobcard.pdf').replace('"', '');
+        a.click();
+    }
     async function markReady(party) {
         if (!confirm('Mark this job as Ready for Delivery (' + party + ')?')) return;
         try {

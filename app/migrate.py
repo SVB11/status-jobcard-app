@@ -29,6 +29,8 @@ NEW_COLUMNS = {
         "empty_signed_sales_by": "INTEGER",
         "empty_signed_sales_at": "DATETIME",
         "job_purpose": "VARCHAR",
+        "ready_sales_by": "INTEGER",
+        "ready_workshop_by": "INTEGER",
     },
     "part_items": {
         "quantity": "VARCHAR",

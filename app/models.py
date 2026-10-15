@@ -121,6 +121,8 @@ class JobCard(Base):
 
     ready_sales = Column(Boolean, default=False)
     ready_workshop = Column(Boolean, default=False)
+    ready_sales_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    ready_workshop_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     empty_signed_workshop = Column(Boolean, default=False)
     empty_signed_workshop_by = Column(Integer, ForeignKey("users.id"), nullable=True)

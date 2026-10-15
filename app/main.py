@@ -12,7 +12,7 @@ import uuid
 from .database import engine, get_db, Base, SQLITE_FILE
 from . import models, auth
 from .seed import seed_database
-from .tasks_config import get_tasks_for_vehicle, get_showroom_tasks
+from .pdf_forms import build_pdi_pdf, build_work_pdf
 from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_PRESETS, THIRD_PARTY_SERVICES, BARREL_INTERVALS, providers_for_task, SUPPLY_CATEGORIES, type_family
 from .migrate import migrate_schema
 from .stock_photos import match_stock_photo
@@ -1274,9 +1274,11 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     if party == "sales":
         job.ready_sales = True
         job.ready_for_delivery_sales_at = datetime.utcnow()
+        job.ready_sales_by = user_id
     elif party == "workshop":
         job.ready_workshop = True
         job.ready_for_delivery_workshop_at = datetime.utcnow()
+        job.ready_workshop_by = user_id
         if is_showroom(job):
             job.ready_sales = True
             job.ready_for_delivery_sales_at = datetime.utcnow()
@@ -2217,6 +2219,39 @@ async def api_client_report_pdf_selected(job_id: int, request: Request, db: Sess
 @app.get("/jobs/{job_id}/print-work", response_class=HTMLResponse)
 async def print_work_page(request: Request, job_id: int):
     return render_template("print_work.html", request=request, job_id=job_id)
+
+def _signer(db, job, field, party):
+    user_id = getattr(job, field, None)
+    if user_id:
+        return user_name(db, user_id)
+    logs = db.query(models.AuditLog).filter(models.AuditLog.job_card_id == job.id, models.AuditLog.action == "Marked Ready for Delivery").order_by(models.AuditLog.timestamp.desc()).all()
+    for log in logs:
+        if party in (log.details or "").lower():
+            return user_name(db, log.user_id)
+    return None
+
+@app.get("/api/jobs/{job_id}/pdf-work")
+async def api_pdf_work(job_id: int, request: Request, db: Session = Depends(get_db)):
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    workshop = _signer(db, job, "ready_workshop_by", "workshop") if job.ready_workshop else None
+    sales = _signer(db, job, "ready_sales_by", "sales") if job.ready_sales else None
+    pdf = build_work_pdf(job, workshop, sales)
+    name = f"{job.stock_number or job.job_number} {job.vehicle_description or ''} completed work.pdf".replace("/", "-")
+    return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+@app.get("/api/jobs/{job_id}/pdf-pdi")
+async def api_pdf_pdi(job_id: int, request: Request, db: Session = Depends(get_db)):
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    items = list(job.pdi_items or [])
+    workshop = user_name(db, job.pdi_signed_workshop_by) if job.pdi_signed_workshop else None
+    sales = user_name(db, job.pdi_signed_sales_by) if job.pdi_signed_sales else None
+    pdf = build_pdi_pdf(job, items, workshop, sales)
+    name = f"{job.stock_number or job.job_number} {job.vehicle_description or ''} PDI.pdf".replace("/", "-")
+    return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @app.post("/api/jobs/{job_id}/parts")
 async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_db)):
