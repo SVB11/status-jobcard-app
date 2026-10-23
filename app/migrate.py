@@ -30,6 +30,10 @@ NEW_COLUMNS = {
         "job_purpose": "VARCHAR",
         "ready_sales_by": "INTEGER",
         "ready_workshop_by": "INTEGER",
+        "archived_at": "DATETIME",
+        "archived_by": "INTEGER",
+        "archive_reason": "TEXT",
+        "delivered_at": "DATETIME",
     },
     "part_items": {
         "quantity": "VARCHAR",
@@ -110,3 +114,35 @@ def migrate_schema():
             if "password_plain" in user_cols:
                 conn.execute(text("UPDATE users SET password_plain = NULL"))
                 conn.execute(text("ALTER TABLE users DROP COLUMN password_plain"))
+        if "job_cards" in tables:
+            cols = {c["name"] for c in inspector.get_columns("job_cards")}
+            if "archived_at" in cols:
+                admin = conn.execute(text("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")).fetchone()
+                admin_id = admin[0] if admin else 1
+                rows = conn.execute(text("""
+                    SELECT id, job_number FROM job_cards
+                    WHERE archived_at IS NULL
+                      AND (
+                        current_location = 'Out / Delivered'
+                        OR status IN ('Delivered / Closed', 'Delivered', 'Closed')
+                      )
+                """)).fetchall()
+                for row in rows:
+                    conn.execute(text("""
+                        UPDATE job_cards
+                        SET archived_at = CURRENT_TIMESTAMP,
+                            archived_by = :uid,
+                            archive_reason = 'Archived by migration',
+                            status = 'Delivered / Closed',
+                            current_location = 'Out / Delivered',
+                            delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
+                        WHERE id = :jid
+                    """), {"uid": admin_id, "jid": row[0]})
+                    conn.execute(text("""
+                        INSERT INTO job_updates (job_card_id, category, description, notes, created_by_name, created_by, created_at)
+                        VALUES (:jid, 'progress', :desc, 'Archived by migration', 'System', :uid, CURRENT_TIMESTAMP)
+                    """), {"jid": row[0], "uid": admin_id, "desc": f"Job delivered and archived {row[1]}"})
+                    conn.execute(text("""
+                        INSERT INTO audit_logs (job_card_id, user_id, action, details, timestamp)
+                        VALUES (:jid, :uid, 'Job delivered and archived', :details, CURRENT_TIMESTAMP)
+                    """), {"jid": row[0], "uid": admin_id, "details": f"{row[1]} Archived by migration"})

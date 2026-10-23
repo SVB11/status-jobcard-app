@@ -130,6 +130,8 @@ def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, d
     db.commit()
 
 def assert_editable(db: Session, job, user_id):
+    if is_archived(job):
+        raise HTTPException(status_code=400, detail="This job is archived and read-only.")
     if not job or job.status != "Delivered / Closed":
         return
     u = db.query(models.User).filter(models.User.id == user_id).first() if user_id else None
@@ -276,7 +278,7 @@ async def api_open_ws(stock: str, db: Session = Depends(get_db)):
     key = "".join((stock or "").split()).upper()
     if not key:
         return {"open": []}
-    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    jobs = active_jobs(db).all()
     open_jobs = []
     for j in jobs:
         if "".join((j.stock_number or "").split()).upper() == key:
@@ -485,6 +487,58 @@ async def api_create_job(
 
 CLOSED_STATUSES = ("Delivered / Closed", "Delivered", "Closed")
 
+def active_jobs(db):
+    """Every active list must start here so archived jobs stay out of the floor."""
+    return db.query(models.JobCard).filter(models.JobCard.archived_at == None)
+
+def is_archived(job) -> bool:
+    return bool(job and getattr(job, "archived_at", None))
+
+def archive_blockers(job):
+    missing = []
+    if is_showroom(job):
+        if not job.ready_workshop:
+            missing.append("Workshop ready for showroom sign-off")
+    else:
+        if not (job.pdi_signed_workshop and job.pdi_signed_sales):
+            missing.append("Both PDI sign-offs (workshop and sales)")
+    wash = [t for t in (job.tasks or []) if is_delivery_wash(getattr(t, "task_name", "") or "")]
+    if wash and not all((t.status or "") == "Completed" for t in wash):
+        missing.append("Wash bay clean before the client collects")
+    return missing
+
+def archive_job(db, job, user_id=None, by_name="System", reason="Job delivered and archived"):
+    if not job or is_archived(job):
+        return job
+    now = datetime.utcnow()
+    job.status = "Delivered / Closed"
+    job.current_location = "Out / Delivered"
+    if not job.delivered_at:
+        job.delivered_at = now
+    job.archived_at = now
+    job.archived_by = user_id
+    job.archive_reason = reason
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Job delivered and archived {job.job_number}",
+        notes=reason,
+        created_by_name=by_name or "System",
+        created_by=user_id,
+    ))
+    if user_id:
+        log_audit(db, user_id, "Job delivered and archived", job.id, f"{job.job_number} {reason}")
+    db.commit()
+    return job
+
+def require_admin_only(user):
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+def hide_archived(job, user):
+    if is_archived(job) and (not user or user.role != "admin"):
+        raise HTTPException(status_code=404, detail="Job not found")
+
 def job_allocated_to_company(job, company: str) -> bool:
     if not job or not company:
         return False
@@ -500,13 +554,9 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
     user = auth._user_from_token_string(raw, db) if raw else None
     if user and user.role == "supplier":
         return {"jobs": []}
-    query = db.query(models.JobCard).order_by(models.JobCard.created_at.desc())
+    query = active_jobs(db).order_by(models.JobCard.created_at.desc())
     if status:
         query = query.filter(models.JobCard.status == status)
-    elif int(archived or 0) == 1:
-        query = query.filter(models.JobCard.status.in_(CLOSED_STATUSES))
-    else:
-        query = query.filter(~models.JobCard.status.in_(CLOSED_STATUSES))
     if salesman:
         query = query.filter(models.JobCard.salesman_name == salesman)
     if created_by:
@@ -551,7 +601,100 @@ async def jobs_page(request: Request):
 
 @app.get("/jobs/archive", response_class=HTMLResponse)
 async def jobs_archive_page(request: Request):
-    return render_template("jobs_archive.html", request=request, page_title="Closed Job Cards")
+    return RedirectResponse(url="/archive")
+
+@app.get("/archive", response_class=HTMLResponse)
+async def archive_page(request: Request):
+    return render_template("archive.html", request=request, page_title="Archive")
+
+@app.get("/api/archive")
+async def api_archive(q: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin_only(current_user)
+    rows = db.query(models.JobCard).filter(models.JobCard.archived_at != None).order_by(models.JobCard.archived_at.desc()).all()
+    needle = (q or "").strip().lower()
+    out = []
+    for j in rows:
+        hay = " ".join([j.stock_number or "", j.job_number or "", j.vin_number or "", j.registration_number or "", j.client_name or "", j.vehicle_description or ""]).lower()
+        if needle and needle not in hay:
+            continue
+        who = user_name(db, j.archived_by) or ""
+        out.append({
+            "id": j.id,
+            "job_number": j.job_number,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "client_name": j.client_name,
+            "vin_number": j.vin_number,
+            "registration_number": j.registration_number,
+            "delivered_at": j.delivered_at.isoformat() if j.delivered_at else None,
+            "archived_at": j.archived_at.isoformat() if j.archived_at else None,
+            "archived_by": who,
+            "status": j.status,
+        })
+    return {"jobs": out}
+
+@app.post("/api/archive/{job_id}/restore")
+async def api_restore_archive(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin_only(current_user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A reason is required to restore")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job or not is_archived(job):
+        raise HTTPException(status_code=404, detail="Archived job not found")
+    job.archived_at = None
+    job.archived_by = None
+    job.archive_reason = reason
+    job.status = "Ready for Delivery"
+    job.current_location = "Yard"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Restored to active {job.job_number}",
+        notes=reason,
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    log_audit(db, current_user.id, "Restored to active", job.id, f"{job.job_number} {reason}")
+    db.commit()
+    return {"success": True}
+
+@app.get("/api/archive/{job_id}")
+async def api_archive_detail(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin_only(current_user)
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job or not is_archived(job):
+        raise HTTPException(status_code=404, detail="Archived job not found")
+    return {
+        "id": job.id,
+        "job_number": job.job_number,
+        "stock_number": job.stock_number,
+        "vehicle_description": job.vehicle_description,
+        "year": job.year,
+        "client_name": job.client_name,
+        "vin_number": job.vin_number,
+        "registration_number": job.registration_number,
+        "status": job.status,
+        "delivered_at": job.delivered_at.isoformat() if job.delivered_at else None,
+        "archived_at": job.archived_at.isoformat() if job.archived_at else None,
+        "archived_by": user_name(db, job.archived_by),
+        "archive_reason": job.archive_reason,
+        "pdi_signed_workshop": bool(job.pdi_signed_workshop),
+        "pdi_signed_sales": bool(job.pdi_signed_sales),
+        "ready_workshop": bool(job.ready_workshop),
+        "ready_sales": bool(job.ready_sales),
+        "tasks": [{"task_name": t.task_name, "status": t.status, "notes": t.notes} for t in (job.tasks or [])],
+        "parts": [{"description": p.description, "quantity": p.quantity, "order_number": p.order_number, "part_progress": p.part_progress} for p in (job.parts or [])],
+        "bookings": [{"service": b.service, "provider": b.provider, "booked_date": b.booked_date} for b in (job.third_party_bookings or [])],
+        "pdi": [{"check_item": p.check_item, "status": p.status, "notes": p.notes} for p in (job.pdi_items or [])],
+        "updates": [{"description": u.description, "notes": u.notes, "created_by_name": u.created_by_name, "created_at": u.created_at.isoformat() if u.created_at else None} for u in (job.updates or [])],
+        "audit": [{"action": a.action, "details": a.details, "timestamp": a.timestamp.isoformat() if a.timestamp else None} for a in (job.audit_logs or [])],
+    }
 
 # ---------- ACCEPT JOB ----------
 
@@ -581,7 +724,7 @@ async def api_approve_showroom(job_id: int, db: Session = Depends(get_db), curre
 async def api_showroom_approval_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     if current_user.role not in ("admin", "accounts", "workshop"):
         return {"jobs": []}
-    jobs = db.query(models.JobCard).filter(models.JobCard.status == "Pending Admin Approval").order_by(models.JobCard.created_at.desc()).all()
+    jobs = active_jobs(db).filter(models.JobCard.status == "Pending Admin Approval").order_by(models.JobCard.created_at.desc()).all()
     return {"jobs": [{
         "id": j.id,
         "stock_number": j.stock_number,
@@ -644,6 +787,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
     if user and user.role == "supplier":
         if not job_allocated_to_company(job, user.supplier_company):
             raise HTTPException(status_code=403, detail="This job is not booked to your company")
+    hide_archived(job, user)
 
     tasks = []
     for t in job.tasks:
@@ -759,6 +903,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
         "empty_signed_workshop_at": job.empty_signed_workshop_at.isoformat() if getattr(job, "empty_signed_workshop_at", None) else None,
         "empty_signed_sales_at": job.empty_signed_sales_at.isoformat() if getattr(job, "empty_signed_sales_at", None) else None,
         "status": job.status,
+        "archived": is_archived(job),
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "created_by": job.created_by,
         "created_by_name": user_name(db, job.created_by),
@@ -1357,7 +1502,7 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
 
 @app.get("/api/jobs/empty-check-queue")
 async def api_empty_check_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    jobs = active_jobs(db).all()
     out = []
     for j in jobs:
         if is_showroom(j) or type_family(j.main_type) != "tanker":
@@ -1411,15 +1556,12 @@ async def api_close_job(job_id: int, request: Request, db: Session = Depends(get
         )
 
     user_id = body.get("user_id")
-    job.status = "Delivered / Closed"
-    job.delivered_at = datetime.utcnow()
-    job.delivered_by = user_id
-    db.commit()
-
-    if user_id:
-        log_audit(db, user_id, "Closed Job", job.id, f"Job {job.job_number} delivered and closed")
-
-    return {"success": True, "status": job.status}
+    blockers = archive_blockers(job)
+    if blockers:
+        raise HTTPException(status_code=400, detail="Cannot deliver. Outstanding: " + "; ".join(blockers))
+    who = user_name(db, user_id) or body.get("full_name") or "Sales"
+    archive_job(db, job, user_id, who, "Job delivered and archived")
+    return {"success": True, "status": job.status, "archived": True}
 
 # ---------- PDI DIGITAL FORMS ----------
 
@@ -1644,42 +1786,13 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
 
 @app.post("/api/jobs/{job_id}/delete")
 async def api_delete_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    require_admin(current_user)
-    try:
-        body = await request.json()
-    except:
-        body = {}
-
-    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.status not in CLOSED_STATUSES:
-        raise HTTPException(status_code=400, detail="Only delivered / closed jobs can be deleted from archive")
-
-    user_id = body.get("user_id") or current_user.id
-    job_number = job.job_number
-
-    db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).delete()
-    db.query(models.PDIItem).filter(models.PDIItem.job_card_id == job_id).delete()
-    db.query(models.PartItem).filter(models.PartItem.job_card_id == job_id).delete()
-    db.query(models.SupplyItem).filter(models.SupplyItem.job_card_id == job_id).delete()
-    db.query(models.ThirdPartyBooking).filter(models.ThirdPartyBooking.job_card_id == job_id).delete()
-    db.query(models.JobUpdate).filter(models.JobUpdate.job_card_id == job_id).delete()
-    db.query(models.Notification).filter(models.Notification.job_card_id == job_id).delete()
-    db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job_id).delete()
-    db.delete(job)
-    db.commit()
-
-    if user_id:
-        log_audit(db, user_id, "Deleted closed Job Card", None, f"Deleted archived job {job_number}")
-
-    return {"success": True, "message": f"Job {job_number} deleted from archive"}
+    raise HTTPException(status_code=400, detail="Delivered jobs are archived. They are not deleted.")
 
 @app.get("/api/admin/closed-jobs.csv")
 async def api_closed_jobs_csv(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
     import csv, io
-    jobs = db.query(models.JobCard).filter(models.JobCard.status.in_(CLOSED_STATUSES)).order_by(models.JobCard.created_at.desc()).all()
+    jobs = db.query(models.JobCard).filter(models.JobCard.archived_at != None).order_by(models.JobCard.archived_at.desc()).all()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["job_number", "stock_number", "vehicle", "year", "type", "client", "salesman", "status", "location", "created"])
@@ -1811,7 +1924,7 @@ def _board_push(board, loc, item):
 
 @app.get("/api/locations-board")
 async def api_locations_board(db: Session = Depends(get_db)):
-    jobs = db.query(models.JobCard).order_by(models.JobCard.created_at.desc()).all()
+    jobs = active_jobs(db).order_by(models.JobCard.created_at.desc()).all()
     board = {loc: [] for loc in LOCATIONS}
     board["Unspecified"] = []
     board["Delivered / Out"] = []
@@ -1876,6 +1989,13 @@ async def api_update_location(job_id: int, request: Request, db: Session = Depen
     location = body.get("location")
     if location not in LOCATIONS:
         raise HTTPException(status_code=400, detail="Invalid location")
+    if location == "Out / Delivered":
+        blockers = archive_blockers(job)
+        if blockers:
+            raise HTTPException(status_code=400, detail="Cannot move to Out / Delivered. Outstanding: " + "; ".join(blockers))
+        who = body.get("full_name") or user_name(db, body.get("user_id")) or "Staff"
+        archive_job(db, job, body.get("user_id"), who, "Job delivered and archived")
+        return {"success": True, "current_location": job.current_location, "archived": True}
     old = job.current_location
     job.current_location = location
     if location in WORKSHOP_BAYS and not job.workshop_entered_at:
@@ -1903,7 +2023,7 @@ def location_touched_today(db, job_id):
 async def api_morning_locations(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     if current_user.role != "workshop":
         return {"date": str(sast_today()), "pending": [], "confirmed": 0, "total": 0, "locations": LOCATIONS}
-    jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).order_by(models.JobCard.stock_number).all()
+    jobs = active_jobs(db).order_by(models.JobCard.stock_number).all()
     pending = []
     done = 0
     for j in jobs:
@@ -2438,6 +2558,10 @@ def build_snapshot(db):
             "pdi_signed_sales": j.pdi_signed_sales,
             "ready_sales": j.ready_sales,
             "ready_workshop": j.ready_workshop,
+            "delivered_at": iso(j.delivered_at),
+            "archived_at": iso(getattr(j, "archived_at", None)),
+            "archived_by": getattr(j, "archived_by", None),
+            "archive_reason": getattr(j, "archive_reason", None),
             "created_at": iso(j.created_at),
             "accepted_at": iso(j.accepted_at),
             "tasks": [{
@@ -2925,7 +3049,7 @@ async def api_clear_update_request(job_id: int, request: Request, db: Session = 
 
 @app.get("/api/update-requests")
 async def api_update_requests(db: Session = Depends(get_db)):
-    jobs = db.query(models.JobCard).filter(models.JobCard.update_requested_at != None).order_by(models.JobCard.update_requested_at.desc()).all()
+    jobs = active_jobs(db).filter(models.JobCard.update_requested_at != None).order_by(models.JobCard.update_requested_at.desc()).all()
     return {"requests": [{
         "id": j.id,
         "stock_number": j.stock_number,
@@ -3069,7 +3193,7 @@ async def api_supplier_jobs(db: Session = Depends(get_db), current_user: models.
     company = (current_user.supplier_company or "").strip()
     if not company:
         return {"company": "", "jobs": []}
-    jobs = db.query(models.JobCard).filter(models.JobCard.status != "Delivered / Closed").order_by(models.JobCard.created_at.desc()).all()
+    jobs = active_jobs(db).order_by(models.JobCard.created_at.desc()).all()
     open_jobs = []
     closed_jobs = []
     for job in jobs:
@@ -3478,7 +3602,7 @@ async def admin_print_bookings_page(request: Request):
 @app.get("/api/admin/job-bookings")
 async def api_admin_job_bookings(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
-    jobs = db.query(models.JobCard).filter(models.JobCard.status != "Delivered / Closed").order_by(models.JobCard.created_at.desc()).all()
+    jobs = active_jobs(db).order_by(models.JobCard.created_at.desc()).all()
     out = []
     for job in jobs:
         parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job.id).all()
@@ -3516,7 +3640,7 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
     out = []
     for p in parts:
         job = db.query(models.JobCard).filter(models.JobCard.id == p.job_card_id).first()
-        if job and job.status == "Delivered / Closed":
+        if job and is_archived(job):
             continue
         out.append({
             "id": p.id,
@@ -3538,7 +3662,7 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
 
 @app.get("/api/jobs/signoff-queue")
 async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    open_jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    open_jobs = active_jobs(db).all()
     changed = False
     for j in open_jobs:
         if j.status in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Pending Admin Approval"):
@@ -3549,7 +3673,7 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
     if changed:
         db.commit()
     statuses = ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery")
-    jobs = db.query(models.JobCard).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
+    jobs = active_jobs(db).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
     out = []
     for j in jobs:
         need_pdi = False
@@ -3598,15 +3722,22 @@ async def api_notifications(user_id: int, db: Session = Depends(get_db)):
     q = db.query(models.Notification).filter(models.Notification.user_id == user_id)
     if not user or user.role != "workshop":
         q = q.filter(~models.Notification.message.like("Morning location check%"))
-    unread = q.filter(models.Notification.is_read == False).count()
-    rows = q.order_by(models.Notification.created_at.desc()).limit(30).all()
+    rows = q.order_by(models.Notification.created_at.desc()).limit(40).all()
+    visible = []
+    for n in rows:
+        if n.job_card_id:
+            job = db.query(models.JobCard).filter(models.JobCard.id == n.job_card_id).first()
+            if is_archived(job) and (not user or user.role != "admin"):
+                continue
+        visible.append(n)
+    unread = sum(1 for n in visible if not n.is_read)
     return {"unread": unread, "notifications": [{
         "id": n.id,
         "message": n.message,
         "job_card_id": n.job_card_id,
         "is_read": n.is_read,
         "created_at": n.created_at.isoformat() if n.created_at else None
-    } for n in rows]}
+    } for n in visible[:30]]}
 
 @app.post("/api/notifications/mark-read")
 async def api_mark_notifications_read(request: Request, db: Session = Depends(get_db)):
@@ -3655,7 +3786,7 @@ async def api_approve_task(job_id: int, task_id: int, request: Request, db: Sess
 
 @app.get("/api/pdi-fails")
 async def api_pdi_fails(db: Session = Depends(get_db)):
-    jobs = db.query(models.JobCard).filter(models.JobCard.status == "PDI Failed - Returned to Workshop").order_by(models.JobCard.created_at.desc()).all()
+    jobs = active_jobs(db).filter(models.JobCard.status == "PDI Failed - Returned to Workshop").order_by(models.JobCard.created_at.desc()).all()
     out = []
     for j in jobs:
         fails = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == j.id, models.PDIItem.status == "Fail").all()

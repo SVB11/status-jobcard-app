@@ -109,6 +109,9 @@ class JobCard(Base):
     ready_for_delivery_workshop_at = Column(DateTime(timezone=True), nullable=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     delivered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    archive_reason = Column(Text, nullable=True)
 
     # Dual sign-offs
     pdi_signed_workshop = Column(Boolean, default=False)

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Archive{% endblock %}
+{% block content %}
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Archive</h1>
+    <p class="text-sm text-[#9aa6b4]">Delivered jobs. Admin only. Read-only unless restored.</p>
+</div>
+<input id="q" type="search" placeholder="WS / VIN / REG / CLIENT" class="w-full mb-4 px-3 py-3 rounded-lg bg-[#11151c] border border-[#2a3340] text-white uppercase text-sm">
+<div id="list" class="space-y-3"></div>
+<div id="detail" class="hidden mt-6 g-card p-4"></div>
+{% endblock %}
+{% block scripts %}
+<style>
+.g-card { background: rgba(17,21,28,0.78); border: 1px solid #243040; border-radius: 14px; color: #e8edf3; }
+</style>
+<script>
+const token = localStorage.getItem('token');
+const role = (localStorage.getItem('role') || '').toLowerCase();
+if (!token) window.location.href = '/login';
+if (role !== 'admin') window.location.href = '/dashboard';
+let rows = [];
+async function load() {
+    const q = document.getElementById('q').value || '';
+    const res = await fetch('/api/archive?q=' + encodeURIComponent(q), { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 403 || res.status === 404) { window.location.href = '/dashboard'; return; }
+    const data = await res.json();
+    rows = data.jobs || [];
+    const box = document.getElementById('list');
+    if (!rows.length) { box.innerHTML = '<div class="text-[#9aa6b4]">No archived jobs</div>'; return; }
+    box.innerHTML = rows.map(function(j) {
+        return '<div class="g-card p-4">' +
+            '<div class="font-bold">' + (j.stock_number || '') + ' · ' + (j.job_number || '') + '</div>' +
+            '<div class="text-sm">' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</div>' +
+            '<div class="text-xs text-[#9aa6b4]">' + (j.client_name || '') + ' · Delivered ' + (j.delivered_at || '').replace('T',' ').substring(0,16) + ' · Archived by ' + (j.archived_by || '') + '</div>' +
+            '<div class="mt-2 flex gap-2">' +
+            '<button class="px-3 py-1 bg-[#025daa] text-white text-xs rounded" onclick="openJob(' + j.id + ')">Open</button>' +
+            '<a class="px-3 py-1 border text-xs rounded" href="/api/jobs/' + j.id + '/pdf-work">Work PDF</a>' +
+            '<a class="px-3 py-1 border text-xs rounded" href="/api/jobs/' + j.id + '/pdf-pdi">PDI PDF</a>' +
+            '<button class="px-3 py-1 bg-[#2a3340] text-white text-xs rounded" onclick="restoreJob(' + j.id + ')">Restore to active</button>' +
+            '</div></div>';
+    }).join('');
+}
+async function openJob(id) {
+    const res = await fetch('/api/archive/' + id, { headers: { 'Authorization': 'Bearer ' + token } });
+    const j = await res.json();
+    const box = document.getElementById('detail');
+    box.classList.remove('hidden');
+    function lines(arr, fn) { return (arr || []).map(fn).join('') || '<div class="text-[#9aa6b4]">None</div>'; }
+    box.innerHTML = '<h2 class="font-bold uppercase">' + j.stock_number + ' ' + j.vehicle_description + '</h2>' +
+        '<p class="text-xs text-[#9aa6b4] mb-3">' + j.job_number + ' · ' + (j.client_name || '') + ' · VIN ' + (j.vin_number || '') + ' · Reg ' + (j.registration_number || '') + '</p>' +
+        '<div class="text-sm mb-2">Tasks</div>' + lines(j.tasks, function(t){ return '<div>' + t.task_name + ' — ' + (t.status || '') + (t.notes ? ' · ' + t.notes : '') + '</div>'; }) +
+        '<div class="text-sm mt-3 mb-2">Parts</div>' + lines(j.parts, function(p){ return '<div>' + p.description + ' · ' + (p.quantity || '') + ' · ' + (p.order_number || '') + '</div>'; }) +
+        '<div class="text-sm mt-3 mb-2">Third parties</div>' + lines(j.bookings, function(b){ return '<div>' + b.service + ' @ ' + b.provider + ' · ' + (b.booked_date || '') + '</div>'; }) +
+        '<div class="text-sm mt-3 mb-2">PDI</div>' + lines(j.pdi, function(p){ return '<div>' + p.check_item + ' — ' + (p.status || '') + '</div>'; }) +
+        '<div class="text-sm mt-3 mb-2">Updates</div>' + lines(j.updates, function(u){ return '<div>' + (u.created_at || '').replace('T',' ').substring(0,16) + ' · ' + (u.created_by_name || '') + ' · ' + u.description + '</div>'; }) +
+        '<div class="text-sm mt-3 mb-2">Audit</div>' + lines(j.audit, function(a){ return '<div>' + (a.timestamp || '').replace('T',' ').substring(0,16) + ' · ' + a.action + ' · ' + (a.details || '') + '</div>'; });
+}
+async function restoreJob(id) {
+    const reason = prompt('Reason to restore this job to active:');
+    if (!reason) return;
+    const res = await fetch('/api/archive/' + id + '/restore', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.detail || 'Could not restore'); return; }
+    load();
+}
+document.getElementById('q').addEventListener('input', load);
+load();
+</script>
+{% endblock %}

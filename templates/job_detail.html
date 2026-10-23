@@ -483,7 +483,7 @@
     }
 
     function renderTasks(tasks) {
-        const canEdit = canEditTasks() && currentJob && 
+        const canEdit = canEditTasks() && currentJob && !currentJob.archived &&
             !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
 
         let completed = 0;
@@ -665,12 +665,14 @@
 
             // Action buttons
             let buttons = '';
-            if (isWorkshop && j.status === 'Submitted to Workshop') {
+            if (j.archived) {
+                buttons += '<div class="px-4 py-2 bg-[#2a3340] text-white rounded-lg text-sm">Archived — read only</div>';
+            } else if (isWorkshop && j.status === 'Submitted to Workshop') {
                 buttons += '<button onclick="acceptJob()" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm hover:bg-blue-800">Accept Job</button>';
             }
             const isShowroom = (j.job_purpose || 'sold') === 'showroom';
             // Ready for Delivery - both parties. Showroom skips PDI.
-            if (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery') {
+            if (!j.archived && (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery')) {
                 if (!isShowroom && (role === 'sales' || isAdmin)) {
                     buttons += '<button onclick="markReady(\x27sales\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Sales)</button>';
                 }
@@ -681,20 +683,20 @@
             if (!isShowroom && ['Work Completed', 'PDI in Progress', 'PDI Completed', 'Ready for Delivery', 'Delivered / Closed'].includes(j.status)) {
                 buttons += '<a href="/jobs/' + jobId + '/pdi" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">View PDI Checklist</a>';
             }
-            if ((role === 'sales' || isAdmin || (isShowroom && isWorkshop)) && j.status === 'Ready for Delivery') {
+            if (!j.archived && (role === 'sales' || isAdmin || (isShowroom && isWorkshop)) && j.status === 'Ready for Delivery') {
                 buttons += '<button onclick="closeJob()" class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900">Close / Delivered</button>';
             }
             // Delete - Admin only
-            if ((role === 'sales' || isAdmin) && j.status !== 'Delivered / Closed') {
+            if (!j.archived && (role === 'sales' || isAdmin) && j.status !== 'Delivered / Closed') {
                 buttons += '<button onclick="requestUpdate()" class="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm">Request update</button>';
             }
-            if (isWorkshop && j.update_requested_at) {
+            if (!j.archived && isWorkshop && j.update_requested_at) {
                 buttons += '<button onclick="clearUpdateRequest()" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Update sent / clear request</button>';
             }
-            if (isAdmin && j.status === 'Pending Admin Approval') {
+            if (!j.archived && isAdmin && j.status === 'Pending Admin Approval') {
                 buttons += '<button onclick="approveShowroomJob()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">Approve showroom job</button>';
             }
-            if (isAdmin) {
+            if (!j.archived && isAdmin) {
                 buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
             }
             if (!isShowroom) {
