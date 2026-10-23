@@ -114,35 +114,53 @@ def migrate_schema():
             if "password_plain" in user_cols:
                 conn.execute(text("UPDATE users SET password_plain = NULL"))
                 conn.execute(text("ALTER TABLE users DROP COLUMN password_plain"))
+        # Re-read columns. The inspector cache does not see columns added above.
         if "job_cards" in tables:
-            cols = {c["name"] for c in inspector.get_columns("job_cards")}
-            if "archived_at" in cols:
+            job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(job_cards)")).fetchall()}
+            if "archived_at" in job_cols:
                 admin = conn.execute(text("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")).fetchone()
                 admin_id = admin[0] if admin else 1
                 rows = conn.execute(text("""
-                    SELECT id, job_number FROM job_cards
+                    SELECT id, job_number, delivered_at FROM job_cards
                     WHERE archived_at IS NULL
                       AND (
                         current_location = 'Out / Delivered'
-                        OR status IN ('Delivered / Closed', 'Delivered', 'Closed')
+                        OR status = 'Delivered / Closed'
                       )
                 """)).fetchall()
+                archived = 0
+                skipped = 0
                 for row in rows:
+                    open_tasks = conn.execute(text("""
+                        SELECT COUNT(*) FROM job_tasks
+                        WHERE job_card_id = :jid
+                          AND COALESCE(status, '') != 'Completed'
+                          AND LOWER(COALESCE(task_name, '')) NOT LIKE '%wash%'
+                    """), {"jid": row[0]}).scalar()
+                    if open_tasks:
+                        conn.execute(text("""
+                            INSERT INTO audit_logs (job_card_id, user_id, action, details, timestamp)
+                            VALUES (:jid, :uid, 'Not archived: open tasks', :details, CURRENT_TIMESTAMP)
+                        """), {"jid": row[0], "uid": admin_id, "details": f"{row[1]} Not archived: open tasks"})
+                        skipped += 1
+                        continue
                     conn.execute(text("""
                         UPDATE job_cards
-                        SET archived_at = CURRENT_TIMESTAMP,
-                            archived_by = :uid,
+                        SET archived_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
+                            archived_by = NULL,
                             archive_reason = 'Archived by migration',
                             status = 'Delivered / Closed',
                             current_location = 'Out / Delivered',
                             delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
-                        WHERE id = :jid
-                    """), {"uid": admin_id, "jid": row[0]})
+                        WHERE id = :jid AND archived_at IS NULL
+                    """), {"jid": row[0]})
                     conn.execute(text("""
                         INSERT INTO job_updates (job_card_id, category, description, notes, created_by_name, created_by, created_at)
-                        VALUES (:jid, 'progress', :desc, 'Archived by migration', 'System', :uid, CURRENT_TIMESTAMP)
-                    """), {"jid": row[0], "uid": admin_id, "desc": f"Job delivered and archived {row[1]}"})
+                        VALUES (:jid, 'progress', :desc, 'Archived by migration', 'System', NULL, CURRENT_TIMESTAMP)
+                    """), {"jid": row[0], "desc": f"Job delivered and archived {row[1]}"})
                     conn.execute(text("""
                         INSERT INTO audit_logs (job_card_id, user_id, action, details, timestamp)
                         VALUES (:jid, :uid, 'Job delivered and archived', :details, CURRENT_TIMESTAMP)
                     """), {"jid": row[0], "uid": admin_id, "details": f"{row[1]} Archived by migration"})
+                    archived += 1
+                print(f"Archive migration: archived {archived}, skipped {skipped} with open non-wash tasks")

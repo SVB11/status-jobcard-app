@@ -485,7 +485,9 @@ async def api_create_job(
 
 # ---------- LIST JOBS (basic) ----------
 
-CLOSED_STATUSES = ("Delivered / Closed", "Delivered", "Closed")
+DELIVERED_STATUS = "Delivered / Closed"
+DELIVERED_LOCATION = "Out / Delivered"
+CLOSED_STATUSES = (DELIVERED_STATUS,)
 
 def active_jobs(db):
     """Every active list must start here so archived jobs stay out of the floor."""
@@ -511,10 +513,12 @@ def archive_job(db, job, user_id=None, by_name="System", reason="Job delivered a
     if not job or is_archived(job):
         return job
     now = datetime.utcnow()
-    job.status = "Delivered / Closed"
-    job.current_location = "Out / Delivered"
+    job.status = DELIVERED_STATUS
+    job.current_location = DELIVERED_LOCATION
     if not job.delivered_at:
         job.delivered_at = now
+    if user_id and not getattr(job, "delivered_by", None):
+        job.delivered_by = user_id
     job.archived_at = now
     job.archived_by = user_id
     job.archive_reason = reason
@@ -1989,7 +1993,7 @@ async def api_update_location(job_id: int, request: Request, db: Session = Depen
     location = body.get("location")
     if location not in LOCATIONS:
         raise HTTPException(status_code=400, detail="Invalid location")
-    if location == "Out / Delivered":
+    if location == DELIVERED_LOCATION:
         blockers = archive_blockers(job)
         if blockers:
             raise HTTPException(status_code=400, detail="Cannot move to Out / Delivered. Outstanding: " + "; ".join(blockers))
