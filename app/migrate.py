@@ -3,7 +3,6 @@ from .database import engine
 
 NEW_COLUMNS = {
     "users": {
-        "password_plain": "VARCHAR",
         "must_change_password": "BOOLEAN",
         "supplier_company": "VARCHAR",
     },
@@ -106,3 +105,8 @@ def migrate_schema():
                 """))
                 conn.execute(text("DROP TABLE wash_requests"))
                 conn.execute(text("ALTER TABLE wash_requests_new RENAME TO wash_requests"))
+        if "users" in tables:
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            if "password_plain" in user_cols:
+                conn.execute(text("UPDATE users SET password_plain = NULL"))
+                conn.execute(text("ALTER TABLE users DROP COLUMN password_plain"))

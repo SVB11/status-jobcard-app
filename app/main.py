@@ -945,21 +945,10 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
         log_audit(db, user_id, "Updated Task", job.id,
                   f"Task '{task.task_name}' → {new_status or old_status}" + (f" | Notes: {notes}" if notes else ""))
 
-    # Check if all tasks are completed → move job to Work Completed
+    # Work is done when every task except wash / clean is completed. Wash is after sign-off.
     all_tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job_id).all()
-    if all_tasks and all(t.status == "Completed" for t in all_tasks):
-        if job.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Delivered / Closed"):
-            job.status = "Work Completed"
-            job.work_completed_at = datetime.utcnow()
-            db.commit()
-            if user_id:
-                log_audit(db, user_id, "Work Completed", job.id, f"All tasks completed on {job.job_number}")
-            if is_showroom(job):
-                notify_signoff(db, job, f"Showroom work completed on {job.stock_number} — workshop mark ready. No sales sign-off, PDI or empty check")
-            else:
-                notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready for delivery")
-                if type_family(job.main_type) == "tanker":
-                    notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
+    if work_is_done(all_tasks):
+        if mark_work_complete(db, job, user_id):
             db.commit()
 
     # Blocked notification placeholder
@@ -1143,7 +1132,6 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "role": u.role,
                 "supplier_company": getattr(u, "supplier_company", None),
                 "is_active": u.is_active,
-                "password": getattr(u, "password_plain", None) or "(changed — not stored)",
                 "created_at": u.created_at.isoformat() if u.created_at else None
             } for u in users
         ]
@@ -1179,7 +1167,6 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
         username=username,
         full_name=full_name,
         hashed_password=auth.get_password_hash(password),
-        password_plain=password,
         must_change_password=True,
         role=role,
         supplier_company=company if role == "supplier" else None,
@@ -1223,7 +1210,6 @@ async def api_reset_password(user_id: int, request: Request, db: Session = Depen
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.hashed_password = auth.get_password_hash(new_password)
-    user.password_plain = new_password
     user.must_change_password = True
     db.commit()
     return {"success": True}
@@ -1242,7 +1228,6 @@ async def api_change_own_password(request: Request, db: Session = Depends(get_db
     if not auth.verify_password(current, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is wrong")
     user.hashed_password = auth.get_password_hash(new_password)
-    user.password_plain = new_password
     user.must_change_password = False
     db.commit()
     return {"success": True}
@@ -2158,6 +2143,10 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
 async def print_pdi_page(request: Request, job_id: int):
     return render_template("print_pdi.html", request=request, job_id=job_id)
 
+@app.get("/jobs/client-reports", response_class=HTMLResponse)
+async def client_reports_page(request: Request):
+    return render_template("client_reports.html", request=request, page_title="Client reports")
+
 @app.get("/jobs/{job_id}/client-report", response_class=HTMLResponse)
 async def client_report_page(request: Request, job_id: int, db: Session = Depends(get_db)):
     try:
@@ -2853,6 +2842,32 @@ def notify_salesman(db, job, message):
         ids.append(u.id)
     send_web_push(db, ids, "Status Job Cards", message, f"/jobs/{job.id}")
 
+def is_delivery_wash(name: str) -> bool:
+    n = (name or "").lower()
+    return "wash" in n
+
+def work_tasks(tasks):
+    return [t for t in (tasks or []) if not is_delivery_wash(getattr(t, "task_name", "") or "")]
+
+def mark_work_complete(db, job, user_id=None):
+    if job.status in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Delivered / Closed", "Pending Admin Approval"):
+        return False
+    job.status = "Work Completed"
+    job.work_completed_at = datetime.utcnow()
+    if user_id:
+        log_audit(db, user_id, "Work Completed", job.id, f"Work tasks done on {job.job_number}. Wash is only at collection")
+    if is_showroom(job):
+        notify_signoff(db, job, f"Showroom work completed on {job.stock_number} — workshop mark ready. No sales sign-off, PDI or empty check")
+    else:
+        notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready. Wash bay is only before the client collects")
+        if type_family(job.main_type) == "tanker":
+            notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
+    return True
+
+def work_is_done(tasks):
+    real = work_tasks(tasks)
+    return bool(real) and all((t.status or "") == "Completed" for t in real)
+
 def notify_signoff(db, job, message):
     notify_salesman(db, job, message)
     notify_role(db, "workshop", message, job.id)
@@ -3186,10 +3201,8 @@ async def api_supplier_update(
         job.status = "In Progress"
     if status_val == "Completed":
         all_tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == job.id).all()
-        if all_tasks and all((t.status or "") == "Completed" for t in all_tasks):
-            if job.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Delivered / Closed"):
-                job.status = "Work Completed"
-                job.work_completed_at = datetime.utcnow()
+        if work_is_done(all_tasks):
+            mark_work_complete(db, job, current_user.id)
 
     msg = f"SUPPLIER {company} on {job.stock_number}: {status_val}"
     if row.parts_needed:
@@ -3525,6 +3538,16 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
 
 @app.get("/api/jobs/signoff-queue")
 async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    open_jobs = db.query(models.JobCard).filter(~models.JobCard.status.in_(CLOSED_STATUSES)).all()
+    changed = False
+    for j in open_jobs:
+        if j.status in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Pending Admin Approval"):
+            continue
+        tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == j.id).all()
+        if work_is_done(tasks) and mark_work_complete(db, j):
+            changed = True
+    if changed:
+        db.commit()
     statuses = ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery")
     jobs = db.query(models.JobCard).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
     out = []

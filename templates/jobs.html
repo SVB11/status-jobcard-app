@@ -10,9 +10,12 @@
 {% endblock %}
 
 {% block content %}
-<div class="mb-5">
-    <h1 class="text-2xl font-bold uppercase tracking-wide">Job Cards</h1>
-    <p class="text-sm text-[#9aa6b4]">Open jobs only. Delivered jobs move to Closed.</p>
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div>
+        <h1 class="text-2xl font-bold uppercase tracking-wide">Job Cards</h1>
+        <p class="text-sm text-[#9aa6b4]">Open jobs only. Delivered jobs move to Closed.</p>
+    </div>
+    <a id="reportsBtn" href="/jobs/client-reports" class="hidden px-4 py-2 bg-green-700 text-white rounded-lg text-sm uppercase">Send client reports</a>
 </div>
 
 <div class="sticky-sub" id="filterBar">
@@ -46,7 +49,10 @@
     if (!token) window.location.href = '/login';
     if (role === 'stock') window.location.href = '/stock';
     if (role === 'supplier') window.location.href = '/supplier';
-    document.getElementById('userInfo').textContent = fullName + ' (' + role + ')';
+    if (role === 'sales' || role === 'admin' || role === 'accounts') {
+        const btn = document.getElementById('reportsBtn');
+        if (btn) btn.classList.remove('hidden');
+    }
     function logout() { localStorage.clear(); window.location.href = '/login'; }
 
     const WORKSHOP = ['yard','bay 1 reuben','bay 2 ricardo','bay 3 jonas','bay 4 josiah','bay 5 josiah 2','wash bay','test pit bay 1','test pit bay 2','test pit bay 3'];

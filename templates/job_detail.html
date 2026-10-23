@@ -492,10 +492,15 @@
         if (!tasks || tasks.length === 0) {
             html = '<p class="text-sm text-gray-400">No tasks listed</p>';
         } else {
-            const open = tasks.filter(function(t){ return t.status !== 'Completed'; });
-            const done = tasks.filter(function(t){ return t.status === 'Completed'; });
+            const open = tasks.filter(function(t){ return t.status !== 'Completed' && (t.task_name || '').toLowerCase().indexOf('wash') === -1; });
+            const wash = tasks.filter(function(t){ return (t.task_name || '').toLowerCase().indexOf('wash') !== -1; });
+            const done = tasks.filter(function(t){ return t.status === 'Completed' && (t.task_name || '').toLowerCase().indexOf('wash') === -1; });
             completed = done.length;
             html += open.map(function(t){ return taskCard(t, canEdit); }).join('');
+            if (wash.length) {
+                html += '<div class="mt-3 text-xs uppercase text-[#9aa6b4]">Wash bay — only before client collects. Does not block sign-off</div>' +
+                    wash.map(function(t){ return taskCard(t, canEdit); }).join('');
+            }
             if (done.length) {
                 html += '<details class="mt-2"><summary class="cursor-pointer text-sm text-[#7ec2ff] py-2">Completed tasks (' + done.length + ') — tap to open</summary>' +
                     done.map(function(t){ return taskCard(t, canEdit); }).join('') + '</details>';
@@ -503,7 +508,7 @@
         }
 
         document.getElementById('tasksList').innerHTML = html;
-        document.getElementById('taskProgress').textContent = completed + ' of ' + (tasks ? tasks.length : 0) + ' completed';
+        document.getElementById('taskProgress').textContent = completed + ' of ' + (tasks ? tasks.filter(function(t){ return (t.task_name || '').toLowerCase().indexOf('wash') === -1; }).length : 0) + ' completed (wash excluded)';
 
         if (canEdit) {
             document.getElementById('addTaskSection').classList.remove('hidden');

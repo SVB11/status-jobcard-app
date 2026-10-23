@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Client reports{% endblock %}
+{% block content %}
+<div class="mb-5">
+    <h1 class="text-2xl font-bold uppercase tracking-wide">Client reports</h1>
+    <p class="text-sm text-[#9aa6b4]">Send a progress report on any of your jobs. You can send again later as the job moves. Wash and in-house notes stay off the client message.</p>
+</div>
+<div id="list" class="space-y-4 text-sm">Loading your jobs...</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const token = localStorage.getItem('token') || '';
+    const fullName = localStorage.getItem('full_name') || '';
+    if (!token) window.location.href = '/login';
+
+    function waText(d) {
+        const lines = [
+            'Status Truck Sales — vehicle preparation update',
+            '',
+            'Dear ' + (d.client_name || 'Client') + ',',
+            '',
+            (d.vehicle || '') + (d.registration ? ' · ' + d.registration : '')
+        ];
+        if (d.quote) lines.push('Reference: ' + d.quote);
+        lines.push('', 'Current status: ' + (d.status_line || ''), '');
+        (d.items || []).forEach(function(it) {
+            if (!(it.status === 'Completed' || it.status === 'In progress' || it.status === 'Delayed' || it.status === 'Still in preparation')) return;
+            const extra = (it.note && it.status !== 'Completed') ? ' (' + it.note + ')' : '';
+            lines.push('- ' + it.title + ': ' + it.status + extra);
+        });
+        lines.push('', 'Next step: ' + (d.next_step || ''), '', d.salesman_name || fullName || 'Status Truck Sales', 'Sales · Status Truck Sales', 'www.statustrucksales.co.za');
+        return lines.join('\n');
+    }
+
+    async function shareOne(id) {
+        const res = await fetch('/api/jobs/' + id + '/client-report', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) { alert('Could not build the report'); return; }
+        const d = await res.json();
+        window.open('https://wa.me/?text=' + encodeURIComponent(waText(d)), '_blank');
+    }
+
+    async function pdfOne(id) {
+        const res = await fetch('/api/jobs/' + id + '/client-report.pdf', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) { alert('Could not build the PDF'); return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'progress_report.pdf';
+        a.click();
+    }
+
+    async function load() {
+        const res = await fetch('/api/jobs', { headers: { 'Authorization': 'Bearer ' + token } });
+        const data = await res.json();
+        const mine = (data.jobs || []).filter(function(j) {
+            return (j.job_purpose || 'sold') !== 'showroom' && (j.salesman_name || '') === fullName;
+        });
+        const box = document.getElementById('list');
+        if (!mine.length) { box.innerHTML = '<p class="text-[#9aa6b4]">No open sales jobs on your name.</p>'; return; }
+        box.innerHTML = mine.map(function(j) {
+            return '<div class="app-glass"><div class="glass-inner">' +
+                '<div class="font-bold">' + (j.stock_number || j.job_number) + ' · ' + (j.vehicle_description || '') + '</div>' +
+                '<div class="text-xs text-[#9aa6b4] mt-1">' + (j.client_name || '') + ' · ' + (j.status || '') + '</div>' +
+                '<div class="flex flex-wrap gap-2 mt-3">' +
+                '<button type="button" class="px-3 py-2 bg-green-700 text-white rounded text-xs uppercase" onclick="shareOne(' + j.id + ')">WhatsApp</button>' +
+                '<button type="button" class="px-3 py-2 bg-[#025daa] text-white rounded text-xs uppercase" onclick="pdfOne(' + j.id + ')">PDF</button>' +
+                '<a class="px-3 py-2 border rounded text-xs uppercase" href="/jobs/' + j.id + '/client-report">Open and choose items</a>' +
+                '</div></div></div>';
+        }).join('');
+    }
+    load();
+</script>
+{% endblock %}

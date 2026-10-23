@@ -27,7 +27,7 @@
 </div>
 <div id="signoffBox" class="hidden mb-6 rounded-xl border-2 border-green-600 p-4">
     <h2 class="font-bold uppercase tracking-wide text-green-300">Sign off / mark ready</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Work is done. Sign the PDI and mark the job ready for delivery.</p>
+    <p class="text-sm text-[#d5dde6] mb-3">Work is done. Sign the PDI and mark ready. Wash bay is only before the client collects. It does not block sign-off.</p>
     <div id="signoffList" class="space-y-2 text-sm">Loading...</div>
 </div>
 <div id="washDashBox" class="hidden mb-6 rounded-xl border-2 border-cyan-500 p-4">
@@ -58,7 +58,17 @@
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-    <a href="/jobs/create" id="createCard" class="hidden bg-white rounded-xl shadow hover:shadow-md transition">
+    <a href="/jobs/client-reports" id="reportsCard" class="hidden bg-white rounded-xl shadow hover:shadow-md transition">
+        <div class="glass-inner">
+        <div class="tile-row">
+            <div class="tile-ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+            <div>
+                <div class="text-status-blue font-bold text-lg mb-1">Client reports</div>
+                <p class="text-sm text-gray-500">Send a progress report on any of your jobs. Send again as the job moves.</p>
+            </div>
+        </div>
+        </div>
+    </a>
         <div class="glass-inner">
         <div class="tile-row">
             <div class="tile-ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 11v6M9 14h6"/></svg></div>
@@ -302,6 +312,7 @@
             show('systemStatusBox');
             show('workshopCard');
             show('createCard');
+            show('reportsCard');
             show('stockCard');
             show('stockDashBox');
             loadStockDash();
@@ -320,6 +331,7 @@
         }
         if (role === 'sales') {
             show('createCard');
+            show('reportsCard');
             show('myJobsBox');
             show('allJobsBox');
             show('bookingsBox');
@@ -712,17 +724,32 @@
             const res = await fetch('/api/notifications?user_id=' + uid, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             const data = await res.json();
             const rows = data.notifications || [];
-            const unread = data.unread || rows.filter(function(n){ return !n.is_read; }).length;
+            let sign = [];
+            try {
+                const sres = await fetch('/api/jobs/signoff-queue', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+                if (sres.ok) sign = ((await sres.json()).jobs || []);
+            } catch (e) {}
+            const unread = (data.unread || rows.filter(function(n){ return !n.is_read; }).length) + sign.length;
             if (navigator.setAppBadge) {
                 if (unread) navigator.setAppBadge(unread);
                 else if (navigator.clearAppBadge) navigator.clearAppBadge();
             }
             const box = document.getElementById('notifyList');
-            if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No notifications</p>'; return; }
-            box.innerHTML = rows.map(function(n) {
-                return '<div class="p-2 bg-gray-50 rounded ' + (n.is_read ? '' : 'border border-[#025daa]') + '">' + n.message +
-                    '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + (n.is_read ? '' : ' · new') + '</div></div>';
+            let html = '';
+            sign.forEach(function(j) {
+                const href = j.need_pdi ? ('/jobs/' + j.id + '/pdi') : ('/jobs/' + j.id);
+                html += '<a href="' + href + '" class="block p-2 rounded border border-green-600 bg-[#0f1a14]">' +
+                    '<div class="font-semibold">Ready to sign · ' + j.stock_number + ' ' + (j.vehicle_description || '') + '</div>' +
+                    '<div class="text-xs text-[#9aa6b4]">' + j.action + (j.salesman_name ? ' · ' + j.salesman_name : '') + '</div></a>';
+            });
+            if (!rows.length && !sign.length) { box.innerHTML = '<p class="text-gray-400">No notifications</p>'; return; }
+            html += rows.map(function(n) {
+                const link = n.job_card_id ? '<a href="/jobs/' + n.job_card_id + '" class="block">' : '<div>';
+                const end = n.job_card_id ? '</a>' : '</div>';
+                return link + '<div class="p-2 bg-gray-50 rounded ' + (n.is_read ? '' : 'border border-[#025daa]') + '">' + n.message +
+                    '<div class="text-xs text-gray-400">' + (n.created_at || '').replace('T',' ').substring(0,16) + (n.is_read ? '' : ' · new') + '</div></div>' + end;
             }).join('');
+            box.innerHTML = html;
             if (typeof refreshBell === 'function') refreshBell();
         } catch (err) {}
     }

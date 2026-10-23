@@ -46,7 +46,6 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
-    password_plain = Column(String, nullable=True)
     must_change_password = Column(Boolean, default=True)
     role = Column(String, nullable=False)  # sales, workshop, accounts, admin, stock, supplier
     supplier_company = Column(String, nullable=True)

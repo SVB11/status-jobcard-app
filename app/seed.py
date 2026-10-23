@@ -39,7 +39,6 @@ def seed_database():
             username=username,
             full_name=full_name,
             hashed_password=get_password_hash(password),
-            password_plain=password,
             must_change_password=False,
             role=role
         ))

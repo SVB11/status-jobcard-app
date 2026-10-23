@@ -13,6 +13,8 @@ TRUCK_PDI = [
         {"num": 6, "item": 'Mudflaps', "criteria": 'Fitted as required (4/6/8 depending on configuration). Secure and intact.'},
         {"num": 7, "item": 'Mudguard end caps', "criteria": 'Fitted and secure where applicable.'},
         {"num": 8, "item": 'Wheel indicators / markers', "criteria": 'Fitted and functional (where equipped).'},
+        {"num": 9, "item": 'Spare wheel', "criteria": 'Present, correctly mounted and secure. Tyre serviceable.'},
+        {"num": 10, "item": 'Spare wheel carrier / hanger', "criteria": 'Secure and serviceable.'},
     ]},
     {"section": '2. BRAKES & AIR SYSTEM', "items": [
         {"num": 9, "item": 'Service brakes', "criteria": 'Pads/linings adequate thickness, drums/discs serviceable, lines free of leaks, pedal firm with good feel.'},
@@ -98,6 +100,8 @@ TANKER_PDI = [
         {"num": 6, "item": 'Mudflaps', "criteria": 'Fitted as required (4/6/8). Secure.'},
         {"num": 7, "item": 'Mudguard end caps', "criteria": 'Fitted where applicable.'},
         {"num": 8, "item": 'Wheel indicators / markers', "criteria": 'Fitted and functional.'},
+        {"num": 9, "item": 'Spare wheel', "criteria": 'Present, correctly mounted and secure. Tyre serviceable.'},
+        {"num": 10, "item": 'Spare wheel carrier / hanger', "criteria": 'Secure and serviceable.'},
     ]},
     {"section": '2. BRAKES & AIR SYSTEM', "items": [
         {"num": 9, "item": 'Service brakes', "criteria": 'Pads/drums adequate, lines free of leaks, firm pedal.'},
