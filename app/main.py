@@ -132,11 +132,6 @@ def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, d
 def assert_editable(db: Session, job, user_id):
     if is_archived(job):
         raise HTTPException(status_code=400, detail="This job is archived and read-only.")
-    if not job or job.status != "Delivered / Closed":
-        return
-    u = db.query(models.User).filter(models.User.id == user_id).first() if user_id else None
-    if not u or u.role not in ("admin", "accounts"):
-        raise HTTPException(status_code=400, detail="Job is delivered and locked. Only Admin can edit.")
 
 def user_name(db: Session, user_id):
     if not user_id:
@@ -496,6 +491,24 @@ def active_jobs(db):
 def is_archived(job) -> bool:
     return bool(job and getattr(job, "archived_at", None))
 
+def is_delivery_wash_task(name: str) -> bool:
+    n = (name or "").lower()
+    return "wash" in n and "clean" in n and "delivery" in n
+
+def open_blocking_tasks(job):
+    open_names = []
+    for t in (job.tasks or []):
+        if (t.status or "") == "Completed":
+            continue
+        if is_delivery_wash_task(t.task_name):
+            continue
+        open_names.append(t.task_name or "Task")
+    return open_names
+
+def delivery_wash_open(job):
+    wash = [t for t in (job.tasks or []) if is_delivery_wash_task(getattr(t, "task_name", "") or "")]
+    return bool(wash) and not all((t.status or "") == "Completed" for t in wash)
+
 def archive_blockers(job):
     missing = []
     if is_showroom(job):
@@ -504,9 +517,8 @@ def archive_blockers(job):
     else:
         if not (job.pdi_signed_workshop and job.pdi_signed_sales):
             missing.append("Both PDI sign-offs (workshop and sales)")
-    wash = [t for t in (job.tasks or []) if is_delivery_wash(getattr(t, "task_name", "") or "")]
-    if wash and not all((t.status or "") == "Completed" for t in wash):
-        missing.append("Wash bay clean before the client collects")
+    if delivery_wash_open(job):
+        missing.append("Wash / clean for delivery must be completed before the client collects")
     return missing
 
 def archive_job(db, job, user_id=None, by_name="System", reason="Job delivered and archived"):
@@ -1413,6 +1425,9 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
             status_code=400,
             detail="Cannot close / mark ready. Add Chantelle order numbers for: " + ", ".join(p.description for p in missing)
         )
+    open_tasks = open_blocking_tasks(job)
+    if open_tasks:
+        raise HTTPException(status_code=400, detail="Cannot mark ready. Open tasks: " + "; ".join(open_tasks))
 
     if is_showroom(job) and party == "sales":
         raise HTTPException(status_code=400, detail="Showroom jobs are signed off by workshop only")
@@ -1566,6 +1581,39 @@ async def api_close_job(job_id: int, request: Request, db: Session = Depends(get
     who = user_name(db, user_id) or body.get("full_name") or "Sales"
     archive_job(db, job, user_id, who, "Job delivered and archived")
     return {"success": True, "status": job.status, "archived": True}
+
+@app.post("/api/jobs/{job_id}/reopen")
+async def api_reopen_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin_only(current_user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A reason is required to reopen")
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job or is_archived(job):
+        raise HTTPException(status_code=404, detail="Open job not found")
+    job.ready_sales = False
+    job.ready_workshop = False
+    job.ready_for_delivery_sales_at = None
+    job.ready_for_delivery_workshop_at = None
+    job.ready_sales_by = None
+    job.ready_workshop_by = None
+    if job.status == "Ready for Delivery":
+        job.status = "Work Completed"
+    db.add(models.JobUpdate(
+        job_card_id=job.id,
+        category="progress",
+        description=f"Reopened {job.job_number}",
+        notes=reason,
+        created_by_name=current_user.full_name,
+        created_by=current_user.id,
+    ))
+    log_audit(db, current_user.id, "Reopened job", job.id, f"{job.job_number} {reason}")
+    db.commit()
+    return {"success": True, "status": job.status}
 
 # ---------- PDI DIGITAL FORMS ----------
 
@@ -3698,9 +3746,12 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
             need_ready = not (j.ready_workshop if showroom else (j.ready_sales and j.ready_workshop))
         else:
             continue
-        if not (need_pdi or need_ready):
+        if not (need_pdi or need_ready or open_blocking_tasks(j)):
             continue
         action = "Sign PDI" if need_pdi else "Mark ready"
+        open_tasks = open_blocking_tasks(j)
+        if open_tasks:
+            action = "Ready - tasks outstanding"
         out.append({
             "id": j.id,
             "stock_number": j.stock_number,
@@ -3710,6 +3761,7 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
             "salesman_name": j.salesman_name,
             "need_pdi": need_pdi,
             "need_ready": need_ready,
+            "open_tasks": open_tasks,
             "action": action,
         })
     return {"jobs": out}
@@ -3940,6 +3992,23 @@ async def api_wash_status(item_id: int, request: Request, db: Session = Depends(
             models.JobCard.stock_number == wr.stock_number,
             ~models.JobCard.status.in_(CLOSED_STATUSES),
         ).order_by(models.JobCard.created_at.desc()).first()
+    if job and status == "Done":
+        notes = (wr.notes or "").lower()
+        marketing = "photo" in notes or "marketing" in notes or "showroom" in notes
+        if not marketing:
+            for t in (job.tasks or []):
+                if is_delivery_wash_task(t.task_name) and (t.status or "") != "Completed":
+                    t.status = "Completed"
+                    t.completed_at = datetime.utcnow()
+                    t.last_updated_by_name = current_user.full_name
+            db.add(models.JobUpdate(
+                job_card_id=job.id,
+                category="wash",
+                description="Wash / clean for delivery completed",
+                notes=wr.notes,
+                created_by_name=current_user.full_name,
+                created_by=current_user.id,
+            ))
     if job and status == "At wash bay" and "Wash Bay" in LOCATIONS:
         job.current_location = "Wash Bay"
         wr.job_card_id = job.id

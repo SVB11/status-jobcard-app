@@ -483,8 +483,7 @@
     }
 
     function renderTasks(tasks) {
-        const canEdit = canEditTasks() && currentJob && !currentJob.archived &&
-            !['Delivered / Closed', 'Ready for Delivery', 'PDI Completed'].includes(currentJob.status);
+        const canEdit = canEditTasks() && currentJob && !currentJob.archived;
 
         let completed = 0;
         let html = '';
@@ -696,8 +695,8 @@
             if (!j.archived && isAdmin && j.status === 'Pending Admin Approval') {
                 buttons += '<button onclick="approveShowroomJob()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">Approve showroom job</button>';
             }
-            if (!j.archived && isAdmin) {
-                buttons += '<button onclick="deleteJob()" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Delete Job</button>';
+            if (isAdmin && !j.archived) {
+                buttons += '<button onclick="reopenJob()" class="px-4 py-2 bg-orange-700 text-white rounded-lg text-sm">Reopen job</button>';
             }
             if (!isShowroom) {
                 buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
@@ -947,6 +946,20 @@
         } catch (err) { alert('Connection error'); }
     }
 
+    async function reopenJob() {
+        const reason = prompt('Reason to reopen this job:');
+        if (!reason) return;
+        const res = await fetch('/api/jobs/' + jobId + '/reopen', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.detail || 'Could not reopen'); return; }
+        alert('Job reopened. Ready sign-off cleared. PDI stays.');
+        loadJob();
+    }
+
     async function closeJob() {
         if (!confirm('Close this job as Delivered? Make sure documents are printed and saved to Admin computer first.')) return;
         try {
@@ -1028,7 +1041,7 @@
         const rows = j.supplies || [];
         const open = rows.filter(function(s){ return s.status !== 'Completed'; });
         const closed = rows.filter(function(s){ return s.status === 'Completed'; });
-        const can = canEditTasks() && j.status !== 'Delivered / Closed';
+        const can = canEditTasks() && !j.archived;
         if (form) form.classList.toggle('hidden', !can);
         fillSupplyTypes();
         booked.innerHTML = '<div class="text-xs font-semibold uppercase mb-1">Booked / to supply</div>' + (open.length ? open.map(function(s){

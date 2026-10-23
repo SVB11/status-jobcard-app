@@ -50,6 +50,11 @@
             position: relative;
             z-index: 1;
         }
+        header a, header button, main a, main button, main input, main select, main textarea {
+            position: relative;
+            z-index: 2;
+            pointer-events: auto;
+        }
         .bg-status-blue { background-color: #025daa; }
         .text-status-blue { color: #5eb0ff; }
         .border-status-blue { border-color: #025daa; }
@@ -204,7 +209,7 @@
                 <a href="/admin/third-parties" id="navTp" class="hidden">3rd Parties</a>
                 <a href="/stock" id="navStock" class="hidden">Stock</a>
                 <a href="/supplier" id="navSupplier" class="hidden">Supplier</a>
-                <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 rounded-lg">Create</a>
+                <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 rounded-lg" style="position:relative;z-index:60;">Create</a>
                 <button type="button" onclick="enablePings()">Pings</button>
             </nav>
         </div>
