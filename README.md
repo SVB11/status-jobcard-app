@@ -38,8 +38,9 @@ Change these passwords immediately after going live.
 1. Create a free account at https://railway.app
 2. Create a new project → Deploy from local folder / GitHub
 3. Railway will detect the Procfile and requirements.txt
-4. Set environment variables (recommended):
-   - SECRET_KEY = a long random string
+4. Set environment variables (required):
+   - SECRET_KEY = set a long random value in Railway
+   - Optional: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (phone pings stay off if unset)
 5. Railway gives you a public URL automatically
 
 ## Custom Domain

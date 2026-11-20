@@ -206,6 +206,7 @@
                 <a href="/locations" id="navLocations" class="hidden">Locations</a>
                 <a href="/archive" id="navArchive" class="hidden">Archive</a>
                 <a href="/admin/users" id="navUsers" class="hidden">Users</a>
+                <a href="/admin/overrides" id="navOverrides" class="hidden">Overrides</a>
                 <a href="/admin/third-parties" id="navTp" class="hidden">3rd Parties</a>
                 <a href="/stock" id="navStock" class="hidden">Stock</a>
                 <a href="/supplier" id="navSupplier" class="hidden">Supplier</a>
@@ -254,6 +255,7 @@
         await navigator.serviceWorker.ready;
         const keyRes = await fetch('/api/push/public-key');
         const keyData = await keyRes.json();
+        if (!keyData.key) { alert('Phone pings are not configured on the server.'); return; }
         const sub = await reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(keyData.key)
@@ -281,8 +283,10 @@
         if (s && r === 'supplier') s.classList.remove('hidden');
         var u = document.getElementById('navUsers');
         var t = document.getElementById('navTp');
+        var ov = document.getElementById('navOverrides');
         if (u && isAdm) u.classList.remove('hidden');
         if (t && isAdm) t.classList.remove('hidden');
+        if (ov && isAdm) ov.classList.remove('hidden');
         var locNav = document.getElementById('navLocations');
         if (locNav && (r === 'workshop' || r === 'admin' || r === 'accounts' || nm === 'sebastian van biljon')) locNav.classList.remove('hidden');
         if (ar && isArchiveAdmin) ar.classList.remove('hidden');
@@ -299,6 +303,9 @@
         if (r === 'marketing') {
             var nc2 = document.getElementById('navCreate');
             if (nc2) nc2.classList.add('hidden');
+        }
+        if (localStorage.getItem('token') && localStorage.getItem('must_change_password') === '1' && window.location.pathname !== '/set-password') {
+            window.location.href = '/set-password';
         }
     })();
     async function refreshBell() {

@@ -46,7 +46,8 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
-    must_change_password = Column(Boolean, default=True)
+    must_change_password = Column(Boolean, default=False)
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
     role = Column(String, nullable=False)  # sales, workshop, accounts, admin, stock, supplier
     supplier_company = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -112,6 +113,7 @@ class JobCard(Base):
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     archive_reason = Column(Text, nullable=True)
+    admin_override = Column(Boolean, default=False)
 
     # Dual sign-offs
     pdi_signed_workshop = Column(Boolean, default=False)
@@ -194,6 +196,23 @@ class AuditLog(Base):
 
     user = relationship("User", back_populates="audit_logs")
     job_card = relationship("JobCard", back_populates="audit_logs")
+
+class IntegrityEvent(Base):
+    """Overrides, bulk completions and reopens. Admin Overrides report reads this."""
+    __tablename__ = "integrity_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    event_type = Column(String, nullable=False)
+    side = Column(String, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    on_behalf_of = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    override = Column(Boolean, default=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    job_card = relationship("JobCard")
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class ThirdPartyBooking(Base):
