@@ -61,6 +61,7 @@
     <!-- Users List -->
     <div class="lg:col-span-2 bg-white rounded-xl shadow p-5">
         <h2 class="font-semibold text-status-blue mb-4">All Users</h2>
+        <button type="button" onclick="forceResetAll()" class="mb-3 px-3 py-2 bg-orange-700 text-white text-sm rounded uppercase">Force reset for all users</button>
         <div id="usersList" class="space-y-2">
             <p class="text-sm text-gray-400">Loading...</p>
         </div>
@@ -122,6 +123,7 @@
                     '<div class="font-medium text-sm">' + u.full_name + ' ' + roleBadge(u.role) + 
                     (!u.is_active ? ' <span class="text-xs text-red-500">(inactive)</span>' : '') + '</div>' +
                     '<div class="text-xs text-gray-500">@' + u.username + (u.supplier_company ? ' · ' + u.supplier_company : '') + '</div>' +
+                    '<div class="text-xs text-gray-400">Last password change: ' + (u.password_changed_at || '—') + '</div>' +
                     '</div>' +
                     '<div class="flex gap-2">' +
                     '<button onclick="toggleUser(' + u.id + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' + 
@@ -172,6 +174,18 @@
             msg.classList.remove('hidden');
         }
     });
+
+    async function forceResetAll() {
+        if (!confirm('Force every user to set a new password on next login?')) return;
+        const res = await fetch('/api/admin/users/force-reset', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) { alert(data.detail || 'Could not force reset'); return; }
+        alert('Done. ' + (data.count || 0) + ' users must set a new password.');
+        loadUsers();
+    }
 
     async function toggleUser(id) {
         try {
