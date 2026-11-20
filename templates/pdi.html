@@ -158,7 +158,7 @@
             if ((role === 'workshop' || role === 'admin') && !job.pdi_signed_workshop) {
                 btns += '<button type="button" onclick="signPDI(\'workshop\')" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Workshop</button> ';
             }
-            if ((role === 'sales' || role === 'admin') && !job.pdi_signed_sales) {
+            if (((role === 'sales' && (job.salesman_name || '').trim().toLowerCase() === (fullName || '').trim().toLowerCase()) || role === 'admin') && !job.pdi_signed_sales) {
                 btns += '<button type="button" onclick="signPDI(\'sales\')" class="px-4 py-2 bg-status-blue text-white rounded-lg text-sm">Sign as Sales</button> ';
             }
             if (job.pdi_signed_workshop && job.pdi_signed_sales) {
@@ -230,11 +230,25 @@
 
     async function signPDI(party) {
         if (!confirm('Sign this PDI as ' + party + '?')) return;
+        const payload = { party: party, user_id: userId ? parseInt(userId) : null };
+        const role = (localStorage.getItem('role') || '').toLowerCase();
+        if ((role === 'admin' || role === 'accounts') && confirm('Signing the other side? Use admin override.')) {
+            const resU = await fetch('/api/admin/users', { headers: { 'Authorization': 'Bearer ' + token } });
+            const users = await resU.json().catch(function(){ return {}; });
+            const people = (users.users || []).filter(function(u){ return u.role === 'sales' || u.role === 'workshop'; });
+            const names = people.map(function(u){ return u.id + ' ' + u.full_name + ' (' + u.role + ')'; }).join('\n');
+            const pick = prompt('Signing on behalf of. Type the user id:\n' + names);
+            const reason = prompt('Reason for admin override (at least 15 characters):');
+            if (!pick || !reason || reason.trim().length < 15) { alert('Override needs a named user and a 15 character reason.'); return; }
+            payload.override = true;
+            payload.on_behalf_of = parseInt(pick, 10);
+            payload.reason = reason.trim();
+        }
         try {
             const res = await fetch('/api/jobs/' + jobId + '/pdi/sign', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ party: party, user_id: userId ? parseInt(userId) : null })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) { alert(data.detail || 'Failed'); return; }

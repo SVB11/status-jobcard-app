@@ -671,8 +671,9 @@
             }
             const isShowroom = (j.job_purpose || 'sold') === 'showroom';
             // Ready for Delivery - both parties. Showroom skips PDI.
+            const isJobSalesman = (j.salesman_name || '').trim().toLowerCase() === (fullName || '').trim().toLowerCase();
             if (!j.archived && (j.status === 'Work Completed' || j.status === 'PDI Completed' || j.status === 'Ready for Delivery')) {
-                if (!isShowroom && (role === 'sales' || isAdmin)) {
+                if (!isShowroom && (isJobSalesman || isAdmin)) {
                     buttons += '<button onclick="markReady(\x27sales\x27)" class="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm hover:bg-teal-700">Mark Ready (Sales)</button>';
                 }
                 if (isWorkshop) {
@@ -695,8 +696,8 @@
             if (!j.archived && isAdmin && j.status === 'Pending Admin Approval') {
                 buttons += '<button onclick="approveShowroomJob()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">Approve showroom job</button>';
             }
-            if (isAdmin && !j.archived) {
-                buttons += '<button onclick="reopenJob()" class="px-4 py-2 bg-orange-700 text-white rounded-lg text-sm">Reopen job</button>';
+            if (j.admin_override) {
+                buttons = '<span class="px-3 py-2 bg-orange-600 text-white rounded-lg text-xs font-bold uppercase">Admin override</span>' + buttons;
             }
             if (!isShowroom) {
                 buttons += '<a href="/jobs/' + jobId + '/print-pdi" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Print PDI</a>';
@@ -722,7 +723,7 @@
                 if ((role === 'workshop' || isAdmin) && !j.empty_signed_workshop) {
                     eb += '<button type="button" onclick="signEmpty(\'workshop\')" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Workshop sign empty</button>';
                 }
-                if ((role === 'sales' || isAdmin) && !j.empty_signed_sales) {
+                if (((role === 'sales' && (j.salesman_name || '').trim().toLowerCase() === (fullName || '').trim().toLowerCase()) || isAdmin) && !j.empty_signed_sales) {
                     eb += '<button type="button" onclick="signEmpty(\'sales\')" class="px-4 py-2 bg-orange-600 text-white text-sm rounded">Sales sign empty</button>';
                 }
                 if (j.empty_signed_workshop && j.empty_signed_sales) {
@@ -736,7 +737,53 @@
         }
     }
 
+    async function overrideFields() {
+        if (!isAdmin) return null;
+        const res = await fetch('/api/admin/users', { headers: { 'Authorization': 'Bearer ' + token } });
+        const data = await res.json().catch(function(){ return {}; });
+        const people = (data.users || []).filter(function(u){ return u.role === 'sales' || u.role === 'workshop'; });
+        if (!people.length) return null;
+        const names = people.map(function(u){ return u.id + ' ' + u.full_name + ' (' + u.role + ')'; }).join('\n');
+        const pick = prompt('Signing on behalf of. Type the user id:\n' + names);
+        if (!pick) return null;
+        const id = parseInt(pick, 10);
+        const reason = prompt('Reason for admin override (at least 15 characters):');
+        if (!reason || reason.trim().length < 15) { alert('Reason must be at least 15 characters.'); return null; }
+        return { override: true, on_behalf_of: id, reason: reason.trim() };
+    }
+
     async function updateTaskStatus(taskId, newStatus) {
+        const task = (currentJob && currentJob.tasks || []).find(function(t){ return t.id === taskId; });
+        const payload = {
+            status: newStatus,
+            user_id: userId ? parseInt(userId) : null,
+            full_name: fullName
+        };
+        const name = ((task && task.task_name) || '').toLowerCase();
+        const isTest = /roadworthy|brake test|pressure test|barrel test|calibration|dekra|slp|3rd party|third party/.test(name);
+        if (newStatus === 'Completed' && isTest) {
+            const result = prompt('Result for ' + task.task_name + ': Pass, Fail or Repaired');
+            if (!result || ['pass','fail','repaired'].indexOf(result.trim().toLowerCase()) === -1) { alert('Result must be Pass, Fail or Repaired.'); return; }
+            const note = prompt('Reference or note for ' + task.task_name + ':');
+            if (!note || !note.trim()) { alert('A reference or note is required.'); return; }
+            payload.test_result = result.trim().charAt(0).toUpperCase() + result.trim().slice(1).toLowerCase();
+            payload.notes = note.trim();
+            if (payload.test_result === 'Fail') {
+                const fails = prompt('Fail list. Separate items with a semicolon:');
+                if (!fails || !fails.trim()) { alert('A fail list is required.'); return; }
+                payload.fail_list = fails.trim();
+            }
+        }
+        if (newStatus === 'Completed') {
+            const recent = (currentJob && currentJob.tasks || []).filter(function(t){
+                return t.completed_by === parseInt(userId, 10) && t.completed_at && (Date.now() - new Date(t.completed_at).getTime()) < 60000;
+            }).length;
+            if (recent >= 3) {
+                const note = prompt('You completed more than 3 tasks in 60 seconds. Confirmation note:');
+                if (!note || !note.trim()) { alert('A confirmation note is required.'); return; }
+                payload.bulk_note = note.trim();
+            }
+        }
         try {
             const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
                 method: 'POST',
@@ -744,11 +791,7 @@
                     'Authorization': 'Bearer ' + token,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    status: newStatus,
-                    user_id: userId ? parseInt(userId) : null,
-                    full_name: fullName
-                })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) {
@@ -756,7 +799,6 @@
                 loadJob();
                 return;
             }
-            // Refresh to show new job status if it changed
             loadJob();
         } catch (err) {
             alert('Connection error');
@@ -933,11 +975,17 @@
     }
     async function markReady(party) {
         if (!confirm('Mark this job as Ready for Delivery (' + party + ')?')) return;
+        const payload = { party: party, user_id: userId ? parseInt(userId) : null };
+        if (isAdmin && confirm('Signing the other side? Use admin override.')) {
+            const extra = await overrideFields();
+            if (!extra) return;
+            Object.assign(payload, extra);
+        }
         try {
             const res = await fetch('/api/jobs/' + jobId + '/ready', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ party: party, user_id: userId ? parseInt(userId) : null })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) { alert(data.detail || 'Failed'); return; }
@@ -947,8 +995,8 @@
     }
 
     async function reopenJob() {
-        const reason = prompt('Reason to reopen this job:');
-        if (!reason) return;
+        const reason = prompt('Reason to reopen this job (at least 15 characters):');
+        if (!reason || reason.trim().length < 15) { alert('Reason must be at least 15 characters.'); return; }
         const res = await fetch('/api/jobs/' + jobId + '/reopen', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
