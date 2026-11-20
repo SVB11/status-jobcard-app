@@ -4,6 +4,7 @@ from .database import engine
 NEW_COLUMNS = {
     "users": {
         "must_change_password": "BOOLEAN",
+        "password_changed_at": "DATETIME",
         "supplier_company": "VARCHAR",
     },
     "job_cards": {
@@ -34,6 +35,7 @@ NEW_COLUMNS = {
         "archived_by": "INTEGER",
         "archive_reason": "TEXT",
         "delivered_at": "DATETIME",
+        "admin_override": "BOOLEAN",
     },
     "part_items": {
         "quantity": "VARCHAR",
@@ -123,10 +125,7 @@ def migrate_schema():
                 rows = conn.execute(text("""
                     SELECT id, job_number, delivered_at FROM job_cards
                     WHERE archived_at IS NULL
-                      AND (
-                        current_location = 'Out / Delivered'
-                        OR status = 'Delivered / Closed'
-                      )
+                      AND status = 'Delivered / Closed'
                 """)).fetchall()
                 archived = 0
                 skipped = 0
@@ -138,10 +137,16 @@ def migrate_schema():
                           AND LOWER(COALESCE(task_name, '')) NOT LIKE '%wash%'
                     """), {"jid": row[0]}).scalar()
                     if open_tasks:
-                        conn.execute(text("""
-                            INSERT INTO audit_logs (job_card_id, user_id, action, details, timestamp)
-                            VALUES (:jid, :uid, 'Not archived: open tasks', :details, CURRENT_TIMESTAMP)
-                        """), {"jid": row[0], "uid": admin_id, "details": f"{row[1]} Not archived: open tasks"})
+                        already = conn.execute(text("""
+                            SELECT COUNT(*) FROM audit_logs
+                            WHERE job_card_id = :jid
+                              AND action = 'Not archived: open tasks'
+                        """), {"jid": row[0]}).scalar()
+                        if not already:
+                            conn.execute(text("""
+                                INSERT INTO audit_logs (job_card_id, user_id, action, details, timestamp)
+                                VALUES (:jid, :uid, 'Not archived: open tasks', :details, CURRENT_TIMESTAMP)
+                            """), {"jid": row[0], "uid": admin_id, "details": f"{row[1]} Not archived: open tasks"})
                         skipped += 1
                         continue
                     conn.execute(text("""
@@ -149,10 +154,11 @@ def migrate_schema():
                         SET archived_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
                             archived_by = NULL,
                             archive_reason = 'Archived by migration',
-                            status = 'Delivered / Closed',
                             current_location = 'Out / Delivered',
                             delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
-                        WHERE id = :jid AND archived_at IS NULL
+                        WHERE id = :jid
+                          AND archived_at IS NULL
+                          AND status = 'Delivered / Closed'
                     """), {"jid": row[0]})
                     conn.execute(text("""
                         INSERT INTO job_updates (job_card_id, category, description, notes, created_by_name, created_by, created_at)
