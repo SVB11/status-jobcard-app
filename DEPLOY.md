@@ -5,6 +5,8 @@ Live site: https://www.stsjobcards.co.za
 ## One-time Railway setup
 1. Service → Volumes → add volume, mount path `/data`
 2. Service → Variables → `SQLITE_PATH` = `/data/status_jobcard.db`
+   Set `SECRET_KEY` to a long random value in Railway (required; the app will not start without it).
+   Optional: `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` for phone pings. If unset, the app starts and pings stay off.
 3. After the first jobs exist, Admin dashboard → Download database backup
 4. Save that `.db` on the office PC
 
