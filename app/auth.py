@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import hashlib
 import os
 from typing import Optional
 from jose import JWTError, jwt
@@ -15,7 +16,25 @@ from . import models
 from .database import get_db
 
 # Security settings
-SECRET_KEY = os.getenv("SECRET_KEY", "status-truck-sales-jobcard-secret-key-change-in-production-2026")
+# SHA-256 of the old hardcoded default, which has been removed from the repo.
+_UNSAFE_SECRET_KEY_SHA256 = "1dbc3dd6eb735bc04992acb26eb77e875e641a5cfa3a2485d25a820337520eec"
+
+def _load_secret_key() -> str:
+    value = os.getenv("SECRET_KEY")
+    if value is not None:
+        value = value.strip()
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest() if value else ""
+    if (
+        not value
+        or len(value) < 32
+        or digest == _UNSAFE_SECRET_KEY_SHA256
+    ):
+        raise RuntimeError(
+            "SECRET_KEY is missing or unsafe - set it in Railway Variables."
+        )
+    return value
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days — phones stay signed in
 
