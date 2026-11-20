@@ -14,6 +14,8 @@ Site: https://www.stsjobcards.co.za
 ## Railway (do once)
 Volume mount: /data
 Variable: SQLITE_PATH=/data/status_jobcard.db
+Variable: SECRET_KEY = set a long random value in Railway (required)
+Optional: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (phone pings stay off if unset)
 
 ## Every code update
 Copy code only. Never upload status_jobcard.db. Never delete the volume.
