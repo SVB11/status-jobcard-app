@@ -176,7 +176,7 @@ def build_work_pdf(job, workshop_name, sales_name):
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job.stock_number} completed work")
     story = []
-    story += header("COMPLETED WORK", f"Job card &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["FILE COPY", datetime.utcnow().strftime("%d %b %Y"), job.status or ""])
+    story += header("COMPLETED WORK", f"Job card &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), job.status or ""])
     story.append(info_block(vehicle_pairs(job)))
     done, open_rows = [], []
     for t in job.tasks or []:
@@ -216,7 +216,7 @@ def build_pdi_pdf(job, items, workshop_name, sales_name):
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job.stock_number} PDI")
     story = []
-    story += header("PDI CHECKLIST", f"Pre-delivery inspection &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["FILE COPY", datetime.utcnow().strftime("%d %b %Y"), "PDI signed" if (workshop_name and sales_name) else job.status or ""])
+    story += header("PDI CHECKLIST", f"Pre-delivery inspection &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), "PDI signed" if (workshop_name and sales_name) else job.status or ""])
     story.append(info_block(vehicle_pairs(job)[:10]))
     rows = []
     for item in items:

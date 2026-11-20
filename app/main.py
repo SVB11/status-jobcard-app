@@ -9,7 +9,7 @@ import os
 import json
 import uuid
 
-from .database import engine, get_db, Base, SQLITE_FILE
+from .database import engine, get_db, Base, SQLITE_FILE, SessionLocal
 from . import models, auth
 from .seed import seed_database
 from .pdf_forms import build_pdi_pdf, build_work_pdf
@@ -31,6 +31,20 @@ LOCK_MINUTES = 15
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    path = request.url.path
+    allowed = path in ("/set-password", "/login", "/token", "/api/me/set-password", "/health", "/sw.js", "/manifest.json") or path.startswith("/static/") or path.startswith("/uploads/")
+    if not allowed:
+        raw = auth.token_from_request(request)
+        if raw:
+            db = SessionLocal()
+            try:
+                user = auth._user_from_token_string(raw, db)
+                if user and getattr(user, "must_change_password", False):
+                    if path.startswith("/api/"):
+                        return JSONResponse({"detail": "Set a new password before using the app."}, status_code=403)
+                    return RedirectResponse(url="/set-password")
+            finally:
+                db.close()
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -133,6 +147,56 @@ def assert_editable(db: Session, job, user_id):
     if is_archived(job):
         raise HTTPException(status_code=400, detail="This job is archived and read-only.")
 
+def is_job_salesman(job, user) -> bool:
+    if not job or not user:
+        return False
+    return (job.salesman_name or "").strip().casefold() == (user.full_name or "").strip().casefold()
+
+def assert_sales_owner(db, job, user, body, action):
+    if is_job_salesman(job, user):
+        return
+    if user and user.role == "admin" and body.get("override"):
+        named = db.query(models.User).filter(models.User.id == body.get("on_behalf_of")).first()
+        if named and is_job_salesman(job, named):
+            return
+    who = job.salesman_name or "the salesman who opened this job"
+    raise HTTPException(status_code=400, detail=f"Only {who} can {action}. Another salesman cannot sign this job.")
+
+def is_test_task(name: str) -> bool:
+    n = (name or "").lower()
+    keys = ("roadworthy", "brake test", "pressure test", "barrel test", "calibration", "dekra", "slp")
+    if any(k in n for k in keys):
+        return True
+    return "3rd party" in n or "third party" in n or "third-party" in n
+
+def require_other_side(db, job, user_id, other_by, side_label, body):
+    if not user_id or not other_by or int(other_by) != int(user_id):
+        return None
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=400, detail=f"You already signed the other side of {side_label}. One person cannot sign both sides.")
+    reason = (body.get("reason") or "").strip()
+    on_behalf = body.get("on_behalf_of")
+    if not body.get("override") or len(reason) < 15 or not on_behalf:
+        raise HTTPException(status_code=400, detail="Admin override needs 'Signing on behalf of' a named sales or workshop user, and a reason of at least 15 characters.")
+    named = db.query(models.User).filter(models.User.id == on_behalf, models.User.role.in_(("sales", "workshop"))).first()
+    if not named:
+        raise HTTPException(status_code=400, detail="Signing on behalf of must be a named sales or workshop user.")
+    return named
+
+def record_override(db, job, user_id, named, reason, side):
+    job.admin_override = True
+    db.add(models.IntegrityEvent(
+        job_card_id=job.id,
+        event_type="override",
+        side=side,
+        user_id=user_id,
+        on_behalf_of=named.id,
+        reason=reason,
+        override=True,
+    ))
+    log_audit(db, user_id, "Admin override", job.id, f"{side} on behalf of {named.full_name}. {reason}")
+
 def user_name(db: Session, user_id):
     if not user_id:
         return None
@@ -147,8 +211,10 @@ def parts_missing_order_numbers(db: Session, job_id: int):
 
 @app.get("/api/push/public-key")
 async def api_push_public_key():
-    from .vapid import VAPID_PUBLIC_KEY
-    return {"key": VAPID_PUBLIC_KEY}
+    from .vapid import VAPID_PUBLIC_KEY, PUSH_ENABLED
+    if not PUSH_ENABLED or not VAPID_PUBLIC_KEY:
+        return {"key": None, "enabled": False}
+    return {"key": VAPID_PUBLIC_KEY, "enabled": True}
 
 @app.post("/api/push/subscribe")
 async def api_push_subscribe(request: Request, db: Session = Depends(get_db)):
@@ -217,9 +283,43 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return resp
 
+@app.get("/set-password", response_class=HTMLResponse)
+async def set_password_page(request: Request):
+    return render_template("set_password.html", request=request, page_title="Set new password")
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return render_template("login.html", request=request)
+
+@app.post("/api/me/set-password")
+async def api_set_password(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    body = await request.json()
+    current = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+    if len(new_password) < 10:
+        raise HTTPException(status_code=400, detail="New password must be at least 10 characters")
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not auth.verify_password(current, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is wrong")
+    if auth.verify_password(new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="New password cannot be the same as the old one")
+    user.hashed_password = auth.get_password_hash(new_password)
+    user.must_change_password = False
+    user.password_changed_at = datetime.utcnow()
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/admin/users/force-reset")
+async def api_force_reset_all(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    users = db.query(models.User).all()
+    for u in users:
+        u.must_change_password = True
+    log_audit(db, current_user.id, "Force password reset", None, f"must_change_password set for {len(users)} users")
+    db.commit()
+    return {"success": True, "count": len(users)}
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -823,7 +923,8 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             "test_result": getattr(t, "test_result", None),
             "fail_list": getattr(t, "fail_list", None),
             "providers": providers_for_task_db(db, t.task_name),
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "completed_by": t.completed_by
         })
 
     updates = []
@@ -909,6 +1010,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
         "pdi_signed_sales": job.pdi_signed_sales,
         "pdi_signed_workshop_by_name": user_name(db, job.pdi_signed_workshop_by),
         "pdi_signed_sales_by_name": user_name(db, job.pdi_signed_sales_by),
+        "admin_override": bool(getattr(job, "admin_override", False)),
         "pdi_signed_workshop_at": job.pdi_signed_workshop_at.isoformat() if job.pdi_signed_workshop_at else None,
         "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None,
         "is_tanker": type_family(job.main_type) == "tanker",
@@ -1054,6 +1156,41 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     if new_status and new_status not in allowed_statuses:
         raise HTTPException(status_code=400, detail="Invalid status")
 
+    if new_status == "Completed" and is_test_task(task.task_name):
+        result = (task.test_result or body.get("test_result") or "").strip()
+        note = (body.get("notes") if notes is not None else task.notes) or ""
+        reference = (body.get("reference") or "").strip() or note.strip()
+        if result not in ("Pass", "Fail", "Repaired"):
+            raise HTTPException(status_code=400, detail=f"{task.task_name} needs a result: Pass, Fail or Repaired.")
+        if not reference:
+            raise HTTPException(status_code=400, detail=f"{task.task_name} needs a reference or note before it can be completed.")
+        if result == "Fail" and not ((body.get("fail_list") or task.fail_list or "").strip()):
+            raise HTTPException(status_code=400, detail=f"{task.task_name} failed. Add the fail list before completing.")
+        task.test_result = result
+        if reference and not task.notes:
+            task.notes = reference
+
+    if new_status == "Completed" and user_id:
+        window = datetime.utcnow() - timedelta(seconds=60)
+        recent = db.query(models.JobTask).filter(
+            models.JobTask.job_card_id == job_id,
+            models.JobTask.completed_by == user_id,
+            models.JobTask.completed_at != None,
+            models.JobTask.completed_at >= window,
+        ).count()
+        if recent >= 3:
+            note = (body.get("bulk_note") or "").strip()
+            if not note:
+                raise HTTPException(status_code=400, detail="Bulk completion: more than 3 tasks in 60 seconds. Add a confirmation note.")
+            db.add(models.IntegrityEvent(
+                job_card_id=job.id,
+                event_type="bulk",
+                side=task.task_name,
+                user_id=user_id,
+                reason=note,
+            ))
+            log_audit(db, user_id, "Bulk completion", job.id, f"{task.task_name}. {note}")
+
     old_status = task.status
 
     if new_status:
@@ -1189,6 +1326,31 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
 async def admin_users_page(request: Request):
     return render_template("admin_users.html", request=request, page_title="User Management")
 
+@app.get("/admin/overrides", response_class=HTMLResponse)
+async def overrides_page(request: Request):
+    return render_template("overrides.html", request=request, page_title="Overrides")
+
+@app.get("/api/admin/overrides")
+async def api_overrides(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    rows = db.query(models.IntegrityEvent).order_by(models.IntegrityEvent.timestamp.desc()).limit(400).all()
+    out = []
+    for e in rows:
+        job = db.query(models.JobCard).filter(models.JobCard.id == e.job_card_id).first()
+        out.append({
+            "job_id": e.job_card_id,
+            "job_number": job.job_number if job else "",
+            "stock_number": job.stock_number if job else "",
+            "event_type": e.event_type,
+            "side": e.side,
+            "who": user_name(db, e.user_id),
+            "on_behalf_of": user_name(db, e.on_behalf_of),
+            "reason": e.reason,
+            "override": bool(e.override),
+            "when": e.timestamp.isoformat() if e.timestamp else None,
+        })
+    return {"events": out}
+
 @app.get("/admin/third-parties", response_class=HTMLResponse)
 async def admin_third_parties_page(request: Request):
     return render_template("admin_third_parties.html", request=request, page_title="3rd Parties")
@@ -1293,7 +1455,8 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "role": u.role,
                 "supplier_company": getattr(u, "supplier_company", None),
                 "is_active": u.is_active,
-                "created_at": u.created_at.isoformat() if u.created_at else None
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "password_changed_at": u.password_changed_at.date().isoformat() if getattr(u, "password_changed_at", None) else None
             } for u in users
         ]
     }
@@ -1399,7 +1562,7 @@ def is_showroom(job) -> bool:
     return (getattr(job, "job_purpose", None) or "sold").strip().lower() == "showroom"
 
 @app.post("/api/jobs/{job_id}/ready")
-async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1418,6 +1581,7 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
 
     user_id = body.get("user_id")
     party = body.get("party")  # "sales" or "workshop"
+    override_user = None
 
     missing = parts_missing_order_numbers(db, job_id)
     if missing and party == "workshop":
@@ -1432,18 +1596,23 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     if is_showroom(job) and party == "sales":
         raise HTTPException(status_code=400, detail="Showroom jobs are signed off by workshop only")
     if party == "sales":
+        assert_sales_owner(db, job, current_user, body, "sign this job off")
+        override_user = require_other_side(db, job, user_id, job.ready_workshop_by, "ready for delivery", body)
         job.ready_sales = True
         job.ready_for_delivery_sales_at = datetime.utcnow()
-        job.ready_sales_by = user_id
+        job.ready_sales_by = override_user.id if override_user else user_id
     elif party == "workshop":
+        override_user = require_other_side(db, job, user_id, job.ready_sales_by, "ready for delivery", body)
         job.ready_workshop = True
         job.ready_for_delivery_workshop_at = datetime.utcnow()
-        job.ready_workshop_by = user_id
+        job.ready_workshop_by = override_user.id if override_user else user_id
         if is_showroom(job):
             job.ready_sales = True
             job.ready_for_delivery_sales_at = datetime.utcnow()
     else:
         raise HTTPException(status_code=400, detail="party must be 'sales' or 'workshop'")
+    if override_user:
+        record_override(db, job, user_id, override_user, (body.get("reason") or "").strip(), f"Ready {party}")
 
     if job.ready_sales and job.ready_workshop:
         job.status = "Ready for Delivery"
@@ -1491,13 +1660,18 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
     if party not in ("workshop", "sales"):
         raise HTTPException(status_code=400, detail="Workshop or sales must sign the empty check")
     if party == "workshop":
+        override_user = require_other_side(db, job, current_user.id, job.empty_signed_sales_by, "the tanker empty check", body)
         job.empty_signed_workshop = True
-        job.empty_signed_workshop_by = current_user.id
+        job.empty_signed_workshop_by = override_user.id if override_user else current_user.id
         job.empty_signed_workshop_at = datetime.utcnow()
     else:
+        assert_sales_owner(db, job, current_user, body, "sign the tanker empty check")
+        override_user = require_other_side(db, job, current_user.id, job.empty_signed_workshop_by, "the tanker empty check", body)
         job.empty_signed_sales = True
-        job.empty_signed_sales_by = current_user.id
+        job.empty_signed_sales_by = override_user.id if override_user else current_user.id
         job.empty_signed_sales_at = datetime.utcnow()
+    if override_user:
+        record_override(db, job, current_user.id, override_user, (body.get("reason") or "").strip(), f"Empty check {party}")
     db.add(models.JobUpdate(
         job_card_id=job.id,
         category="empty_check",
@@ -1590,8 +1764,8 @@ async def api_reopen_job(job_id: int, request: Request, db: Session = Depends(ge
     except Exception:
         body = {}
     reason = (body.get("reason") or "").strip()
-    if not reason:
-        raise HTTPException(status_code=400, detail="A reason is required to reopen")
+    if len(reason) < 15:
+        raise HTTPException(status_code=400, detail="Reopen needs a reason of at least 15 characters.")
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job or is_archived(job):
         raise HTTPException(status_code=404, detail="Open job not found")
@@ -1612,6 +1786,19 @@ async def api_reopen_job(job_id: int, request: Request, db: Session = Depends(ge
         created_by=current_user.id,
     ))
     log_audit(db, current_user.id, "Reopened job", job.id, f"{job.job_number} {reason}")
+    db.add(models.IntegrityEvent(
+        job_card_id=job.id,
+        event_type="reopen",
+        user_id=current_user.id,
+        reason=reason,
+    ))
+    notify_role(db, "admin", f"{current_user.full_name} reopened {job.stock_number}: {reason}", job.id)
+    db.query(models.Notification).filter(
+        models.Notification.user_id == current_user.id,
+        models.Notification.job_card_id == job.id,
+        models.Notification.message.like(f"{current_user.full_name} reopened%")
+    ).delete(synchronize_session=False)
+    notify_salesman(db, job, f"{job.stock_number} was reopened: {reason}")
     db.commit()
     return {"success": True, "status": job.status}
 
@@ -1778,7 +1965,7 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/pdi/sign")
-async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1796,19 +1983,24 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
 
     party = body.get("party")  # "workshop" or "sales"
     user_id = body.get("user_id")
-
+    override_user = None
     if party == "workshop":
+        override_user = require_other_side(db, job, user_id, job.pdi_signed_sales_by, "the PDI", body)
         job.pdi_signed_workshop = True
-        job.pdi_signed_workshop_by = user_id
+        job.pdi_signed_workshop_by = override_user.id if override_user else user_id
         job.pdi_signed_workshop_at = datetime.utcnow()
         if job.status == "Work Completed":
             job.status = "PDI in Progress"
     elif party == "sales":
+        assert_sales_owner(db, job, current_user, body, "sign this PDI")
+        override_user = require_other_side(db, job, user_id, job.pdi_signed_workshop_by, "the PDI", body)
         job.pdi_signed_sales = True
-        job.pdi_signed_sales_by = user_id
+        job.pdi_signed_sales_by = override_user.id if override_user else user_id
         job.pdi_signed_sales_at = datetime.utcnow()
     else:
         raise HTTPException(status_code=400, detail="party must be workshop or sales")
+    if override_user:
+        record_override(db, job, user_id, override_user, (body.get("reason") or "").strip(), f"PDI {party}")
 
     if job.pdi_signed_workshop and job.pdi_signed_sales:
         job.status = "PDI Completed"
@@ -2967,8 +3159,10 @@ def send_web_push(db, user_ids, title, body, url="/dashboard"):
         return
     try:
         from pywebpush import webpush, WebPushException
-        from .vapid import VAPID_PRIVATE_KEY, VAPID_EMAIL
+        from .vapid import VAPID_PRIVATE_KEY, VAPID_EMAIL, PUSH_ENABLED
     except Exception:
+        return
+    if not PUSH_ENABLED or not VAPID_PRIVATE_KEY:
         return
     subs = db.query(models.PushSubscription).filter(models.PushSubscription.user_id.in_(list(set(user_ids)))).all()
     for s in subs:
