@@ -458,6 +458,7 @@
             (t.description && t.description !== t.task_name ? '<div class="text-xs text-[#9aa6b4]">' + t.description + '</div>' : '') +
             (t.last_updated_by_name ? '<div class="text-xs text-gray-400">Updated by ' + t.last_updated_by_name + '</div>' : '') + (t.needs_approval && isAdmin ? '<div class="mt-1"><button type="button" onclick="approveTask(' + t.id + ')" class="text-xs px-2 py-1 bg-purple-700 text-white rounded">Approve extra task</button></div>' : '') +
             partStatusControls(t) +
+            assignmentLine(t, canEdit) +
             '</div>';
         html += statusButtons(t, canEdit);
         html += '</div>';
@@ -502,6 +503,82 @@
         html += taskPhotoBlock(t, canEdit);
         html += '</div>';
         return html;
+    }
+
+    function assignmentLine(t, canEdit) {
+        let out = '';
+        if (t.responsible_name || t.assisting_names || t.paint_team) {
+            out += '<div class="task-assign mt-1 text-xs text-[#cfe6ff]">' +
+                '<span class="task-label inline">Responsible</span> ' + escHtml(t.responsible_name || '—') +
+                (t.assisting_names ? ' &middot; <span class="task-label inline">Assisting</span> ' + escHtml(t.assisting_names) : '') +
+                (t.paint_team ? ' &middot; <span class="task-label inline">Paint team</span> ' + escHtml(t.paint_team) : '') + '</div>';
+        }
+        if (canEdit && t.status === 'In Progress') {
+            out += '<div class="mt-1"><button type="button" onclick="reassignTask(' + t.id + ')" class="task-off">' + (t.responsible_name ? 'Change who is doing this' : 'Set who is doing this') + '</button></div>';
+        }
+        return out;
+    }
+
+    let taskPeopleCache = null;
+    async function taskPeople() {
+        if (taskPeopleCache) return taskPeopleCache;
+        const res = await fetch('/api/task-people', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!res.ok) throw new Error('Could not load workshop names');
+        taskPeopleCache = await res.json();
+        return taskPeopleCache;
+    }
+
+    function askAssignment(task) {
+        return taskPeople().then(function(people) {
+            return new Promise(function(resolve) {
+                const paint = !!task.is_paint_task;
+                const wrap = document.createElement('div');
+                wrap.id = 'assignModal';
+                wrap.className = 'fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/70 p-3';
+                wrap.innerHTML = '<div class="w-full max-w-md rounded-xl border border-[#2a3340] bg-[#12161c] p-4 text-white">' +
+                    '<div class="text-sm font-bold uppercase tracking-wide mb-1">Start: ' + escHtml(task.task_name) + '</div>' +
+                    '<div class="text-xs text-[#9aa6b4] mb-3">Who is doing this task?</div>' +
+                    '<div class="task-label">Responsible *</div>' +
+                    '<select id="asgPerson" class="w-full mb-3"><option value="">Choose workshop person</option>' +
+                    (people.workshop || []).map(function(p) { return '<option value="' + p.id + '"' + (task.responsible_user_id === p.id ? ' selected' : '') + '>' + escHtml(p.full_name) + '</option>'; }).join('') + '</select>' +
+                    '<div class="task-label">Assisting (optional)</div>' +
+                    '<input id="asgHelp" type="text" maxlength="200" class="w-full mb-3" placeholder="Type names of helpers" value="' + escHtml(task.assisting_names || '') + '">' +
+                    (paint ? '<div class="task-label">Paint team *</div><select id="asgTeam" class="w-full mb-3"><option value="">Choose paint team</option>' +
+                        (people.paint_teams || []).map(function(p) { return '<option value="' + escHtml(p) + '"' + (task.paint_team === p ? ' selected' : '') + '>' + escHtml(p) + '</option>'; }).join('') + '</select>' : '') +
+                    '<div id="asgErr" class="text-xs text-red-400 mb-2"></div>' +
+                    '<div class="flex gap-2"><button type="button" id="asgOk" class="flex-1 bg-status-blue text-white font-bold rounded-lg">Start task</button>' +
+                    '<button type="button" id="asgCancel" class="flex-1 bg-[#2a3340] text-white rounded-lg">Cancel</button></div></div>';
+                document.body.appendChild(wrap);
+                function done(v) { wrap.remove(); resolve(v); }
+                document.getElementById('asgCancel').onclick = function() { done(null); };
+                wrap.addEventListener('change', function() { document.getElementById('asgErr').textContent = ''; });
+                document.getElementById('asgOk').onclick = function() {
+                    const pid = document.getElementById('asgPerson').value;
+                    const team = paint ? document.getElementById('asgTeam').value : '';
+                    if (!pid) { document.getElementById('asgErr').textContent = 'Choose who is responsible.'; return; }
+                    if (paint && !team) { document.getElementById('asgErr').textContent = 'Choose the paint team.'; return; }
+                    const out = { responsible_user_id: parseInt(pid, 10), assisting_names: document.getElementById('asgHelp').value.trim() };
+                    if (paint) out.paint_team = team;
+                    done(out);
+                };
+            });
+        });
+    }
+
+    async function reassignTask(taskId) {
+        const task = (currentJob && currentJob.tasks || []).find(function(t){ return t.id === taskId; });
+        if (!task) return;
+        let pick;
+        try { pick = await askAssignment(task); } catch (e) { alert(e.message); return; }
+        if (!pick) return;
+        const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/update', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({ user_id: userId ? parseInt(userId) : null, full_name: fullName }, pick))
+        });
+        const data = await res.json().catch(function(){ return {}; });
+        if (!res.ok) alert(data.detail || 'Could not save');
+        loadJob();
     }
 
     function escHtml(v) {
@@ -562,7 +639,8 @@
     }
 
     function openTaskPhoto(id) {
-        if (photoUrlCache[id]) window.open(photoUrlCache[id], '_blank');
+        const el = document.querySelector('img[data-photo-id="' + id + '"]');
+        if (photoUrlCache[id]) openPhotoViewer(photoUrlCache[id], el ? el.alt : 'Task photo');
     }
 
     // Shrink phone photos in the browser (max 1600 px, JPEG 80%) to keep the server disk small.
@@ -755,7 +833,7 @@
         let html = '<div class="task-label">Supplier progress</div><div class="font-semibold">' + (latest.company||'') + ' — ' + latest.status + '</div>';
         if (latest.work_doing) html += '<div class="text-sm">Work: ' + latest.work_doing + '</div>';
         if (role === 'sales') {
-            if (latest.photo_path) html += '<div class="mt-1"><img src="'+latest.photo_path+'" class="max-h-32 rounded"></div>';
+            if (latest.photo_path) html += '<div class="mt-1"><img src="'+latest.photo_path+'" data-viewer-src="'+latest.photo_path+'" data-viewer-label="Supplier update photo" class="max-h-32 rounded cursor-pointer"></div>';
             box.innerHTML = html;
             return;
         }
@@ -764,7 +842,7 @@
             if (u.work_doing) block += '<div>Work: ' + u.work_doing + '</div>';
             if (u.parts_needed) block += '<div class="text-orange-400">Parts needed: ' + u.parts_needed + '</div>';
             if (u.note) block += '<div>Note: ' + u.note + '</div>';
-            if (u.photo_path) block += '<div class="mt-1"><a href="'+u.photo_path+'" target="_blank"><img src="'+u.photo_path+'" alt="Supplier job card" class="max-h-40 rounded border border-[#2a3340]"></a></div>';
+            if (u.photo_path) block += '<div class="mt-1"><a href="'+u.photo_path+'" data-viewer-src="'+u.photo_path+'" data-viewer-label="Supplier job card"><img src="'+u.photo_path+'" alt="Supplier job card" class="max-h-40 rounded border border-[#2a3340] cursor-pointer"></a></div>';
             if (u.workshop_parts_decision) block += '<div>' + (u.workshop_parts_decision === 'workshop_assist' ? 'Workshop will assist' : 'Supplier must supply') + '</div>';
             else if (u.parts_needed && (role === 'workshop' || role === 'admin' || role === 'accounts')) {
                 block += '<div class="flex gap-2 mt-1"><button type="button" onclick="supDecideJob('+u.id+',\'workshop_assist\')" class="px-2 py-1 bg-[#025daa] text-white rounded">Workshop can assist</button><button type="button" onclick="supDecideJob('+u.id+',\'supplier_supply\')" class="px-2 py-1 bg-[#2a3340] text-white rounded">Supplier must supply</button></div>';
@@ -1013,6 +1091,12 @@
                 if (!fails || !fails.trim()) { alert('A fail list is required.'); return; }
                 payload.fail_list = fails.trim();
             }
+        }
+        if (newStatus === 'In Progress' && task && task.status !== 'In Progress') {
+            let pick;
+            try { pick = await askAssignment(task); } catch (e) { alert(e.message); return; }
+            if (!pick) return;
+            Object.assign(payload, pick);
         }
         if (newStatus === 'Completed') {
             const recent = (currentJob && currentJob.tasks || []).filter(function(t){
