@@ -50,6 +50,7 @@ class User(Base):
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
     role = Column(String, nullable=False)  # sales, workshop, accounts, admin, stock, supplier
     supplier_company = Column(String, nullable=True)
+    yard_access = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

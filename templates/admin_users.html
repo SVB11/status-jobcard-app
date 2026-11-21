@@ -54,6 +54,10 @@
                     <option value="FK Tanker Solutions">FK Tanker Solutions</option>
                 </select>
             </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700 pt-1">
+                <input type="checkbox" id="yard_access" class="w-5 h-5">
+                Yard check
+            </label>
             <button type="submit" class="w-full bg-status-blue text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-800">Add User</button>
             <div id="addMsg" class="text-sm hidden"></div>
         </form>
@@ -77,9 +81,17 @@
     const role = localStorage.getItem('role') || '';
 
     if (!token) window.location.href = '/login';
+    function roleHasYard(role){ return role === 'admin' || role === 'accounts' || role === 'yard'; }
+    function syncCreateYardTick(){
+        var box = document.getElementById('yard_access');
+        if (roleHasYard(document.getElementById('role').value)) { box.checked = true; box.disabled = true; }
+        else { box.disabled = false; }
+    }
     document.getElementById('role').addEventListener('change', function(){
         document.getElementById('companyBox').classList.toggle('hidden', this.value !== 'supplier');
+        syncCreateYardTick();
     });
+    syncCreateYardTick();
     const isAdminUser = (role === 'admin' || role === 'accounts' || fullName.toLowerCase() === 'sebastian van biljon');
     if (!isAdminUser) {
         alert('Admin access only. Sign in as sebastian (admin), not sebastian_sales.');
@@ -127,7 +139,11 @@
                     '<div class="text-xs text-gray-500">@' + u.username + (u.supplier_company ? ' · ' + u.supplier_company : '') + '</div>' +
                     '<div class="text-xs text-gray-400">Last password change: ' + (u.password_changed_at || '—') + '</div>' +
                     '</div>' +
-                    '<div class="flex gap-2">' +
+                    '<div class="flex gap-2 flex-wrap justify-end">' +
+                    (roleHasYard(u.role)
+                        ? '<span class="text-xs px-2 py-1 border rounded bg-white text-gray-500">Yard check on</span>'
+                        : '<button type="button" onclick="toggleYardAccess(' + u.id + ', ' + (u.yard_access ? 'false' : 'true') + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' +
+                          (u.yard_access ? 'Yard check on' : 'Yard check off') + '</button>') +
                     '<button onclick="toggleUser(' + u.id + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' + 
                     (u.is_active ? 'Deactivate' : 'Activate') + '</button>' +
                     '<button onclick="resetPassword(' + u.id + ', \'' + u.username + '\')" class="text-xs px-2 py-1 border rounded hover:bg-white">Reset PW</button>' +
@@ -155,7 +171,8 @@
                     username: document.getElementById('username').value,
                     password: document.getElementById('password').value,
                     role: document.getElementById('role').value,
-                    supplier_company: document.getElementById('supplier_company').value
+                    supplier_company: document.getElementById('supplier_company').value,
+                    yard_access: document.getElementById('yard_access').checked
                 })
             });
             const data = await res.json();
@@ -169,6 +186,7 @@
             msg.className = 'text-sm text-green-600';
             msg.classList.remove('hidden');
             document.getElementById('addUserForm').reset();
+            syncCreateYardTick();
             loadUsers();
         } catch (err) {
             msg.textContent = 'Connection error';
@@ -187,6 +205,21 @@
         if (!res.ok) { alert(data.detail || 'Could not force reset'); return; }
         alert('Done. ' + (data.count || 0) + ' users must set a new password.');
         loadUsers();
+    }
+
+    async function toggleYardAccess(id, enabled) {
+        try {
+            const res = await fetch('/api/admin/users/' + id + '/yard-access', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ yard_access: !!enabled })
+            });
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) { alert(data.detail || 'Could not update Yard check'); return; }
+            loadUsers();
+        } catch (err) {
+            alert('Failed');
+        }
     }
 
     async function toggleUser(id) {
