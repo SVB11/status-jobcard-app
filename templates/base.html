@@ -204,7 +204,7 @@
                 {% if yard_only %}
                 <a href="/yard">Yard check</a>
                 {% else %}
-                <a href="/yard" id="navYard" class="hidden">Yard check</a>
+                <a href="/yard" id="navYard"{% if not has_yard_access %} class="hidden"{% endif %}>Yard check</a>
                 <a href="/dashboard">Dashboard</a>
                 <a href="/jobs" id="navJobs">Jobs</a>
                 <a href="/locations" id="navLocations" class="hidden">Locations</a>
@@ -290,7 +290,10 @@
         var nm = (localStorage.getItem('full_name') || '').toLowerCase();
         var isAdm = (r === 'admin' || r === 'accounts' || nm === 'sebastian van biljon');
         var yn = document.getElementById('navYard');
-        if (yn && ['admin','accounts','workshop','yard'].includes(r)) yn.classList.remove('hidden');
+        if (yn) {
+            var hasYard = (r === 'admin' || r === 'accounts' || r === 'yard' || localStorage.getItem('yard_access') === '1');
+            yn.classList.toggle('hidden', !hasYard);
+        }
         var isArchiveAdmin = (r === 'admin');
         var ar = document.getElementById('navArchive');
         var el = document.getElementById('navStock');

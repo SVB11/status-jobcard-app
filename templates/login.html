@@ -70,6 +70,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         localStorage.setItem('full_name', data.full_name);
         if (data.user_id) localStorage.setItem('user_id', data.user_id);
         localStorage.setItem('must_change_password', data.must_change_password ? '1' : '0');
+        localStorage.setItem('yard_access', data.yard_access ? '1' : '0');
         if (data.must_change_password) { window.location.href = '/set-password'; return; }
         if (data.supplier_company) localStorage.setItem('supplier_company', data.supplier_company);
         const next = new URLSearchParams(window.location.search).get('next') || '';
