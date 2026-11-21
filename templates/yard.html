@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Yard check{% endblock %}
+{% block header_right %}<a href="/logout" class="text-sm">Logout</a>{% endblock %}
+{% block head %}
+<style>
+.yard-toolbar {display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:18px 0}
+.yard-toolbar button,.yard-toolbar select {padding:10px 14px;border-radius:10px;border:1px solid #2a3340;min-height:48px}
+.yard-toolbar label {display:flex;align-items:center;gap:10px;min-height:48px}
+.yard-toolbar input {width:24px;height:24px}
+.yard-summary {display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0}
+.yard-summary div {background:#12161ce8;border:1px solid #2a3340;border-radius:12px;padding:12px}
+.yard-summary strong {display:block;font-size:25px;color:#7ec2ff}
+.yard-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}
+.yard-row {background:#12161cf2;border:1px solid #2a3340;border-radius:14px;padding:16px}
+.yard-row h2 {font-size:18px;font-weight:800;margin-bottom:12px;color:#7ec2ff}
+.yard-ticks {display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.yard-tick {min-height:72px;background:#1a2028;border:1px solid #3a4450;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px;font-weight:700;color:#e8edf3}
+.yard-tick[aria-pressed=true] {background:#14532d;border-color:#4ade80}
+.yard-tick .tick-symbol {font-size:25px;line-height:25px}
+.yard-by {font-size:11px;line-height:1.5;color:#9aa6b4;margin-top:8px;min-height:34px;overflow-wrap:anywhere}
+.yard-note {color:#9aa6b4;font-size:13px;margin:8px 0}
+#yardError {color:#fca5a5;margin:12px 0}
+@media(max-width:480px){.yard-summary div{padding:9px;font-size:12px}.yard-summary strong{font-size:23px}.yard-toolbar select{width:100%}}
+</style>
+{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold">Yard check</h1>
+<p class="yard-note">Stock take &amp; WS stickers. Tap each tick as you check the vehicle.</p>
+<div class="yard-toolbar">
+<label><input type="checkbox" id="missingOnly" onchange="renderYard()"> Missing only</label>
+<select id="roundPicker" aria-label="Stock take" onchange="loadRound()"><option value="current">Current stock take</option></select>
+{% if can_start %}<button id="newRound" class="bg-status-blue text-white" onclick="startRound()">Start new stock take</button>{% endif %}
+</div>
+<p id="roundInfo" class="yard-note"></p>
+<p id="readOnly" class="yard-note" hidden>Past stock take — read-only. Results stay as they were when closed.</p>
+<div id="yardSummary" class="yard-summary"></div>
+<div id="yardError" role="alert"></div>
+<p id="visibleCount" class="yard-note"></p>
+<div id="yardRows" class="yard-grid" aria-live="polite">Loading yard check…</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let yardData = null;
+const yardHeaders = () => ({'Authorization':'Bearer '+(localStorage.getItem('token')||''),'Content-Type':'application/json'});
+const yEsc = v => String(v == null ? '' : v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function yTime(v) {return v ? new Date(v).toLocaleString('en-ZA',{timeZone:'Africa/Johannesburg',dateStyle:'medium',timeStyle:'short'})+' SAST' : '';}
+async function yFetch(url,opts={}) {
+    const r=await fetch(url,Object.assign({headers:yardHeaders()},opts));
+    if(r.status===401){location.href='/login';throw new Error('Sign in again.');}
+    const data=await r.json(); if(!r.ok) throw new Error(data.detail||'Could not save.'); return data;
+}
+async function loadHistory(){
+    const data=await yFetch('/api/yard/history');
+    const pick=document.getElementById('roundPicker'), selected=pick.value;
+    pick.innerHTML='<option value="current">Current stock take</option>'+data.rounds.map(r=>'<option value="'+r.id+'">Past #'+r.id+' · '+yEsc(yTime(r.closed_at))+'</option>').join('');
+    pick.value=selected||'current';
+}
+async function loadRound(){
+    try{
+        document.getElementById('yardError').textContent='';
+        const id=document.getElementById('roundPicker').value;
+        yardData=await yFetch(id==='current'?'/api/yard/current':'/api/yard/history/'+id);
+        renderYard();
+    }catch(e){document.getElementById('yardError').textContent=e.message;}
+}
+function renderYard(){
+    if(!yardData)return;
+    const {round:r,summary:s}=yardData, ro=!!yardData.read_only;
+    document.getElementById('roundInfo').textContent='Stock take #'+r.id+' · Started '+yTime(r.started_at)+' · '+(r.started_by||'System')+(ro?' · Closed '+yTime(r.closed_at)+' · '+r.closed_by:'');
+    document.getElementById('readOnly').hidden=!ro;
+    const newBtn=document.getElementById('newRound');if(newBtn)newBtn.disabled=ro;
+    document.getElementById('yardSummary').innerHTML='<div><strong>'+s.missing+'</strong>WS numbers missing a tick</div><div><strong>'+s.on_site+' / '+s.total+'</strong>On site</div><div><strong>'+s.stickers+' / '+s.total+'</strong>Stickers fitted</div>';
+    const rows=yardData.rows.filter(r=>!document.getElementById('missingOnly').checked||!r.on_site||!r.sticker_fitted);
+    document.getElementById('visibleCount').textContent='Showing '+rows.length+' of '+s.total+' WS numbers';
+    document.getElementById('yardRows').innerHTML=rows.map(r=>'<article class="yard-row" data-job="'+r.job_id+'"><h2>'+yEsc(r.label)+'</h2><div class="yard-ticks">'+[['on_site','On site','on_site'],['sticker_fitted','WS sticker fitted','sticker']].map(([field,label,prefix])=>'<div><button class="yard-tick w-full" type="button" '+(ro?'disabled':'onclick="tickYard('+r.job_id+',\''+field+'\','+(!r[field])+')"')+' aria-pressed="'+r[field]+'" aria-label="'+yEsc(label+' '+r.label)+'"><span class="tick-symbol">'+(r[field]?'✓':'○')+'</span>'+label+'</button><div class="yard-by">'+(r[prefix+'_at']?yEsc((r[field]?'Checked':'Unchecked')+' · '+r[prefix+'_by'])+'<br>'+yEsc(yTime(r[prefix+'_at'])):'Not checked yet')+'</div></div>').join('')+'</div></article>').join('')||'<p>Nothing missing. All checked.</p>';
+}
+async function tickYard(job,field,checked){
+    document.querySelectorAll('.yard-tick').forEach(b=>b.disabled=true);
+    try{await yFetch('/api/yard/'+yardData.round.id+'/tick',{method:'POST',body:JSON.stringify({job_id:job,field,checked})});await loadRound();}
+    catch(e){document.getElementById('yardError').textContent=e.message;await loadRound();}
+}
+async function startRound(){
+    if(!confirm('Close this stock take and start a fresh one? Past results will be kept read-only.'))return;
+    const btn=document.getElementById('newRound');btn.disabled=true;
+    try{await yFetch('/api/yard/start',{method:'POST'});document.getElementById('roundPicker').value='current';await loadHistory();await loadRound();}
+    catch(e){document.getElementById('yardError').textContent=e.message;}finally{btn.disabled=false;}
+}
+(async()=>{try{await loadHistory();await loadRound();}catch(e){document.getElementById('yardError').textContent=e.message;}})();
+</script>
+{% endblock %}

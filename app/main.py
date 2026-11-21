@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from datetime import datetime, timedelta
 from typing import Optional, List
 import os
@@ -30,12 +31,15 @@ FAILED_LOGINS = {}
 MAX_FAILED = 6
 LOCK_MINUTES = 15
 
+# Paths a 'yard' role user may reach (public paths are handled before this check).
+YARD_ROLE_PATHS = ("/yard", "/logout", "/set-password", "/api/me/set-password", "/api/push/subscribe")
+
+def yard_role_path_allowed(path: str) -> bool:
+    return path in YARD_ROLE_PATHS or path.startswith("/api/yard/")
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/uploads/tasks/"):
-        # Task photos are only served to logged-in users through /api/task-photos/{id}.
-        return JSONResponse({"detail": "Not found"}, status_code=404)
     public_unauthenticated = path in (
         "/",
         "/set-password",
@@ -69,6 +73,15 @@ async def security_headers(request: Request, call_next):
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Set a new password before using the app."}, status_code=403)
             return RedirectResponse(url="/set-password")
+        if (getattr(user, "role", "") or "") == "yard" and not yard_role_path_allowed(path):
+            # Yard users may only use the Yard check. Deny everything else server-side.
+            if path.startswith("/api/") or path.startswith("/uploads/"):
+                return JSONResponse({"detail": "Yard users can only use the Yard check."}, status_code=403)
+            return RedirectResponse(url="/yard")
+    if path.startswith("/uploads/tasks/"):
+        # Direct task photo files stay unavailable, even to signed-in staff.
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    request.state.yard_only = bool(user and user.role == "yard")
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -136,6 +149,8 @@ jinja_env = Environment(
 )
 
 def render_template(name: str, **context):
+    if "yard_only" not in context:
+        context["yard_only"] = bool(getattr(getattr(context.get("request"), "state", None), "yard_only", False))
     template = jinja_env.get_template(name)
     return HTMLResponse(template.render(**context))
 
@@ -318,6 +333,12 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.get("/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
     return render_template("set_password.html", request=request, page_title="Set new password")
+
+@app.get("/logout")
+async def logout_page():
+    response = HTMLResponse('<script>localStorage.clear();location.replace("/login");</script>')
+    response.delete_cookie("sts_token", path="/")
+    return response
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -1063,6 +1084,11 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             "booked_date": getattr(t, "booked_date", None),
             "test_result": getattr(t, "test_result", None),
             "fail_list": getattr(t, "fail_list", None),
+            "responsible_user_id": getattr(t, "responsible_user_id", None),
+            "responsible_name": getattr(t, "responsible_name", None),
+            "assisting_names": getattr(t, "assisting_names", None),
+            "paint_team": getattr(t, "paint_team", None),
+            "is_paint_task": is_paint_task(t.task_name),
             "providers": providers_for_task_db(db, t.task_name),
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
             "completed_by": t.completed_by,
@@ -1261,6 +1287,64 @@ async def api_update_vehicle(job_id: int, request: Request, db: Session = Depend
 
 # ---------- TASK UPDATES ----------
 
+PAINT_TEAMS = ("Reuben", "Jonas", "Ricardo", "Shoes (Bay 4)")
+PAINT_TASK_WORDS = ("paint", "spray", "touch-up", "touch up", "touchup")
+
+def is_paint_task(name: str) -> bool:
+    n = (name or "").lower()
+    return any(w in n for w in PAINT_TASK_WORDS)
+
+def workshop_people(db: Session):
+    return db.query(models.User).filter(
+        models.User.role == "workshop", models.User.is_active == True
+    ).order_by(models.User.full_name).all()
+
+def apply_task_assignment(db, task, body, new_status, old_status, changer):
+    """Who is doing the task. Required when a task moves into In Progress."""
+    moving_in = new_status == "In Progress" and old_status != "In Progress"
+    has_pick = "responsible_user_id" in body
+    if not moving_in and not has_pick:
+        return []
+    paint = is_paint_task(task.task_name)
+    rid = body.get("responsible_user_id")
+    try:
+        rid = int(rid) if rid not in (None, "") else None
+    except (TypeError, ValueError):
+        rid = None
+    person = None
+    if rid:
+        person = db.query(models.User).filter(
+            models.User.id == rid, models.User.role == "workshop", models.User.is_active == True
+        ).first()
+    if not person:
+        raise HTTPException(status_code=400, detail="Choose who is responsible for this task (a workshop user) before it goes In Progress.")
+    team = (body.get("paint_team") or "").strip()
+    if paint and team not in PAINT_TEAMS:
+        raise HTTPException(status_code=400, detail="Paint task: choose the paint team (" + ", ".join(PAINT_TEAMS) + ").")
+    # Free text is shown in several older views that build HTML strings, so drop markup characters.
+    assisting = "".join(ch for ch in str(body.get("assisting_names") or "") if ch not in "<>&\"'`").strip()[:200] or None
+    task.responsible_user_id = person.id
+    task.responsible_name = person.full_name
+    task.assisting_names = assisting
+    if paint:
+        task.paint_team = team
+    task.assigned_at = datetime.utcnow()
+    task.assigned_by_name = changer
+    bits = [f"responsible {person.full_name}"]
+    if assisting:
+        bits.append(f"assisting {assisting}")
+    if paint:
+        bits.append(f"paint team {team}")
+    return bits
+
+@app.get("/api/task-people")
+async def api_task_people(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    """Names for the In Progress picker. Names only, no contact details."""
+    return {
+        "workshop": [{"id": u.id, "full_name": u.full_name} for u in workshop_people(db)],
+        "paint_teams": list(PAINT_TEAMS),
+    }
+
 @app.post("/api/jobs/{job_id}/tasks/{task_id}/update")
 async def api_update_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
@@ -1346,6 +1430,8 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
 
     old_status = task.status
 
+    assign_bits = apply_task_assignment(db, task, body, new_status, old_status, body.get("full_name") or user_name(db, user_id) or "Staff")
+
     if new_status:
         task.status = new_status
         if new_status == "Completed":
@@ -1377,6 +1463,7 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
         apply_job_location(db, job, task.task_location or ("3rd Party: " + (task.third_party_provider or "")), changer, user_id)
     if notes is not None:
         change_bits.append("note updated")
+    change_bits.extend(assign_bits)
     if change_bits:
         add_update(
             db, job.id, "progress",
@@ -1634,7 +1721,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
     if not username or not full_name or not password:
         raise HTTPException(status_code=400, detail="Username, full name and password are required")
 
-    if role not in ("sales", "workshop", "accounts", "admin", "stock", "supplier", "marketing"):
+    if role not in ("sales", "workshop", "accounts", "admin", "stock", "supplier", "marketing", "yard"):
         raise HTTPException(status_code=400, detail="Invalid role")
     company = (body.get("supplier_company") or "").strip() or None
     if role == "supplier" and not company:
@@ -4577,3 +4664,140 @@ async def api_job_photos_delete(job_id: int, request: Request, db: Session = Dep
         except OSError:
             pass
     return {"success": True, "deleted": deleted, "message": text_line}
+
+# ---------- YARD CHECK (no client, price, task or photo data) ----------
+YARD_ROLES = ("admin", "accounts", "workshop", "yard")
+
+def require_yard(user):
+    if user.role not in YARD_ROLES:
+        raise HTTPException(status_code=403, detail="Yard check access only")
+
+def yard_can_start(user):
+    return user.role in ("admin", "accounts")
+
+def yard_lock(db):
+    # Acquire SQLite's write lock before reading the active round. Serialises a
+    # tick against closing a round and prevents simultaneous new rounds.
+    db.execute(text("UPDATE stock_takes SET id = id WHERE closed_at IS NULL"))
+
+def yard_current(db):
+    current = db.query(models.StockTake).filter(models.StockTake.closed_at == None).first()
+    if not current:
+        # First visit only. Subsequent resets require admin/accounts.
+        current = models.StockTake(started_at=datetime.utcnow(), started_by_name="System")
+        db.add(current)
+        db.flush()
+    return current
+
+def yard_stamp(value):
+    return value.isoformat() + "Z" if value else None
+
+def yard_rows(db, current):
+    jobs = active_jobs(db).order_by(models.JobCard.stock_number, models.JobCard.id).all()
+    counts = stock_repeat_counts(jobs)
+    items = {i.job_card_id: i for i in db.query(models.StockTakeItem).filter(models.StockTakeItem.stock_take_id == current.id).all()}
+    rows = []
+    for job in jobs:
+        item = items.get(job.id)
+        rows.append({
+            "job_id": job.id,
+            "display_id": job_display_id(job),
+            "label": job_display_label(job, counts),
+            "on_site": bool(item and item.on_site),
+            "on_site_by": item.on_site_by_name if item else None,
+            "on_site_at": yard_stamp(item.on_site_at) if item else None,
+            "sticker_fitted": bool(item and item.sticker_fitted),
+            "sticker_by": item.sticker_by_name if item else None,
+            "sticker_at": yard_stamp(item.sticker_at) if item else None,
+        })
+    return rows
+
+def yard_summary(rows):
+    return {
+        "total": len(rows),
+        "on_site": sum(r["on_site"] for r in rows),
+        "stickers": sum(r["sticker_fitted"] for r in rows),
+        "missing": sum(not (r["on_site"] and r["sticker_fitted"]) for r in rows),
+    }
+
+def yard_round_payload(current):
+    return {"id": current.id, "started_at": yard_stamp(current.started_at),
+            "started_by": current.started_by_name, "closed_at": yard_stamp(current.closed_at),
+            "closed_by": current.closed_by_name}
+
+@app.get("/yard", response_class=HTMLResponse)
+async def yard_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
+    if current_user.role not in YARD_ROLES:
+        return RedirectResponse(url="/dashboard")
+    return render_template("yard.html", request=request, page_title="Yard check", yard_only=current_user.role == "yard", can_start=yard_can_start(current_user))
+
+@app.get("/api/yard/current")
+async def api_yard_current(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    yard_lock(db)
+    current = yard_current(db)
+    rows = yard_rows(db, current)
+    result = {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "can_start": yard_can_start(current_user)}
+    db.commit()
+    return result
+
+@app.post("/api/yard/{round_id}/tick")
+async def api_yard_tick(round_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    body = await request.json()
+    field = body.get("field")
+    if field not in ("on_site", "sticker_fitted") or type(body.get("checked")) is not bool:
+        raise HTTPException(status_code=400, detail="Choose an On site or WS sticker tick (true or false).")
+    yard_lock(db)
+    current = db.query(models.StockTake).filter(models.StockTake.id == round_id).first()
+    if not current or current.closed_at:
+        raise HTTPException(status_code=409, detail="This stock take is closed. Refresh to use the current one.")
+    job = active_jobs(db).filter(models.JobCard.id == body.get("job_id")).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Open WS number not found")
+    item = db.query(models.StockTakeItem).filter(models.StockTakeItem.stock_take_id == current.id, models.StockTakeItem.job_card_id == job.id).first()
+    if not item:
+        item = models.StockTakeItem(stock_take_id=current.id, job_card_id=job.id)
+        db.add(item)
+    setattr(item, field, body["checked"])
+    prefix = "on_site" if field == "on_site" else "sticker"
+    setattr(item, prefix + "_by", current_user.id)
+    setattr(item, prefix + "_by_name", current_user.full_name)
+    setattr(item, prefix + "_at", datetime.utcnow())
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/yard/start")
+async def api_yard_start(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    if not yard_can_start(current_user):
+        raise HTTPException(status_code=403, detail="Only admin/accounts can start a new stock take.")
+    yard_lock(db)
+    current = yard_current(db)
+    rows = yard_rows(db, current)
+    summary = yard_summary(rows)
+    current.closed_at = datetime.utcnow()
+    current.closed_by = current_user.id
+    current.closed_by_name = current_user.full_name
+    current.total_jobs, current.on_site_count, current.sticker_count = summary["total"], summary["on_site"], summary["stickers"]
+    current.results = json.dumps(rows)
+    db.flush()
+    new = models.StockTake(started_at=datetime.utcnow(), started_by=current_user.id, started_by_name=current_user.full_name)
+    db.add(new)
+    db.commit()
+    return {"success": True, "id": new.id, "closed_id": current.id}
+
+@app.get("/api/yard/history")
+async def api_yard_history(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    rounds = db.query(models.StockTake).filter(models.StockTake.closed_at != None).order_by(models.StockTake.id.desc()).all()
+    return {"rounds": [dict(yard_round_payload(r), total=r.total_jobs, on_site=r.on_site_count, stickers=r.sticker_count) for r in rounds]}
+
+@app.get("/api/yard/history/{round_id}")
+async def api_yard_history_detail(round_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    current = db.query(models.StockTake).filter(models.StockTake.id == round_id, models.StockTake.closed_at != None).first()
+    if not current:
+        raise HTTPException(status_code=404, detail="Past stock take not found")
+    rows = json.loads(current.results or "[]")
+    return {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "read_only": True}

@@ -74,7 +74,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         if (data.supplier_company) localStorage.setItem('supplier_company', data.supplier_company);
         const next = new URLSearchParams(window.location.search).get('next') || '';
         if (next && next.charAt(0) === '/' && next.indexOf('//') === -1) window.location.href = next;
-        else window.location.href = data.role === 'supplier' ? '/supplier' : '/dashboard';
+        else window.location.href = data.role === 'yard' ? '/yard' : (data.role === 'supplier' ? '/supplier' : '/dashboard');
     } catch (err) {
         errorMsg.textContent = 'Connection error. Please try again.';
         errorMsg.classList.remove('hidden');

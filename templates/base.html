@@ -193,14 +193,18 @@
             <div class="header-top">
                 <img src="/static/images/status_logo_white.png" alt="Status Truck Sales" class="brand-logo">
                 <div class="flex items-center gap-2 shrink-0">
-                    <button type="button" id="bellBtn" onclick="toggleBell()" class="relative text-[#7ec2ff] font-semibold text-xs uppercase">
+                    {% if not yard_only %}<button type="button" id="bellBtn" onclick="toggleBell()" class="relative text-[#7ec2ff] font-semibold text-xs uppercase">
                         Alerts
                         <span id="bellBadge" class="hidden absolute -top-2 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center">0</span>
                     </button>
-                    {% block header_right %}{% endblock %}
+                    {% endif %}{% block header_right %}{% endblock %}
                 </div>
             </div>
             <nav class="nav-scroll">
+                {% if yard_only %}
+                <a href="/yard">Yard check</a>
+                {% else %}
+                <a href="/yard" id="navYard" class="hidden">Yard check</a>
                 <a href="/dashboard">Dashboard</a>
                 <a href="/jobs" id="navJobs">Jobs</a>
                 <a href="/locations" id="navLocations" class="hidden">Locations</a>
@@ -212,6 +216,7 @@
                 <a href="/supplier" id="navSupplier" class="hidden">Supplier</a>
                 <a href="/jobs/create" id="navCreate" class="text-white bg-status-blue px-3 rounded-lg" style="position:relative;z-index:60;">Create</a>
                 <button type="button" onclick="enablePings()">Pings</button>
+                {% endif %}
             </nav>
         </div>
     </header>
@@ -284,6 +289,8 @@
         var r = (localStorage.getItem('role') || '').toLowerCase();
         var nm = (localStorage.getItem('full_name') || '').toLowerCase();
         var isAdm = (r === 'admin' || r === 'accounts' || nm === 'sebastian van biljon');
+        var yn = document.getElementById('navYard');
+        if (yn && ['admin','accounts','workshop','yard'].includes(r)) yn.classList.remove('hidden');
         var isArchiveAdmin = (r === 'admin');
         var ar = document.getElementById('navArchive');
         var el = document.getElementById('navStock');
@@ -318,6 +325,7 @@
         }
     })();
     async function refreshBell() {
+        if (localStorage.getItem('role') === 'yard') return;
         const uid = localStorage.getItem('user_id');
         const token = localStorage.getItem('token');
         if (!uid || !token) return;
@@ -385,6 +393,7 @@
     setInterval(refreshBell, 20000);
     </script>
     <script src="/static/js/job_display.js"></script>
+    <script src="/static/js/photo_viewer.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
