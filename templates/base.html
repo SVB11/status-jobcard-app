@@ -188,17 +188,18 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=s3">
+    <link rel="stylesheet" href="/static/css/theme.css?v=s4">
     {% block head %}{% endblock %}
 </head>
 <body class="min-h-screen">
     <div id="pageBg" aria-hidden="true"></div>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="stsInk" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.1071 0 -0.1071 0 0.0706  -0.4226 0 0.4226 0 0.0824  -0.8512 0 0.8512 0 0.1059  0 0 0 1 0"/></filter></svg>
     <header class="sticky-top bg-[#0c1015]/55 border-b-2 border-[#025daa] backdrop-blur">
         <div class="max-w-7xl mx-auto">
             <div class="header-top">
                 <span class="shrink-0 block">
                     <img src="/static/images/status_logo_white_trim.png" alt="Status Truck Sales" class="brand-logo logo-dark">
-                    <img src="/static/images/status_logo_dark.png" alt="Status Truck Sales" class="brand-logo logo-light">
+                    <img src="/static/images/status_logo_white_trim.png" alt="Status Truck Sales" class="brand-logo logo-light ink">
                 </span>
                 <div class="shell-controls flex items-center gap-2 shrink-0">
                     <button type="button" id="themeSwitch" class="theme-switch" aria-pressed="false" aria-label="Switch between dark and light look" title="Dark or light look">
@@ -246,7 +247,7 @@
 
     <footer class="text-center py-8">
         <img src="/static/images/slogan_quality.png" alt="Quality, Reliability." class="logo-dark h-16 sm:h-20 mx-auto mb-4">
-        <img src="/static/images/slogan_quality_dark.png" alt="Quality, Reliability." class="logo-light h-16 sm:h-20 mx-auto mb-4">
+        <img src="/static/images/slogan_quality.png" alt="Quality, Reliability." class="logo-light ink h-16 sm:h-20 mx-auto mb-4">
         <div class="text-xs text-[#6b7683] uppercase tracking-widest">Status Truck Sales &bull; Boksburg &bull; Internal Use Only</div>
     </footer>
 
@@ -410,7 +411,8 @@
     </script>
     <script src="/static/js/job_display.js"></script>
     <script src="/static/js/photo_viewer.js"></script>
-    <script src="/static/js/theme.js?v=s3"></script>
+    <script src="/static/js/theme.js?v=s4"></script>
     {% block scripts %}{% endblock %}
+    <link rel="stylesheet" href="/static/css/theme-bg.css?v=s4">
 </body>
 </html>

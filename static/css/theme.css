@@ -78,6 +78,7 @@ html[data-theme], html[data-theme] body {
   -webkit-font-smoothing: antialiased;
 }
 /* Page background: 3D flowing ribbons with the tilted Status logo, lower right (static, no motion).
+   The images themselves are in theme-bg.css.
    Uses the existing fixed #pageBg layer; cards and panels stay solid on top. Hidden in print. */
 html[data-theme] #pageBg {
   display: block !important; position: fixed; inset: 0; z-index: 0; pointer-events: none;
@@ -85,12 +86,10 @@ html[data-theme] #pageBg {
 }
 html[data-theme] #pageBg::after { display: none; }
 html[data-theme="dark"] #pageBg {
-  background-image: url("/static/images/bg_logo3d_dark.webp"), url("/static/images/bg_ribbons_dark.webp");
   background-size: min(128vw, 1150px) auto, cover;
   background-position: right -16vw bottom 3vh, 62% 70%;
 }
 html[data-theme="light"] #pageBg {
-  background-image: url("/static/images/bg_logo3d_light.webp"), linear-gradient(rgba(243,245,247,.25), rgba(243,245,247,.45)), url("/static/images/bg_ribbons_light.webp");
   background-size: min(128vw, 1150px) auto, cover, cover;
   background-position: right -16vw bottom 3vh, center, 62% 70%;
 }
@@ -533,6 +532,9 @@ html[data-theme] #tasksList .flex { flex-wrap: wrap; }
 html[data-theme] .logo-light { display:none; }
 html[data-theme="light"] .logo-dark { display:none; }
 html[data-theme="light"] .logo-light { display:block; }
+/* Light theme: the existing white logo and slogan files drawn in dark ink; the blue accent stays #005CAA
+   (colour matrix in base.html, #stsInk). */
+html[data-theme="light"] img.ink { filter: url(#stsInk); }
 html[data-theme] .nl-h1 { color:var(--text) !important; text-transform:none; letter-spacing:-.025em; line-height:1.2; margin-bottom:6px; }
 html[data-theme] .nl-overline { margin-bottom:7px; }
 html[data-theme] .login-card { padding:28px 24px; box-shadow:none; }
