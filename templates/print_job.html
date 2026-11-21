@@ -28,6 +28,7 @@
         <div id="title"></div>
     </div>
     <div id="content">Loading...</div>
+<script src="/static/js/job_display.js"></script>
 <script>
     const jobId = {{ job_id }};
     function noiseText(s) {
@@ -62,7 +63,7 @@
         const pdiRes = await fetch('/api/jobs/' + jobId + '/pdi');
         const j = await jobRes.json();
         const p = await pdiRes.json();
-        document.getElementById('title').innerHTML = '<strong>' + j.job_number + '</strong><div class="muted">' + j.status + '</div>';
+        document.getElementById('title').innerHTML = '<strong>' + jobDisplayLabel(j) + '</strong><div class="muted">' + j.status + '</div>';
         let html = '<h2>Vehicle</h2><table>';
         const rows = [
             ['Stock', j.stock_number], ['Description', j.vehicle_description],
