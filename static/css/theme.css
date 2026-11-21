@@ -1,0 +1,579 @@
+/* Status Truck Sales job cards: new look, all pages (21 Nov 2026).
+   Two themes, picked per device with the switch in the header:
+     data-theme="dark"  = Mission Control (default)
+     data-theme="light" = Clean Glass
+   Visual only. No markup ids, routes or behaviour depend on this file. */
+
+/* ---------- Design tokens ---------- */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --blue: #005CAA;
+  --blue-deep: #004A8C;
+  --blue-soft: rgba(0, 92, 170, 0.18);
+  --blue-line: rgba(0, 92, 170, 0.55);
+  --link: #8CC4F5;
+  --bg: #12151B;
+  --bg-elev: #171B22;
+  --surface: #1C212B;
+  --surface-2: #232935;
+  --field: #12151B;
+  --line: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #F4F6F8;
+  --muted: #B4BBC5;
+  --faint: #959DA9;
+  --green: #3BA066;
+  --green-soft: rgba(59, 160, 102, 0.16);
+  --green-text: #6CCB93;
+  --amber: #D4A017;
+  --amber-soft: rgba(212, 160, 23, 0.16);
+  --amber-text: #E8BE4A;
+  --amber-btn: #9A6A00;
+  --purple: #8B6CC9;
+  --shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.28);
+  --radius: 10px;
+  --radius-lg: 12px;
+  --font: "IBM Plex Sans", Inter, "Noto Sans", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --header-bg: rgba(18, 21, 27, 0.96);
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --blue: #005CAA;
+  --blue-deep: #004A8C;
+  --blue-soft: rgba(0, 92, 170, 0.08);
+  --blue-line: rgba(0, 92, 170, 0.28);
+  --link: #005CAA;
+  --bg: #F3F5F7;
+  --bg-elev: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-2: #F5F7F9;
+  --field: #FFFFFF;
+  --line: rgba(15, 18, 24, 0.09);
+  --line-strong: rgba(15, 18, 24, 0.18);
+  --text: #12151B;
+  --muted: #4F5864;
+  --faint: #66707C;
+  --green: #1F8A4C;
+  --green-soft: rgba(31, 138, 76, 0.10);
+  --green-text: #17703C;
+  --amber: #B8860B;
+  --amber-soft: rgba(184, 134, 11, 0.12);
+  --amber-text: #7A5600;
+  --amber-btn: #8A5F00;
+  --purple: #6B4FB0;
+  --shadow: 0 1px 2px rgba(15, 18, 24, 0.05), 0 10px 28px rgba(15, 18, 24, 0.06);
+  --radius: 14px;
+  --radius-lg: 16px;
+  --font: Inter, "IBM Plex Sans", "Noto Sans", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --header-bg: rgba(255, 255, 255, 0.94);
+}
+
+/* ---------- Page and shell ---------- */
+html[data-theme], html[data-theme] body {
+  background: var(--bg) !important;
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+/* Page background: 3D flowing ribbons with the tilted Status logo, lower right (static, no motion).
+   The images themselves are in theme-bg.css.
+   Uses the existing fixed #pageBg layer; cards and panels stay solid on top. Hidden in print. */
+html[data-theme] #pageBg {
+  display: block !important; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-color: var(--bg); background-repeat: no-repeat;
+}
+html[data-theme] #pageBg::after { display: none; }
+html[data-theme="dark"] #pageBg {
+  background-size: min(128vw, 1150px) auto, cover;
+  background-position: right -16vw bottom 3vh, 62% 70%;
+}
+html[data-theme="light"] #pageBg {
+  background-size: min(128vw, 1150px) auto, cover, cover;
+  background-position: right -16vw bottom 3vh, center, 62% 70%;
+}
+/* The footer line sits straight on the background: a small solid backing keeps its normal contrast. */
+html[data-theme] footer > div { display: inline-block; background: var(--bg); padding: 4px 12px; border-radius: 8px; }
+@media print {
+  html[data-theme] #pageBg { display: none !important; }
+}
+html[data-theme] h1, html[data-theme] h2, html[data-theme] h3 { letter-spacing: 0.02em; }
+html[data-theme] h1 { text-transform: none; letter-spacing: -0.01em; font-weight: 700; }
+html[data-theme] a { color: var(--link); }
+html[data-theme] :focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
+
+html[data-theme] header.sticky-top {
+  background: var(--header-bg) !important;
+  border-bottom: 1px solid var(--line-strong) !important;
+  box-shadow: 0 1px 0 var(--blue-line);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+html[data-theme] header a, html[data-theme] header .brand-title { letter-spacing: 0.04em; }
+html[data-theme] .header-top { padding: 10px 16px 6px; }
+html[data-theme] .brand-logo { height: 30px !important; max-width: 160px; }
+.brand-logo.logo-light { display: none; }
+html[data-theme="light"] .brand-logo.logo-dark { display: none; }
+html[data-theme="light"] .brand-logo.logo-light { display: block; }
+html[data-theme] #userInfo { color: var(--muted) !important; font-size: 13px; }
+html[data-theme] header button[onclick="logout()"] { color: var(--amber-text) !important; font-weight: 600; }
+html[data-theme] #bellBtn { color: var(--link) !important; }
+html[data-theme] #bellBadge { background: var(--amber) !important; color: #12151B !important; font-weight: 700; }
+
+html[data-theme] .nav-scroll { gap: 6px; padding: 4px 12px 8px; }
+html[data-theme] .nav-scroll a, html[data-theme] .nav-scroll button {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  padding: 0 10px;
+  border-radius: 8px;
+  display: inline-flex; align-items: center;
+}
+html[data-theme] .nav-scroll a:hover, html[data-theme] .nav-scroll button:hover { color: var(--text); background: var(--surface-2); }
+html[data-theme] .nav-scroll a.is-current { color: var(--text); background: var(--blue-soft); box-shadow: inset 0 -2px 0 var(--blue); }
+html[data-theme] .nav-scroll a#navCreate { background: var(--blue) !important; color: #fff !important; }
+
+/* Theme switch, next to the user's name */
+.theme-switch {
+  display: inline-flex; align-items: center; gap: 0;
+  border: 1px solid var(--line-strong, rgba(255,255,255,.2));
+  border-radius: 999px; padding: 2px;
+  background: var(--surface-2, #1a2028);
+  min-height: 36px !important;
+  font-size: 12px !important; font-weight: 600;
+  color: var(--muted, #9aa6b4);
+  cursor: pointer;
+}
+.theme-switch .ts-opt {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 999px; line-height: 1;
+}
+.theme-switch svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+html[data-theme="dark"] .theme-switch .ts-dark,
+html[data-theme="light"] .theme-switch .ts-light { background: var(--blue); color: #fff; }
+@media (max-width: 640px) { .theme-switch .ts-txt { display: none; } .theme-switch .ts-opt { padding: 6px 9px; } }
+
+/* Bottom tab bar on phones */
+.tabbar { display: none; }
+@media (max-width: 767px) {
+  html[data-theme] .tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    background: var(--header-bg); border-top: 1px solid var(--line-strong);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+  }
+  html[data-theme] .tabbar a {
+    flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 52px; color: var(--muted); font-size: 11px; font-weight: 600; text-decoration: none;
+    border-radius: 10px;
+  }
+  html[data-theme] .tabbar a svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  html[data-theme] .tabbar a.is-current { color: var(--link); }
+  html[data-theme] .tabbar a.is-current svg { stroke-width: 2.2; }
+  html[data-theme] body.has-tabbar footer { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  html[data-theme] body.has-tabbar #bellPanel { max-height: 60vh; }
+}
+
+/* ---------- Cards, folds and surfaces (all pages) ---------- */
+html[data-theme] .bg-white, html[data-theme] .app-glass {
+  background: var(--surface) !important;
+  color: var(--text);
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow) !important;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  border-radius: var(--radius-lg) !important;
+}
+html[data-theme] .bg-white:has(> .glass-inner), html[data-theme] .app-glass:has(> .glass-inner) { padding: 0 !important; }
+html[data-theme] .glass-inner { background: transparent; border-radius: var(--radius-lg); padding: 16px; }
+html[data-theme] details.dash-fold {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow); padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-theme] details.dash-fold > summary,
+html[data-theme] details.dash-fold > div,
+html[data-theme] details.dash-fold > p { background: transparent; border-radius: 0; padding: 12px 16px; }
+html[data-theme] details.dash-fold > summary {
+  min-height: 52px; font-weight: 600; letter-spacing: 0.01em; text-transform: none; font-size: 16px;
+}
+html[data-theme] details.dash-fold[open] > summary { margin-bottom: 0; border-bottom: 1px solid var(--line); }
+html[data-theme] details.dash-fold > summary::before { border-color: var(--muted) !important; }
+html[data-theme] details.dash-fold > summary .fold-count { color: var(--text) !important; font-family: var(--mono); font-weight: 600; }
+
+html[data-theme] .bg-gray-50, html[data-theme] .bg-gray-100 {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--line);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-theme] .bg-gray-800, html[data-theme] .bg-gray-900, html[data-theme] .bg-gray-700, html[data-theme] .bg-gray-600 { background: var(--surface-2) !important; color: var(--text) !important; border: 1px solid var(--line-strong); }
+html[data-theme] .text-gray-800, html[data-theme] .text-gray-700, html[data-theme] .text-gray-600, html[data-theme] .text-gray-300 { color: var(--text) !important; }
+html[data-theme] .text-gray-500, html[data-theme] .text-gray-400 { color: var(--muted) !important; }
+html[data-theme] .border, html[data-theme] .border-b, html[data-theme] .border-t { border-color: var(--line) !important; }
+html[data-theme] .shadow, html[data-theme] .shadow-md, html[data-theme] .shadow-lg { box-shadow: var(--shadow) !important; }
+html[data-theme] .rounded-xl { border-radius: var(--radius-lg) !important; }
+html[data-theme] .bg-blue-50 { background-color: var(--blue-soft) !important; }
+html[data-theme] .bg-amber-50, html[data-theme] .bg-red-50, html[data-theme] .bg-yellow-100, html[data-theme] .bg-orange-100, html[data-theme] .bg-red-100 { background-color: var(--amber-soft) !important; }
+html[data-theme] .bg-green-50, html[data-theme] .bg-green-100 { background-color: var(--green-soft) !important; }
+html[data-theme] .bg-blue-100, html[data-theme] .bg-cyan-100, html[data-theme] .bg-purple-100, html[data-theme] .bg-pink-100 { background-color: var(--surface-2) !important; }
+html[data-theme] .text-blue-800, html[data-theme] .text-blue-700, html[data-theme] .text-cyan-700, html[data-theme] .text-cyan-600 { color: var(--link) !important; }
+html[data-theme] .text-status-blue { color: var(--link) !important; }
+html[data-theme] .bg-status-blue, html[data-theme] .bg-\[\#025daa\] { background-color: var(--blue) !important; }
+html[data-theme] .border-status-blue, html[data-theme] .border-\[\#025daa\] { border-color: var(--blue-line) !important; }
+html[data-theme] .bg-\[\#025daa22\], html[data-theme] .bg-\[\#025daa33\] { background-color: var(--blue-soft) !important; }
+
+/* Fields */
+html[data-theme] input, html[data-theme] select, html[data-theme] textarea {
+  background: var(--field) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 8px;
+}
+html[data-theme] input::placeholder, html[data-theme] textarea::placeholder { color: var(--faint); }
+html[data-theme] input[type="checkbox"], html[data-theme] input[type="radio"] { accent-color: var(--blue); min-height: 0; }
+
+/* Hard-coded dark colours used by the existing pages, mapped to theme tokens */
+html[data-theme] .bg-\[\#0d1116\], html[data-theme] .bg-\[\#07090c\] { background-color: var(--field) !important; }
+html[data-theme] .bg-\[\#11151c\], html[data-theme] .bg-\[\#12161c\], html[data-theme] .bg-\[\#12161c\]\/85,
+html[data-theme] .bg-\[\#12161ce8\], html[data-theme] .bg-\[\#0c1015\], html[data-theme] .bg-\[\#1a1f27\],
+html[data-theme] .bg-\[\#1b2430\], html[data-theme] .bg-\[\#0f1a14\] { background-color: var(--surface) !important; }
+html[data-theme] .bg-\[\#1a2028\] { background-color: var(--surface-2) !important; }
+html[data-theme] .bg-\[\#2a3340\], html[data-theme] .bg-\[\#3a4450\] {
+  background-color: var(--surface-2) !important; color: var(--text) !important; border: 1px solid var(--line-strong);
+}
+html[data-theme] .text-\[\#9aa6b4\], html[data-theme] .text-\[\#6b7683\] { color: var(--muted) !important; }
+html[data-theme] .text-\[\#7ec2ff\] { color: var(--link) !important; }
+html[data-theme] .text-\[\#d5dde6\], html[data-theme] .text-\[\#e8edf3\], html[data-theme] .text-\[\#cfe6ff\] { color: var(--text) !important; }
+html[data-theme] .border-\[\#2a3340\] { border-color: var(--line-strong) !important; }
+html[data-theme] .border-\[\#7ec2ff\] { border-color: var(--link) !important; }
+html[data-theme] .bg-black\/20 { background-color: var(--surface-2) !important; }
+
+/* Warnings: amber, never red */
+html[data-theme] .text-red-400, html[data-theme] .text-red-500, html[data-theme] .text-red-600,
+html[data-theme] .text-red-700, html[data-theme] .text-red-800,
+html[data-theme] .text-orange-200, html[data-theme] .text-orange-300, html[data-theme] .text-orange-400,
+html[data-theme] .text-orange-600, html[data-theme] .text-orange-700,
+html[data-theme] .text-amber-600, html[data-theme] .text-amber-700,
+html[data-theme] .text-yellow-600, html[data-theme] .text-yellow-700 { color: var(--amber-text) !important; }
+html[data-theme] .bg-red-500, html[data-theme] .bg-red-600, html[data-theme] .bg-red-700, html[data-theme] .bg-red-800,
+html[data-theme] .bg-\[\#b91c1c\], html[data-theme] .bg-orange-600, html[data-theme] .bg-orange-700,
+html[data-theme] .bg-amber-600, html[data-theme] .bg-amber-700 { background-color: var(--amber-btn) !important; color: #fff !important; }
+html[data-theme] .bg-orange-900 { background-color: var(--amber-soft) !important; }
+html[data-theme] .border-red-200, html[data-theme] .border-red-400, html[data-theme] .border-red-500,
+html[data-theme] .border-orange-500, html[data-theme] .border-orange-600,
+html[data-theme] .border-amber-200, html[data-theme] .border-amber-500 { border-color: var(--amber) !important; }
+html[data-theme] .text-green-400, html[data-theme] .text-green-600, html[data-theme] .text-green-700, html[data-theme] .text-green-800 { color: var(--green-text) !important; }
+html[data-theme] .bg-green-600, html[data-theme] .bg-green-700 { background-color: var(--green) !important; }
+html[data-theme] .border-green-200, html[data-theme] .border-green-300, html[data-theme] .border-green-600, html[data-theme] .border-green-700 { border-color: var(--green) !important; }
+html[data-theme] .bg-purple-600, html[data-theme] .bg-purple-700 { background-color: var(--purple) !important; }
+html[data-theme] .text-purple-300, html[data-theme] .text-purple-600, html[data-theme] .text-purple-700 { color: var(--purple) !important; }
+html[data-theme="dark"] .text-purple-300, html[data-theme="dark"] .text-purple-600, html[data-theme="dark"] .text-purple-700 { color: #B9A4E6 !important; }
+html[data-theme] .bg-red-500.rounded-full, html[data-theme] .w-2.h-2.rounded-full.bg-red-500 { background-color: var(--amber) !important; }
+
+/* Light theme only: white text that was written for the old dark glass */
+html[data-theme="light"] .text-white:not([class*="bg-"]):not(.tabbar *) { color: var(--text) !important; }
+html[data-theme="light"] [class*="bg-[#025daa"] .text-white,
+html[data-theme="light"] .bg-status-blue .text-white { color: #fff !important; }
+html[data-theme="light"] .bg-\[\#2a3340\].text-white, html[data-theme="light"] .bg-\[\#3a4450\].text-white,
+html[data-theme="light"] .bg-gray-800.text-white, html[data-theme="light"] .bg-gray-700.text-white { color: var(--text) !important; }
+
+/* Task buttons on the job page (and anywhere the old ids are used) */
+html[data-theme] #tasksList button, html[data-theme] #actionButtons button {
+  background: var(--blue) !important; color: #fff !important; font-weight: 700 !important; border-radius: 10px;
+}
+html[data-theme] #tasksList button.task-off { background: var(--surface-2) !important; color: var(--text) !important; border: 1px solid var(--line-strong); }
+html[data-theme] #tasksList button.task-on { background: var(--blue) !important; color: #fff !important; box-shadow: 0 0 0 2px var(--link); }
+html[data-theme] #tasksList button.task-done { background: var(--green) !important; color: #fff !important; }
+html[data-theme] #tasksList button.task-block { background: var(--amber-btn) !important; color: #fff !important; }
+html[data-theme] #tasksList button[class*="bg-[#2a3340]"] { background: var(--surface-2) !important; color: var(--text) !important; border: 1px solid var(--line-strong); }
+html[data-theme] #tasksList select, html[data-theme] #tasksList input { color: var(--text) !important; background: var(--field) !important; }
+html[data-theme] .task-label { color: var(--muted); letter-spacing: 0.08em; font-weight: 700; }
+
+/* Bell panel */
+html[data-theme] #bellPanel { background: var(--surface) !important; border-color: var(--line-strong) !important; box-shadow: var(--shadow); color: var(--text); }
+html[data-theme] #bellList { color: var(--text) !important; }
+
+/* Sticky jump bar (job page and others that use it) */
+html[data-theme] .sticky-sub {
+  background: var(--bg) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+  border-bottom: 1px solid var(--line); top: var(--hdr, 92px); gap: 4px !important; padding: 6px 0 0 !important;
+}
+html[data-theme] .sticky-sub a {
+  background: transparent !important; color: var(--muted) !important; border-radius: 0 !important;
+  font-weight: 600; padding: 10px 12px !important; min-height: 44px; display: inline-flex; align-items: center;
+  border-bottom: 2px solid transparent;
+}
+html[data-theme] .sticky-sub a.is-current, html[data-theme] .sticky-sub a:hover { color: var(--text) !important; border-bottom-color: var(--blue); }
+
+/* Footer */
+html[data-theme] footer .text-\[\#6b7683\] { color: var(--faint) !important; }
+html[data-theme] footer img { opacity: 0.9; }
+
+/* Photos keep a neutral frame in both themes */
+html[data-theme] .stock-hero, html[data-theme] .stock-thumb { background: var(--surface-2); border: 1px solid var(--line); }
+
+/* ---------- Shared new-look pieces (dashboard and job page) ---------- */
+.nl-overline {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--faint);
+}
+.nl-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px;
+  border-radius: 6px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid var(--line-strong); color: var(--muted);
+}
+.nl-chip.is-amber { color: var(--amber-text); border-color: var(--amber); background: var(--amber-soft); }
+.nl-chip.is-blue { color: var(--link); border-color: var(--blue-line); background: var(--blue-soft); }
+.nl-chip.is-green { color: var(--green-text); border-color: var(--green); background: var(--green-soft); }
+.nl-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint);
+  margin: 0 0 8px;
+}
+
+/* ---------- Dashboard (option C, needs-attention layout) ---------- */
+html[data-theme] .dash-head h1 { font-size: 28px; line-height: 1.15; margin-top: 4px; }
+html[data-theme] .dash-head p { color: var(--muted) !important; }
+html[data-theme] .needs-wrap {
+  background: transparent; border: 0; padding: 0; margin-bottom: 18px;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-theme] .needs-label { color: var(--faint); font-family: var(--mono); letter-spacing: 0.12em; font-weight: 600; }
+html[data-theme] .needs-strip { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 900px) { html[data-theme] .needs-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1200px) { html[data-theme] .needs-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+html[data-theme] .needs-pill {
+  display: flex; width: 100%; justify-content: flex-start; align-items: center; gap: 10px;
+  min-height: 56px; padding: 10px 16px 10px 18px;
+  border-radius: var(--radius-lg); background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  text-transform: none; letter-spacing: 0; font-size: 16px; font-weight: 600; text-align: left;
+}
+html[data-theme] .needs-pill .n {
+  margin-left: auto; color: var(--text); font-family: var(--mono); font-size: 18px; font-weight: 600;
+}
+html[data-theme] .needs-pill::after {
+  content: ""; width: 8px; height: 8px; flex: 0 0 auto; margin-left: 4px;
+  border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint);
+  transform: rotate(45deg) translateY(-3px);
+}
+html[data-theme] .needs-pill.is-on { border-color: var(--blue-line); box-shadow: 0 0 0 2px var(--blue) !important; }
+html[data-theme] .needs-pill.is-on::after { transform: rotate(-135deg) translateY(-1px); }
+html[data-theme] .needs-pill[class*="tone-"] { box-shadow: inset 3px 0 0 var(--tone, var(--blue)), var(--shadow); }
+html[data-theme] .needs-pill.is-on[class*="tone-"] { box-shadow: inset 3px 0 0 var(--tone, var(--blue)), 0 0 0 2px var(--blue) !important; }
+html[data-theme] .needs-pill.tone-blue, html[data-theme] .needs-pill.tone-cyan { --tone: var(--blue); }
+html[data-theme] .needs-pill.tone-green { --tone: var(--green); }
+html[data-theme] .needs-pill.tone-purple { --tone: var(--purple); }
+html[data-theme] .needs-pill.tone-orange, html[data-theme] .needs-pill.tone-amber, html[data-theme] .needs-pill.tone-red { --tone: var(--amber); }
+html[data-theme] .needs-empty { color: var(--muted); font-size: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+
+html[data-theme] details.dash-fold.fold-blue, html[data-theme] details.dash-fold.fold-cyan { box-shadow: inset 3px 0 0 var(--blue), var(--shadow); }
+html[data-theme] details.dash-fold.fold-green { box-shadow: inset 3px 0 0 var(--green), var(--shadow); }
+html[data-theme] details.dash-fold.fold-purple { box-shadow: inset 3px 0 0 var(--purple), var(--shadow); }
+html[data-theme] details.dash-fold.fold-orange, html[data-theme] details.dash-fold.fold-amber,
+html[data-theme] details.dash-fold.fold-red { box-shadow: inset 3px 0 0 var(--amber), var(--shadow); }
+html[data-theme] #moreFold > summary { font-size: 17px; }
+html[data-theme] #moreFoldBody > details.dash-fold { box-shadow: none; border-color: var(--line); margin-bottom: 10px; }
+
+html[data-theme] .shortcut-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin: 0 0 18px; }
+html[data-theme] .shortcut-icons a {
+  width: auto; min-height: 72px; justify-content: center; padding: 10px 4px 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); box-shadow: var(--shadow);
+}
+html[data-theme] .shortcut-icons .tile-ico { width: 28px; height: 28px; flex-basis: 28px; background: transparent; border-radius: 0; }
+html[data-theme] .shortcut-icons .tile-ico svg { stroke: var(--link); width: 22px; height: 22px; }
+html[data-theme] .shortcut-icons .lbl { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: 0.06em; }
+html[data-theme] .attention-reveal { background: transparent; border: 0; padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-theme] .attention-reveal-inner { background: transparent; padding: 0; }
+html[data-theme] .attention-reveal-inner > details.dash-fold { box-shadow: 0 0 0 1px var(--blue-line), var(--shadow); }
+
+/* ---------- Job page ---------- */
+.nl-stagebar { display: none; }
+html[data-theme] .nl-stagebar.is-ready {
+  display: block; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 14px 10px 10px; box-shadow: var(--shadow);
+}
+.nl-stages { display: flex; align-items: flex-start; list-style: none; margin: 0; padding: 0; }
+.nl-stages li { flex: 1 1 0; position: relative; text-align: center; min-width: 0; }
+.nl-stages li::before {
+  content: ""; position: absolute; top: 7px; left: -50%; right: 50%; height: 2px; background: var(--line-strong);
+}
+.nl-stages li:first-child::before { display: none; }
+.nl-stages li.is-done::before, .nl-stages li.is-now::before { background: var(--blue); }
+.nl-stages .dot {
+  position: relative; z-index: 1; display: block; width: 16px; height: 16px; margin: 0 auto 6px;
+  border-radius: 50%; border: 2px solid var(--line-strong); background: var(--surface);
+}
+.nl-stages li.is-done .dot { background: var(--blue); border-color: var(--blue); }
+.nl-stages li.is-now .dot { border-color: var(--blue); box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 8px var(--blue); }
+.nl-stages li.is-warn .dot { border-color: var(--amber); box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 8px var(--amber); }
+.nl-stages .lbl { display: block; font-size: 10px; line-height: 1.2; color: var(--faint); padding: 0 2px; }
+.nl-stages li.is-done .lbl { color: var(--muted); }
+.nl-stages li.is-now .lbl, .nl-stages li.is-warn .lbl { color: var(--text); font-weight: 700; }
+@media (min-width: 768px) { .nl-stages .lbl { font-size: 12px; } }
+
+html[data-theme] .job-head h1#jobNumber {
+  font-family: var(--mono); font-size: 34px; letter-spacing: 0.01em; text-transform: none; color: var(--text) !important;
+}
+@media (min-width: 768px) { html[data-theme] .job-head h1#jobNumber { font-size: 40px; } }
+html[data-theme] .job-head #vehicleLine { color: var(--muted); }
+html[data-theme] #jobTypeBadge { font-family: var(--mono); letter-spacing: 0.08em; font-weight: 600; border-radius: 6px; }
+html[data-theme] #actionButtons button { min-height: 48px; padding: 12px 18px !important; font-size: 15px; }
+@media (max-width: 640px) { html[data-theme] #actionButtons { width: 100%; } html[data-theme] #actionButtons button { flex: 1 1 100%; } }
+
+html[data-theme] details.nl-fold {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+html[data-theme] details.nl-fold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  min-height: 56px; padding: 12px 16px; font-weight: 600; font-size: 16px; color: var(--text);
+}
+html[data-theme] details.nl-fold > summary::-webkit-details-marker { display: none; }
+html[data-theme] details.nl-fold > summary .sum-hint { margin-left: auto; color: var(--faint); font-size: 13px; font-weight: 500; }
+html[data-theme] details.nl-fold > summary::after {
+  content: ""; width: 8px; height: 8px; flex: 0 0 auto; border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint);
+  transform: rotate(45deg) translateY(-3px);
+}
+html[data-theme] details.nl-fold[open] > summary { border-bottom: 1px solid var(--line); }
+html[data-theme] details.nl-fold[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
+html[data-theme] details.nl-fold > .nl-fold-body { padding: 12px; }
+html[data-theme] details.nl-fold > .nl-fold-body .bg-white { box-shadow: none !important; background: var(--surface-2) !important; }
+
+html[data-theme] #content dl dt { color: var(--muted) !important; }
+html[data-theme] #content dl > div { padding: 4px 0; border-bottom: 1px solid var(--line); gap: 12px; }
+html[data-theme] #content dl > div:last-child { border-bottom: 0; }
+html[data-theme] #content dl dd { text-align: right; }
+html[data-theme] #content #stockNumber { font-family: var(--mono); }
+html[data-theme] #content h2.text-status-blue {
+  color: var(--text) !important; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;
+}
+html[data-theme] #taskProgress { font-family: var(--mono); color: var(--muted) !important; }
+html[data-theme] #tasksList > * { border-color: var(--line) !important; }
+html[data-theme] #updateReqBanner.bg-orange-700 { background: var(--amber-soft) !important; color: var(--amber-text) !important; border: 1px solid var(--amber); }
+html[data-theme] #emptyCheckJobBox { border-color: var(--amber) !important; background: var(--surface); }
+html[data-theme] #washReqBox { background: var(--blue-soft) !important; border-color: var(--blue-line) !important; }
+html[data-theme] #photoPromptModal .bg-white { max-width: 24rem; }
+
+/* Fit real staff names and all existing header controls on small phones. */
+html[data-theme] .shell-controls { min-width: 0; }
+@media (max-width: 767px) {
+  html[data-theme] .header-top { flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 16px 2px; }
+  html[data-theme] .header-top > span.shrink-0 { margin-right: auto; }
+  html[data-theme] .brand-logo { max-width: 104px; height: auto !important; max-height: 32px; }
+  html[data-theme] .shell-controls { display: contents; }
+  html[data-theme] .shell-controls > div { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-end; gap: 0 12px; min-width: 0; }
+  html[data-theme] .shell-controls > div > a, html[data-theme] .shell-controls > div > button { flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 36px; font-size: 11px; letter-spacing: 0.03em; white-space: nowrap; }
+  html[data-theme] #userInfo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  html[data-theme] .nav-scroll { max-width: 100vw; }
+  html[data-theme] main { min-width: 0; }
+  html[data-theme] #content dd { min-width: 0; overflow-wrap: anywhere; }
+}
+
+/* Job page: wash request folded to one tap, tanker check kept compact */
+html[data-theme] #washReqBox { padding: 0 !important; }
+html[data-theme] #washReqBox > details > summary { list-style: none; cursor: pointer; min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+html[data-theme] #washReqBox > details > summary::-webkit-details-marker { display: none; }
+html[data-theme] #washReqBox > details > summary::after { content: ""; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint); transform: rotate(45deg) translateY(-3px); }
+html[data-theme] #washReqBox > details[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
+html[data-theme] #washReqBox > details > .wash-body { padding: 0 16px 16px; }
+html[data-theme] #emptyCheckJobBox .glass-inner { padding: 12px 14px; }
+html[data-theme] #emptyCheckJobBox p { font-size: 13px; margin: 4px 0 8px; }
+
+html[data-theme] #actionButtons a[class*="bg-indigo"] { background: var(--blue) !important; color: #fff !important; font-weight: 700; min-height: 44px; display: inline-flex; align-items: center; }
+html[data-theme] #actionButtons > a:not([class*="bg-"]) { min-height: 44px; display: inline-flex; align-items: center; }
+html[data-theme] .job-head #jobTypeBadge { display: inline-block; margin: 6px 8px 2px 0; line-height: 1.4; }
+html[data-theme] .job-head #jobOverline { margin-bottom: 4px; }
+/* Compatibility for page-specific card styles not yet restyled in stage 1 */
+html[data-theme] .g-card { background: var(--surface) !important; color: var(--text) !important; border-color: var(--line) !important; box-shadow: var(--shadow); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-theme] .g-filter { background: var(--surface-2); color: var(--text); border-color: var(--line-strong); }
+html[data-theme] .g-filter.on { background: var(--blue); color: #fff; border-color: var(--blue); }
+html[data-theme] .yard-summary div, html[data-theme] .yard-row { background: var(--surface); border-color: var(--line); }
+html[data-theme] .yard-summary strong, html[data-theme] .yard-row h2 { color: var(--link); }
+html[data-theme] .yard-toolbar button { border-color: var(--line-strong); }
+html[data-theme] .yard-tick { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+html[data-theme] .yard-tick[aria-pressed=true] { background: var(--green-soft); border-color: var(--green); color: var(--green-text); }
+html[data-theme] .yard-by, html[data-theme] .yard-note { color: var(--muted); }
+html[data-theme] #yardError { color: var(--amber-text); }
+html[data-theme] .bg-teal-600, html[data-theme] .bg-teal-700, html[data-theme] .bg-indigo-600, html[data-theme] .bg-indigo-700 { background-color: var(--blue) !important; color: #fff !important; }
+html[data-theme] .text-pink-700 { color: var(--purple) !important; }
+html[data-theme] .bg-green-600, html[data-theme] .bg-green-700, html[data-theme] #tasksList button.task-done { background-color: #18723D !important; }
+html[data-theme] .bg-purple-600, html[data-theme] .bg-purple-700 { background-color: #70519F !important; }
+
+/* A single primary action with the existing secondary actions in a compact row */
+@media (max-width: 640px) {
+  html[data-theme] #actionButtons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: stretch; }
+  html[data-theme] #actionButtons > button, html[data-theme] #actionButtons > a { width: 100%; min-width: 0; justify-content: center; text-align: center; font-size: 12px !important; padding: 10px !important; }
+  html[data-theme] #actionButtons > a:first-child, html[data-theme] #actionButtons > button:first-child { grid-column: 1 / -1; font-size: 15px !important; }
+}
+html[data-theme] #jobNumber, html[data-theme] #stageBar, html[data-theme] #infoFold { scroll-margin-top: 140px; }
+
+/* Keep role-based hiding intact: the restyled links above set display, so .hidden must still win. */
+html[data-theme] .nav-scroll .hidden,
+html[data-theme] .tabbar .hidden,
+html[data-theme] .shell-controls .hidden,
+html[data-theme] #actionButtons > .hidden,
+html[data-theme] .sticky-sub .hidden,
+html[data-theme] .nl-chip.hidden { display: none !important; }
+/* Light theme: old dark panels that carry text-white become light surfaces, so their text goes dark */
+html[data-theme="light"] .text-white:is([class*="bg-[#12161c"], [class*="bg-[#11151c"], [class*="bg-[#0d1116"], [class*="bg-[#07090c"],
+  [class*="bg-[#0c1015"], [class*="bg-[#1a1f27"], [class*="bg-[#1b2430"], [class*="bg-[#0f1a14"], [class*="bg-[#1a2028"],
+  .bg-white, .bg-gray-50, .bg-gray-100, .bg-black\/20, .bg-orange-900) { color: var(--text) !important; }
+/* Preserve white action text on coloured links (the global link rule would otherwise win). */
+html[data-theme] a.text-white:is(.bg-status-blue,.bg-green-600,.bg-green-700,.bg-purple-600,.bg-purple-700,.bg-indigo-600,.bg-indigo-700,.bg-orange-600,.bg-orange-700,.bg-red-600,.bg-red-700,.bg-teal-600,.bg-teal-700,.bg-\[\#025daa\]) { color: #fff !important; }
+html[data-theme] span.bg-\[\#025daa\] { color: #fff !important; }
+html[data-theme="light"] #photoReminderBanner .task-label[style], html[data-theme="light"] #tasksList .task-label[style] { color: var(--amber-text) !important; }
+html[data-theme] .sticky-sub a.text-white[class] { color: var(--muted) !important; background: transparent !important; }
+html[data-theme] .sticky-sub a.text-white.is-current[class], html[data-theme] .sticky-sub a.text-white[class]:hover { color: var(--text) !important; }
+/* 320 px phones: task controls wrap inside the card */
+html[data-theme] #tasksList, html[data-theme] #tasksList * { min-width: 0; }
+html[data-theme] #tasksList select, html[data-theme] #tasksList input { max-width: 100%; }
+html[data-theme] #tasksList .flex { flex-wrap: wrap; }
+
+/* ---------- Remaining screens: Mission Control / Clean Glass ---------- */
+html[data-theme] .logo-light { display:none; }
+html[data-theme="light"] .logo-dark { display:none; }
+html[data-theme="light"] .logo-light { display:block; }
+/* Light theme: the existing white logo and slogan files drawn in dark ink; the blue accent stays #005CAA
+   (colour matrix in base.html, #stsInk). */
+html[data-theme="light"] img.ink { filter: url(#stsInk); }
+html[data-theme] .nl-h1 { color:var(--text) !important; text-transform:none; letter-spacing:-.025em; line-height:1.2; margin-bottom:6px; }
+html[data-theme] .nl-overline { margin-bottom:7px; }
+html[data-theme] .login-card { padding:28px 24px; box-shadow:none; }
+html[data-theme] .login-card .login-logo { width:152px; height:auto; padding-top:12px; }
+html[data-theme] #loginForm label { color:var(--muted); font-size:11px; letter-spacing:.12em; }
+html[data-theme] .login-card h1 { letter-spacing:-.025em; }
+html[data-theme] main:has(#loginForm) { max-width:480px; }
+html[data-theme] .login-card:has(#loginForm) { background:transparent !important; border-color:transparent !important; }
+html[data-theme] #loginForm input,html[data-theme] #pwForm input { min-height:46px; }
+html[data-theme] #bellPanel { position:fixed !important; z-index:80 !important; top:calc(var(--hdr, 110px) + 8px) !important; right:12px; padding:16px; }
+html[data-theme] #bellList { margin-top:12px; }
+html[data-theme] .g-filter { border-radius:8px; font-size:11px; font-weight:600; letter-spacing:.02em; min-height:40px; }
+html[data-theme] #filterBar { padding:10px 0 14px; }
+html[data-theme] #filterBar>div { gap:5px; }
+/* Compact lists keep every photo and all card information. */
+html[data-theme] #jobsContainer .g-card { display:flex; align-items:flex-start; gap:10px; padding:14px; }
+html[data-theme] #jobsContainer .g-card .stock-thumb { width:86px; height:90px; flex-shrink:0; margin:0; object-fit:contain; }
+html[data-theme] #jobsContainer .g-card .glass-inner { min-width:0; padding:0; flex:1; }
+html[data-theme] #jobsContainer .g-card .text-lg { font-family:var(--mono); font-size:15px; }
+html[data-theme] #jobsContainer .g-card .mt-3 { margin-top:7px; gap:4px; }
+html[data-theme] #jobsContainer .g-card span { line-height:1.4; }
+html[data-theme] #locationBoard a { line-height:1.5; }
+html[data-theme] #locationBoard img { border-radius:5px; border:1px solid var(--line); }
+html[data-theme] .stBtn { background:var(--surface-2); color:var(--text); border:1px solid var(--line-strong); }
+html[data-theme] .stBtn.on { background:var(--blue); color:#fff; border-color:var(--blue); }
+html[data-theme] #pdiSections button { min-width:44px; min-height:44px; }
+html[data-theme] #pdiSections textarea { min-height:60px; }
+html[data-theme] #addForm label { color:var(--muted); }
+html[data-theme] #list table { table-layout:fixed; width:100%; }
+html[data-theme] #list th,html[data-theme] #list td { overflow-wrap:anywhere; }
+html[data-theme] #list td button { margin:2px; white-space:normal; }
+html[data-theme] #list th:last-child { width:36%; }
+html[data-theme] #usersList>* { overflow-wrap:anywhere; min-width:0; }
+html[data-theme] input[type=checkbox] { accent-color:var(--blue); }
+@media(max-width:480px) {
+  html[data-theme] #jobsContainer .g-card { padding:12px; gap:9px; }
+  html[data-theme] #jobsContainer .g-card .stock-thumb { width:68px; height:78px; }
+  html[data-theme] #jobsContainer .g-card .text-sm { font-size:13px; }
+  html[data-theme] #list table { font-size:11px; }
+  html[data-theme] #list td button { padding:8px 5px; font-size:11px; }
+  html[data-theme] #list th:last-child { width:35%; }
+}

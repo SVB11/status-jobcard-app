@@ -129,7 +129,8 @@
 {% endblock %}
 
 {% block content %}
-<div class="mb-5">
+<div class="mb-5 dash-head">
+    <div id="dashDate" class="nl-overline"></div>
     <h1 class="text-2xl font-bold uppercase tracking-wide">Dashboard</h1>
     <p class="text-sm text-[#9aa6b4]">Needs attention first. Everything else is under More.</p>
 </div>
@@ -1335,5 +1336,14 @@
             });
         } catch (e) {}
     }
+</script>
+<script>
+(function(){
+    var el = document.getElementById('dashDate');
+    if (!el) return;
+    try {
+        el.textContent = new Intl.DateTimeFormat('en-ZA', { timeZone: 'Africa/Johannesburg', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date()).replace(/,/g, '') + ' \u00b7 SAST';
+    } catch (e) {}
+})();
 </script>
 {% endblock %}

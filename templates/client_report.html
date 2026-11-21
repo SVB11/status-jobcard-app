@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>(function(){var t="dark";try{var s=localStorage.getItem("sts_theme");if(s==="light"||s==="dark")t=s;}catch(e){}document.documentElement.setAttribute("data-theme",t);})();</script>
     <title>Client progress report</title>
     <style>
         body { font-family: Arial, sans-serif; background: #e8edf3; color: #0c2b4a; margin: 0; }
@@ -29,6 +30,19 @@
             textarea { display: none; }
         }
     </style>
+    <style>
+        /* Screen chrome only: the report and existing print rules stay white paper. */
+        @media screen {
+            html[data-theme="dark"] body { background:#12151B; }
+            html[data-theme="light"] body { background:#F3F5F7; }
+            html[data-theme] .bar { background:#171B22; border-bottom:1px solid #343b46; gap:8px; }
+            html[data-theme="light"] .bar { background:#fff; border-color:#d7dde4; }
+            html[data-theme] .bar a,html[data-theme] .bar button { background:#005CAA; font-weight:600; }
+            html[data-theme] .bar .wa { background:#1f7a3f; }
+            html[data-theme] #themeSwitch { margin-left:auto; background:transparent; border:1px solid #8893a0; color:#f4f6f8; }
+            html[data-theme="light"] #themeSwitch { color:#12151B; }
+        }
+    </style>
 </head>
 <body>
     <div class="bar">
@@ -36,7 +50,9 @@
         <button type="button" class="wa" onclick="shareWhatsApp()">Share on WhatsApp</button>
         <a id="pdfLink" href="#">Download PDF</a>
         <button type="button" onclick="window.print()">Print</button>
+        <button type="button" id="themeSwitch" aria-label="Switch colour theme">Light / Dark</button>
     </div>
+    <script>document.getElementById('themeSwitch').addEventListener('click',function(){var t=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem('sts_theme',t);}catch(e){}});</script>
     <div class="page">
         <img src="/static/images/status_logo_th.png" alt="Status Truck Sales" style="height:48px">
         <div class="muted">www.statustrucksales.co.za</div>
