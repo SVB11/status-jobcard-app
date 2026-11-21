@@ -28,13 +28,14 @@
         <div id="title"></div>
     </div>
     <div id="content">Loading...</div>
+<script src="/static/js/job_display.js"></script>
 <script>
     const jobId = {{ job_id }};
     async function load() {
         const p = await (await fetch('/api/jobs/' + jobId + '/pdi', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') } })).json();
         const j = p.job;
         document.title = (j.stock_number || '') + ' ' + (j.vehicle_description || '') + ' PDI';
-        document.getElementById('title').innerHTML = '<strong>' + (j.stock_number || j.job_number) + '</strong><div class="muted">' + (j.vehicle_description || '') + '</div>';
+        document.getElementById('title').innerHTML = '<strong>' + jobDisplayLabel(j) + '</strong><div class="muted">' + (j.vehicle_description || '') + '</div>';
         let html = '<table>';
         [['Stock', j.stock_number], ['Vehicle', j.vehicle_description],
          ['Type', j.main_type + ' / ' + j.sub_type], ['Year', j.year || '—'],

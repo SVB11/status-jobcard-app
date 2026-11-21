@@ -27,6 +27,7 @@
         <div id="when"></div>
     </div>
     <div id="content">Loading...</div>
+<script src="/static/js/job_display.js"></script>
 <script>
     document.getElementById('when').textContent = new Date().toLocaleString();
     (async function() {
@@ -36,7 +37,7 @@
         if (!jobs.length) { document.getElementById('content').textContent = 'No open parts or extras'; return; }
         let html = '';
         jobs.forEach(function(j) {
-            html += '<div class="job"><h2>' + j.job_number + ' — ' + j.stock_number + ' ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</h2>';
+            html += '<div class="job"><h2>' + jobDisplayLabel(j) + ' — ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</h2>';
             html += '<div style="margin-bottom:6px;color:#555">Status: ' + j.status + ' | Sales: ' + (j.salesman_name || '') + '</div>';
             html += '<h3>Parts</h3><table><tr><th>Part</th><th>Qty</th><th>Price</th><th>Order no</th><th>Status</th><th>Invoice</th></tr>';
             if (!(j.parts || []).length) html += '<tr><td colspan="6">None</td></tr>';

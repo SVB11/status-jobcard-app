@@ -32,6 +32,7 @@
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-white uppercase tracking-wide" id="jobNumber"></h1>
+            <p id="jobIdHint" class="hidden text-xs text-[#9aa6b4] mt-1"></p>
             <p class="text-[#9aa6b4]"><span id="jobTypeBadge" class="text-xs px-2 py-1 rounded bg-[#025daa] text-white mr-2">SOLD</span><span id="vehicleLine"></span></p>
         </div>
         <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
@@ -802,8 +803,13 @@
             document.getElementById('loading').classList.add('hidden');
             document.getElementById('content').classList.remove('hidden');
 
-            document.getElementById('jobNumber').textContent = j.job_number;
-            document.getElementById('vehicleLine').textContent = j.stock_number + ' — ' + j.vehicle_description;
+            document.getElementById('jobNumber').textContent = jobDisplayId(j);
+            const hintEl = document.getElementById('jobIdHint');
+            if (hintEl) {
+                if (jobDisplayHint(j)) { hintEl.textContent = jobDisplayHint(j); hintEl.classList.remove('hidden'); }
+                else { hintEl.textContent = ''; hintEl.classList.add('hidden'); }
+            }
+            document.getElementById('vehicleLine').textContent = [j.vehicle_description, j.year].filter(Boolean).join(' · ');
             const typeBadge = document.getElementById('jobTypeBadge');
             if (typeBadge) {
                 const show = (j.job_purpose || 'sold') === 'showroom';

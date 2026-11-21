@@ -438,14 +438,14 @@
                 const others = rows.filter(function(j){ return j.job_purpose !== 'showroom'; });
                 if (purpose === 'sold' && showroom.length) {
                     const s = showroom[0];
-                    if (!confirm(stock + ' already has showroom job ' + s.job_number + '. Convert it to this sales job? The showroom tasks stay on the card.')) {
+                    if (!confirm(stock + ' already has a showroom job' + (s.display_hint ? ' (' + s.display_hint + ')' : '') + '. Convert it to this sales job? The showroom tasks stay on the card.')) {
                         submitBtn.disabled = false;
                         submitBtn.textContent = 'Submit Job Card to Workshop';
                         return;
                     }
                     payload.convert_job_id = s.id;
                 } else if (others.length) {
-                    const lines = others.map(function(j){ return j.job_number + ' (' + j.status + ')'; }).join(', ');
+                    const lines = others.map(function(j){ return (j.display_hint ? j.display_hint + ' · ' : '') + j.status; }).join(', ');
                     if (!confirm(stock + ' already has an open job: ' + lines + '. Create another card anyway?')) {
                         submitBtn.disabled = false;
                         submitBtn.textContent = purpose === 'showroom' ? 'Submit showroom job for admin approval' : 'Submit Job Card to Workshop';
