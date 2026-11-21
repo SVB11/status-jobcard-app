@@ -91,6 +91,13 @@
         </div></div>
     </div>
 
+    <div id="photoArchiveBox" class="hidden bg-white rounded-xl shadow"><div class="glass-inner">
+        <h2 class="font-semibold text-status-blue mb-2">Job photos</h2>
+        <div id="photoArchiveInfo" class="text-sm space-y-1"></div>
+        <div id="photoArchiveActions" class="flex gap-2 flex-wrap mt-2"></div>
+        <div id="photoDeleteStep" class="hidden mt-3 p-3 rounded-lg border border-orange-500"></div>
+    </div></div>
+
     <div class="bg-white rounded-xl shadow"><div class="glass-inner">
         <div class="flex items-center justify-between mb-3">
             <h2 class="font-semibold text-status-blue">Work / Prep Tasks</h2>
@@ -213,6 +220,19 @@
             <div id="updatesList" class="space-y-2"></div>
         </details>
         <div class="mt-3 text-xs text-gray-500" id="partsThirdParty"></div>
+    </div></div>
+</div>
+<div id="photoPromptModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.6);">
+    <div class="bg-white rounded-xl shadow w-full max-w-sm"><div class="glass-inner">
+        <div class="task-label">Photo reminder</div>
+        <p id="photoPromptText" class="text-sm text-white my-2"></p>
+        <p class="text-xs text-[#9aa6b4] mb-3">This is a reminder only. It does not block Mark Ready, the PDI, sign-offs or delivery.</p>
+        <div class="flex gap-2 flex-wrap">
+            <label class="inline-flex items-center px-4 py-2 bg-[#025daa] text-white text-sm font-bold uppercase rounded-lg cursor-pointer tap">Take photo
+                <input id="photoPromptInput" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="photoPromptChosen(this)">
+            </label>
+            <button type="button" id="photoPromptLater" onclick="photoPromptLater()" class="px-4 py-2 bg-[#2a3340] text-white text-sm rounded-lg uppercase">Later</button>
+        </div>
     </div></div>
 </div>
 {% endblock %}
@@ -478,8 +498,219 @@
         if ((t.task_name || '').toLowerCase().indexOf('roadworthy') !== -1) {
             html += roadworthyBlock(t, canEdit);
         }
+        html += taskPhotoBlock(t, canEdit);
         html += '</div>';
         return html;
+    }
+
+    function escHtml(v) {
+        return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+    }
+
+    function photoMissingText(t) {
+        const m = t.photos_missing || [];
+        if (!m.length) return '';
+        return m.map(function(x){ return x.toUpperCase(); }).join(' and ') + ' photo' + (m.length > 1 ? 's' : '') + ' still needed';
+    }
+
+    function taskPhotoBlock(t, canEdit) {
+        const photos = t.photos || [];
+        const showUpload = canEdit && (isWorkshop);
+        if (!photos.length && !t.photo_reminder && !showUpload) return '';
+        let inner = '';
+        if (t.photo_reminder && (t.photos_missing || []).length) {
+            inner += '<div class="mt-2 px-2 py-1 rounded bg-orange-600 text-white text-xs font-bold uppercase inline-block">Photos missing: ' + photoMissingText(t) + '</div>' +
+                '<div class="text-xs text-[#9aa6b4] mt-1">Take a BEFORE and AFTER photo of this work. Reminder only — it does not block Mark Ready, PDI or delivery.</div>';
+        } else if (t.photo_reminder) {
+            inner += '<div class="mt-2 text-xs text-green-400">Before and after photos taken</div>';
+        }
+        if (photos.length) {
+            inner += '<div class="flex flex-wrap gap-2 mt-2">' + photos.map(function(p) {
+                return '<div class="text-[10px] text-[#9aa6b4] w-24">' +
+                    '<img data-photo-id="' + p.id + '" alt="' + p.stage + ' photo" class="w-24 h-24 object-cover rounded border border-[#2a3340] bg-[#12161c] cursor-pointer" onclick="openTaskPhoto(' + p.id + ')">' +
+                    '<div class="font-bold uppercase text-white">' + (p.stage === 'before' ? 'Before' : 'After') + '</div>' +
+                    '<div>' + escHtml(p.uploaded_by_name || '') + '</div><div>' + escHtml(p.uploaded_at_sast || '') + '</div></div>';
+            }).join('') + '</div>';
+        }
+        if (showUpload) {
+            inner += '<div class="flex flex-wrap gap-2 mt-2">' + ['before', 'after'].map(function(stage) {
+                return '<label class="inline-flex items-center px-3 py-2 bg-[#025daa] text-white text-xs font-bold uppercase rounded-lg cursor-pointer tap">Add ' + stage.toUpperCase() + ' photo' +
+                    '<input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="uploadTaskPhotos(' + t.id + ', \'' + stage + '\', this.files, this)"></label>';
+            }).join('') + '</div>';
+        }
+        if (t.photo_reminder || photos.length) {
+            return '<div class="mt-2 pt-2 border-t border-[#2a3340]"><div class="task-label">Photos</div>' + inner + '</div>';
+        }
+        return '<details class="mt-2"><summary class="cursor-pointer text-xs text-[#7ec2ff]">Photos (optional)</summary>' + inner + '</details>';
+    }
+
+    const photoUrlCache = {};
+    async function loadTaskPhotoThumbs() {
+        const imgs = document.querySelectorAll('img[data-photo-id]');
+        for (const img of imgs) {
+            const id = img.getAttribute('data-photo-id');
+            try {
+                if (!photoUrlCache[id]) {
+                    const res = await fetch('/api/task-photos/' + id, { headers: { 'Authorization': 'Bearer ' + token } });
+                    if (!res.ok) continue;
+                    photoUrlCache[id] = URL.createObjectURL(await res.blob());
+                }
+                img.src = photoUrlCache[id];
+            } catch (e) { /* thumbnail only */ }
+        }
+    }
+
+    function openTaskPhoto(id) {
+        if (photoUrlCache[id]) window.open(photoUrlCache[id], '_blank');
+    }
+
+    // Shrink phone photos in the browser (max 1600 px, JPEG 80%) to keep the server disk small.
+    function shrinkPhoto(file) {
+        return new Promise(function(resolve) {
+            if (!/^image\/(jpeg|png|webp)$/i.test(file.type || '')) { resolve(file); return; }
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = function() {
+                try {
+                    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+                    const c = document.createElement('canvas');
+                    c.width = Math.round(img.naturalWidth * scale);
+                    c.height = Math.round(img.naturalHeight * scale);
+                    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                    c.toBlob(function(blob) {
+                        URL.revokeObjectURL(url);
+                        resolve(blob && blob.size < file.size ? new File([blob], 'photo.jpg', { type: 'image/jpeg' }) : file);
+                    }, 'image/jpeg', 0.8);
+                } catch (e) { URL.revokeObjectURL(url); resolve(file); }
+            };
+            img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+            img.src = url;
+        });
+    }
+
+    async function uploadTaskPhotos(taskId, stage, fileList, inputEl) {
+        const files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return false;
+        const fd = new FormData();
+        fd.append('stage', stage);
+        for (const f of files) {
+            const small = await shrinkPhoto(f);
+            fd.append('files', small, small.name || f.name || 'photo.jpg');
+        }
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/tasks/' + taskId + '/photos', {
+                method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd
+            });
+            const data = await res.json().catch(function(){ return {}; });
+            if (inputEl) inputEl.value = '';
+            if (!res.ok) { alert(data.detail || 'Could not upload photo'); return false; }
+            loadJob();
+            return true;
+        } catch (e) { alert('Connection error'); return false; }
+    }
+
+    let photoPromptState = null;
+    function showPhotoPrompt(task, stage) {
+        photoPromptState = { taskId: task.id, stage: stage };
+        document.getElementById('photoPromptText').textContent = stage === 'before'
+            ? 'Take a BEFORE photo now: ' + task.task_name
+            : 'Take an AFTER photo of the work done: ' + task.task_name;
+        document.getElementById('photoPromptLater').textContent = stage === 'before' ? 'Later' : 'Skip';
+        document.getElementById('photoPromptInput').value = '';
+        document.getElementById('photoPromptModal').classList.remove('hidden');
+    }
+    function hidePhotoPrompt() {
+        document.getElementById('photoPromptModal').classList.add('hidden');
+    }
+    async function photoPromptChosen(input) {
+        const st = photoPromptState;
+        hidePhotoPrompt();
+        if (st) await uploadTaskPhotos(st.taskId, st.stage, input.files, input);
+        photoPromptState = null;
+    }
+    function photoPromptLater() {
+        const st = photoPromptState;
+        hidePhotoPrompt();
+        photoPromptState = null;
+        if (st) {
+            fetch('/api/jobs/' + jobId + '/tasks/' + st.taskId + '/photo-skipped', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stage: st.stage })
+            }).catch(function(){});
+        }
+    }
+
+    function renderPhotoArchive(j) {
+        const box = document.getElementById('photoArchiveBox');
+        if (!box) return;
+        const recs = j.photo_archives || [];
+        const canArchive = isAdmin && (j.photo_count || 0) > 0;
+        if (!recs.length && !canArchive) { box.classList.add('hidden'); return; }
+        box.classList.remove('hidden');
+        document.getElementById('photoArchiveInfo').innerHTML = recs.map(function(a) {
+            return '<div>Photos archived by ' + escHtml(a.deleted_by_name || '') + ' on ' + escHtml(a.deleted_at_sast || '') + ', ' + (a.deleted_count || 0) + ((a.deleted_count === 1) ? ' photo' : ' photos') + '</div>';
+        }).join('') + (canArchive ? '<div class="text-xs text-[#9aa6b4]">' + j.photo_count + ' photo' + (j.photo_count === 1 ? '' : 's') + ' on this job (task before / after and supplier photos).</div>' : '');
+        const ws = (j.stock_number || '').trim() || j.job_number;
+        document.getElementById('photoArchiveActions').innerHTML = canArchive
+            ? '<button type="button" onclick="downloadJobPhotos()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded-lg uppercase font-bold">Download photos (' + escHtml(ws) + ')</button>'
+            : '';
+    }
+
+    let lastPhotoDownload = null;
+    async function downloadJobPhotos() {
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/photos/download', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+            if (!res.ok) { const d = await res.json().catch(function(){ return {}; }); alert(d.detail || 'Could not download photos'); return; }
+            const blob = await res.blob();
+            const name = ((res.headers.get('Content-Disposition') || '').split('filename="')[1] || 'photos.zip').replace('"', '');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            lastPhotoDownload = { id: parseInt(res.headers.get('X-Photo-Archive-Id'), 10), count: parseInt(res.headers.get('X-Photo-Count'), 10) || 0, name: name };
+            const step = document.getElementById('photoDeleteStep');
+            step.innerHTML = '<div class="text-sm text-white mb-2">Downloaded <strong>' + escHtml(name) + '</strong> (' + lastPhotoDownload.count + ' photos). Open the zip on your computer and check it before you delete anything.</div>' +
+                '<div class="flex gap-2 flex-wrap"><button type="button" onclick="deleteDownloadedPhotos()" class="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg uppercase font-bold">Delete these ' + lastPhotoDownload.count + ' photos from the app</button>' +
+                '<button type="button" onclick="document.getElementById(\'photoDeleteStep\').classList.add(\'hidden\')" class="px-4 py-2 bg-[#2a3340] text-white text-sm rounded-lg uppercase">Keep photos</button></div>';
+            step.classList.remove('hidden');
+        } catch (e) { alert('Connection error'); }
+    }
+
+    async function deleteDownloadedPhotos() {
+        if (!lastPhotoDownload) return;
+        if (!confirm('Have you saved the zip ' + lastPhotoDownload.name + '? This deletes ' + lastPhotoDownload.count + ' photos from the app and can\'t be undone. The job card itself is not deleted.')) return;
+        try {
+            const res = await fetch('/api/jobs/' + jobId + '/photos/delete', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ archive_id: lastPhotoDownload.id, confirm: true })
+            });
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) { alert(data.detail || 'Could not delete photos'); return; }
+            lastPhotoDownload = null;
+            document.getElementById('photoDeleteStep').classList.add('hidden');
+            alert(data.message || 'Photos archived');
+            loadJob();
+        } catch (e) { alert('Connection error'); }
+    }
+
+    function renderPhotoReminderBanner(j) {
+        let el = document.getElementById('photoReminderBanner');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'photoReminderBanner';
+            const tasksCard = document.getElementById('tasksList');
+            tasksCard.parentNode.insertBefore(el, tasksCard);
+        }
+        const need = (j.tasks || []).filter(function(t){ return t.photo_reminder && (t.photos_missing || []).length; });
+        if (!need.length || !isWorkshop) { el.className = 'hidden'; el.innerHTML = ''; return; }
+        el.className = 'mb-3 p-3 rounded-lg border border-orange-500 text-sm';
+        el.innerHTML = '<div class="task-label" style="color:#fdba74">Photo reminder — sold job</div>' +
+            '<div class="text-white">Take BEFORE and AFTER photos for: ' + need.map(function(t){ return escHtml(t.task_name) + ' (' + t.photos_missing.join(' + ') + ')'; }).join('; ') + '.</div>' +
+            '<div class="text-xs text-[#9aa6b4] mt-1">Reminder only. It never blocks Mark Ready, the PDI, sign-offs or delivery.</div>';
     }
 
     function renderTasks(tasks) {
@@ -655,6 +886,9 @@
 
             renderSupplierProgress(j);
             renderTasks(j.tasks);
+            renderPhotoReminderBanner(j);
+            renderPhotoArchive(j);
+            loadTaskPhotoThumbs();
 
             if (j.other_instructions) {
                 const el = document.getElementById('otherInstructions');
@@ -799,7 +1033,12 @@
                 loadJob();
                 return;
             }
-            loadJob();
+            await loadJob();
+            if (task && task.photo_reminder && isWorkshop) {
+                const missing = task.photos_missing || [];
+                if (newStatus === 'In Progress' && missing.indexOf('before') !== -1) showPhotoPrompt(task, 'before');
+                else if (newStatus === 'Completed' && missing.indexOf('after') !== -1) showPhotoPrompt(task, 'after');
+            }
         } catch (err) {
             alert('Connection error');
             loadJob();

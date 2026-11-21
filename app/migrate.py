@@ -116,6 +116,35 @@ def migrate_schema():
             if "password_plain" in user_cols:
                 conn.execute(text("UPDATE users SET password_plain = NULL"))
                 conn.execute(text("ALTER TABLE users DROP COLUMN password_plain"))
+        # Photo archive and before/after task photos. Additive only.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS task_photos (
+                id INTEGER PRIMARY KEY,
+                job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+                task_id INTEGER REFERENCES job_tasks(id),
+                stage VARCHAR NOT NULL,
+                photo_path VARCHAR NOT NULL,
+                uploaded_by INTEGER REFERENCES users(id),
+                uploaded_by_name VARCHAR,
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS photo_archives (
+                id INTEGER PRIMARY KEY,
+                job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+                zip_name VARCHAR,
+                photo_count INTEGER,
+                manifest TEXT,
+                downloaded_by INTEGER REFERENCES users(id),
+                downloaded_by_name VARCHAR,
+                downloaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                deleted_by INTEGER REFERENCES users(id),
+                deleted_by_name VARCHAR,
+                deleted_at DATETIME,
+                deleted_count INTEGER
+            )
+        """))
         # Re-read columns. The inspector cache does not see columns added above.
         if "job_cards" in tables:
             job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(job_cards)")).fetchall()}

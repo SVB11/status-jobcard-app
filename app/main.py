@@ -32,6 +32,9 @@ LOCK_MINUTES = 15
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     path = request.url.path
+    if path.startswith("/uploads/tasks/"):
+        # Task photos are only served to logged-in users through /api/task-photos/{id}.
+        return JSONResponse({"detail": "Not found"}, status_code=404)
     allowed = path in ("/set-password", "/login", "/token", "/api/me/set-password", "/health", "/sw.js", "/manifest.json") or path.startswith("/static/") or path.startswith("/uploads/")
     if not allowed:
         raw = auth.token_from_request(request)
@@ -91,6 +94,7 @@ DATA_ROOT = "/data" if os.path.isdir("/data") else BASE_DIR
 UPLOAD_DIR = os.path.join(DATA_ROOT, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "supplier"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "tasks"), exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 @app.get("/sw.js")
@@ -883,6 +887,15 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
     if user_id:
         log_audit(db, user_id, "Accepted Job Card", job.id, f"Job {job.job_number} accepted by Workshop")
 
+    # Photo reminder ping. Information only: any error here is ignored so accept always succeeds.
+    try:
+        names = [t.task_name for t in (job.tasks or []) if needs_photo_reminder(job, t)]
+        if names:
+            notify_role(db, "workshop", f"Photo reminder: take BEFORE and AFTER photos on {job.stock_number} — " + ", ".join(names[:4]) + (" …" if len(names) > 4 else ""), job.id)
+            db.commit()
+    except Exception:
+        db.rollback()
+
     # TODO: create notification for the salesman
 
     return {"success": True, "message": f"Job {job.job_number} accepted", "status": job.status}
@@ -905,6 +918,10 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             raise HTTPException(status_code=403, detail="This job is not booked to your company")
     hide_archived(job, user)
 
+    job_photos = db.query(models.TaskPhoto).filter(models.TaskPhoto.job_card_id == job.id).order_by(models.TaskPhoto.uploaded_at, models.TaskPhoto.id).all()
+    photo_archive_rows = db.query(models.PhotoArchive).filter(models.PhotoArchive.job_card_id == job.id).order_by(models.PhotoArchive.id).all()
+    photos_archived = any(a.deleted_at for a in photo_archive_rows)
+
     tasks = []
     for t in job.tasks:
         tasks.append({
@@ -924,7 +941,8 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             "fail_list": getattr(t, "fail_list", None),
             "providers": providers_for_task_db(db, t.task_name),
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            "completed_by": t.completed_by
+            "completed_by": t.completed_by,
+            **task_photo_info(job, t, job_photos, photos_archived)
         })
 
     updates = []
@@ -1056,7 +1074,18 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             "completed_by_name": s.completed_by_name,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None
-        } for s in (db.query(models.SupplyItem).filter(models.SupplyItem.job_card_id == job.id).all() if hasattr(models, "SupplyItem") else [])]
+        } for s in (db.query(models.SupplyItem).filter(models.SupplyItem.job_card_id == job.id).all() if hasattr(models, "SupplyItem") else [])],
+        "photo_count": len(job_photo_items(db, job)),
+        "photos_archived": photos_archived,
+        "photo_archives": [{
+            "id": a.id,
+            "photo_count": a.photo_count,
+            "downloaded_by_name": a.downloaded_by_name,
+            "downloaded_at_sast": sast_text(a.downloaded_at),
+            "deleted_by_name": a.deleted_by_name,
+            "deleted_at_sast": sast_text(a.deleted_at),
+            "deleted_count": a.deleted_count,
+        } for a in photo_archive_rows if a.deleted_at],
     }
 
 @app.post("/api/jobs/{job_id}/vehicle")
@@ -4231,3 +4260,266 @@ async def api_wash_status(item_id: int, request: Request, db: Session = Depends(
             send_web_push(db, [who.id], "Status Job Cards", msg, "/dashboard")
     db.commit()
     return {"success": True}
+
+# ---------- TASK PHOTOS AND PHOTO ARCHIVE ----------
+# Workshop takes BEFORE / AFTER photos on tasks. Admin / accounts download all photos of a job
+# as one zip named by WS number, and may then delete exactly those photos from the app.
+# Reminders are information only: nothing here is checked by Mark Ready, PDI, sign-off or delivery.
+import re as _re
+import io as _io
+import zipfile as _zipfile
+from datetime import timezone as _timezone
+
+SAST_TZ = _timezone(timedelta(hours=2))  # South Africa has no daylight saving
+TASK_PHOTO_DIR = os.path.join(UPLOAD_DIR, "tasks")
+TASK_PHOTO_EXTS = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif"}
+MAX_TASK_PHOTO_BYTES = 15 * 1024 * 1024
+MAX_PHOTOS_PER_STAGE = 10
+PHOTO_TASK_NAMES = ("brake test", "service before delivery")
+PHOTO_TASK_RE = _re.compile(r"brake|under\s*-?\s*carr|suspension", _re.IGNORECASE)
+
+def sast_text(dt):
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_timezone.utc)
+    return dt.astimezone(SAST_TZ).strftime("%d %b %Y %H:%M") + " SAST"
+
+def needs_photo_reminder(job, task) -> bool:
+    """Sold jobs only: brake tests, service before delivery, and any brake / undercarriage / suspension task."""
+    if not job or not task or is_showroom(job):
+        return False
+    name = (getattr(task, "task_name", "") or "").strip()
+    low = name.lower()
+    return any(k in low for k in PHOTO_TASK_NAMES) or bool(PHOTO_TASK_RE.search(name))
+
+def task_photo_info(job, task, job_photos, photos_archived):
+    mine = [p for p in job_photos if p.task_id == task.id]
+    reminder = needs_photo_reminder(job, task) and not is_archived(job) and not photos_archived and job.status != "Delivered / Closed"
+    missing = []
+    if reminder:
+        if not any(p.stage == "before" for p in mine):
+            missing.append("before")
+        if not any(p.stage == "after" for p in mine):
+            missing.append("after")
+    return {
+        "photos": [{
+            "id": p.id,
+            "stage": p.stage,
+            "uploaded_by_name": p.uploaded_by_name,
+            "uploaded_at_sast": sast_text(p.uploaded_at),
+        } for p in mine],
+        "photo_reminder": reminder,
+        "photos_missing": missing,
+    }
+
+def _safe_name_part(value, fallback="photo"):
+    cleaned = _re.sub(r"[^A-Za-z0-9]+", "-", (value or "").strip()).strip("-")
+    return (cleaned[:40] or fallback)
+
+def _supplier_photo_abs(photo_path):
+    if not photo_path or not photo_path.startswith("/uploads/supplier/"):
+        return None
+    return os.path.join(UPLOAD_DIR, "supplier", os.path.basename(photo_path))
+
+def _task_photo_abs(photo_path):
+    if not photo_path:
+        return None
+    return os.path.join(TASK_PHOTO_DIR, os.path.basename(photo_path))
+
+def job_photo_items(db, job):
+    """Every photo file on this job that exists on disk: task photos and supplier job-card photos."""
+    items = []
+    task_names = {t.id: t.task_name for t in (job.tasks or [])}
+    for p in db.query(models.TaskPhoto).filter(models.TaskPhoto.job_card_id == job.id).order_by(models.TaskPhoto.id).all():
+        path = _task_photo_abs(p.photo_path)
+        if path and os.path.isfile(path):
+            items.append({"key": f"t:{p.id}", "path": path, "folder": "Before" if p.stage == "before" else "After",
+                          "label": task_names.get(p.task_id) or "task", "stage": p.stage})
+    for s in db.query(models.SupplierUpdate).filter(models.SupplierUpdate.job_card_id == job.id).order_by(models.SupplierUpdate.id).all():
+        path = _supplier_photo_abs(s.photo_path)
+        if path and os.path.isfile(path):
+            items.append({"key": f"s:{s.id}", "path": path, "folder": "Supplier",
+                          "label": s.company or "supplier", "stage": "supplier", "photo_path": s.photo_path})
+    return items
+
+def _photo_job_for_user(db, job_id, current_user):
+    job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not current_user or current_user.role == "supplier":
+        raise HTTPException(status_code=403, detail="Not allowed")
+    hide_archived(job, current_user)
+    return job
+
+def _looks_like_image(head: bytes, ext: str) -> bool:
+    if ext in (".jpg", ".jpeg"):
+        return head[:3] == b"\xff\xd8\xff"
+    if ext == ".png":
+        return head[:8] == b"\x89PNG\r\n\x1a\n"
+    if ext == ".webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if ext in (".heic", ".heif"):
+        return head[4:8] == b"ftyp"
+    return False
+
+@app.post("/api/jobs/{job_id}/tasks/{task_id}/photos")
+async def api_task_photo_upload(job_id: int, task_id: int, stage: str = Form(...), files: List[UploadFile] = File(...),
+                                db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    job = _photo_job_for_user(db, job_id, current_user)
+    if not (current_user.role == "workshop" or is_admin_user(current_user)):
+        raise HTTPException(status_code=403, detail="Only workshop or admin can add task photos")
+    assert_editable(db, job, current_user.id)
+    task = db.query(models.JobTask).filter(models.JobTask.id == task_id, models.JobTask.job_card_id == job.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    stage = (stage or "").strip().lower()
+    if stage not in ("before", "after"):
+        raise HTTPException(status_code=400, detail="Stage must be before or after")
+    files = [f for f in (files or []) if f and f.filename]
+    if not files:
+        raise HTTPException(status_code=400, detail="Choose a photo")
+    existing = db.query(models.TaskPhoto).filter(models.TaskPhoto.task_id == task.id, models.TaskPhoto.stage == stage).count()
+    if existing + len(files) > MAX_PHOTOS_PER_STAGE:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_PHOTOS_PER_STAGE} {stage} photos per task")
+    saved = []
+    for f in files:
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in TASK_PHOTO_EXTS:
+            raise HTTPException(status_code=400, detail="Photo must be jpg, png, webp or heic")
+        raw = await f.read(MAX_TASK_PHOTO_BYTES + 1)
+        if len(raw) > MAX_TASK_PHOTO_BYTES:
+            raise HTTPException(status_code=400, detail="Photo is too large (max 15 MB)")
+        if not _looks_like_image(raw[:16], ext):
+            raise HTTPException(status_code=400, detail="That file is not a photo")
+        saved.append((ext, raw))
+    os.makedirs(TASK_PHOTO_DIR, exist_ok=True)
+    rows = []
+    for ext, raw in saved:
+        fname = f"{job.id}_{uuid.uuid4().hex}{'.jpg' if ext == '.jpeg' else ext}"
+        with open(os.path.join(TASK_PHOTO_DIR, fname), "wb") as out:
+            out.write(raw)
+        row = models.TaskPhoto(job_card_id=job.id, task_id=task.id, stage=stage, photo_path=f"tasks/{fname}",
+                               uploaded_by=current_user.id, uploaded_by_name=current_user.full_name, uploaded_at=datetime.utcnow())
+        db.add(row)
+        rows.append(row)
+    db.commit()
+    log_audit(db, current_user.id, "Task photo added", job.id, f"{job.job_number} {task.task_name}: {len(rows)} {stage} photo(s)")
+    return {"success": True, "added": len(rows)}
+
+@app.get("/api/task-photos/{photo_id}")
+async def api_task_photo_get(photo_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    photo = db.query(models.TaskPhoto).filter(models.TaskPhoto.id == photo_id).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    _photo_job_for_user(db, photo.job_card_id, current_user)
+    path = _task_photo_abs(photo.photo_path)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Photo file not found")
+    ext = os.path.splitext(path)[1].lower()
+    return FileResponse(path, media_type=TASK_PHOTO_EXTS.get(ext, "application/octet-stream"))
+
+@app.post("/api/jobs/{job_id}/tasks/{task_id}/photo-skipped")
+async def api_task_photo_skipped(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    job = _photo_job_for_user(db, job_id, current_user)
+    task = db.query(models.JobTask).filter(models.JobTask.id == task_id, models.JobTask.job_card_id == job.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    stage = (body.get("stage") or "").strip().lower()
+    if stage not in ("before", "after"):
+        stage = "photo"
+    log_audit(db, current_user.id, "Task photo skipped", job.id, f"{job.job_number} {task.task_name}: {stage} photo skipped")
+    return {"success": True}
+
+@app.post("/api/jobs/{job_id}/photos/download")
+async def api_job_photos_download(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    job = _photo_job_for_user(db, job_id, current_user)
+    if not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Only admin or accounts can download job photos")
+    items = job_photo_items(db, job)
+    if not items:
+        raise HTTPException(status_code=400, detail="There are no photos on this job")
+    base = _safe_name_part(_re.sub(r"\s+", "", job.stock_number or ""), "") or _safe_name_part(job.job_number, f"job{job.id}")
+    zip_name = f"{base}_photos_{datetime.now(SAST_TZ).strftime('%Y-%m-%d')}.zip"
+    buf = _io.BytesIO()
+    counters = {}
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for it in items:
+            label = _safe_name_part(it["label"], "task")
+            k = (it["folder"], label, it["stage"])
+            counters[k] = counters.get(k, 0) + 1
+            ext = os.path.splitext(it["path"])[1].lower() or ".jpg"
+            zf.write(it["path"], f"{it['folder']}/{base}_{label}_{it['stage']}_{counters[k]}{ext}")
+    manifest = [{"key": it["key"], "photo_path": it.get("photo_path")} for it in items]
+    rec = models.PhotoArchive(job_card_id=job.id, zip_name=zip_name, photo_count=len(items), manifest=json.dumps(manifest),
+                              downloaded_by=current_user.id, downloaded_by_name=current_user.full_name, downloaded_at=datetime.utcnow())
+    db.add(rec)
+    db.commit()
+    log_audit(db, current_user.id, "Photos downloaded", job.id, f"{job.job_number} {zip_name}: {len(items)} photos")
+    return Response(content=buf.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{zip_name}"',
+        "X-Photo-Archive-Id": str(rec.id),
+        "X-Photo-Count": str(len(items)),
+    })
+
+@app.post("/api/jobs/{job_id}/photos/delete")
+async def api_job_photos_delete(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    """Second, explicit step after a download. Deletes only the photos that were in that zip. Never deletes job records."""
+    job = _photo_job_for_user(db, job_id, current_user)
+    if not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Only admin or accounts can delete job photos")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Confirm that the zip is saved before deleting")
+    rec = db.query(models.PhotoArchive).filter(models.PhotoArchive.id == body.get("archive_id"), models.PhotoArchive.job_card_id == job.id).first()
+    if not rec or rec.deleted_at:
+        raise HTTPException(status_code=400, detail="Download the photos zip first")
+    if rec.downloaded_by != current_user.id:
+        raise HTTPException(status_code=400, detail="Only the person who downloaded the zip can delete these photos")
+    try:
+        manifest = json.loads(rec.manifest or "[]")
+    except Exception:
+        manifest = []
+    files_to_remove = []
+    deleted = 0
+    for m in manifest:
+        key = (m or {}).get("key") or ""
+        kind, _, raw_id = key.partition(":")
+        if not raw_id.isdigit():
+            continue
+        if kind == "t":
+            p = db.query(models.TaskPhoto).filter(models.TaskPhoto.id == int(raw_id), models.TaskPhoto.job_card_id == job.id).first()
+            if p:
+                files_to_remove.append(_task_photo_abs(p.photo_path))
+                db.delete(p)
+                deleted += 1
+        elif kind == "s":
+            s = db.query(models.SupplierUpdate).filter(models.SupplierUpdate.id == int(raw_id), models.SupplierUpdate.job_card_id == job.id).first()
+            if s and s.photo_path and s.photo_path == m.get("photo_path"):
+                files_to_remove.append(_supplier_photo_abs(s.photo_path))
+                s.photo_path = None  # the supplier update itself stays
+                deleted += 1
+    now = datetime.utcnow()
+    rec.deleted_by = current_user.id
+    rec.deleted_by_name = current_user.full_name
+    rec.deleted_at = now
+    rec.deleted_count = deleted
+    text_line = f"Photos archived by {current_user.full_name} on {sast_text(now)}, {deleted} photo{'' if deleted == 1 else 's'} ({rec.zip_name})"
+    db.add(models.JobUpdate(job_card_id=job.id, category="progress", description=text_line,
+                            notes="Photos downloaded as zip and removed from the app", created_by_name=current_user.full_name, created_by=current_user.id))
+    db.commit()
+    log_audit(db, current_user.id, "Photos archived and deleted", job.id, f"{job.job_number} {rec.zip_name}: {deleted} photos deleted from the app")
+    for path in files_to_remove:
+        try:
+            if path and os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
+    return {"success": True, "deleted": deleted, "message": text_line}

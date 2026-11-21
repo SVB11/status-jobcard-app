@@ -370,3 +370,33 @@ class WashRequest(Base):
     requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class TaskPhoto(Base):
+    """Workshop BEFORE / AFTER photos on a job task. Files live under UPLOAD_DIR/tasks/."""
+    __tablename__ = "task_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey("job_tasks.id"), nullable=True)
+    stage = Column(String, nullable=False)  # before / after
+    photo_path = Column(String, nullable=False)  # relative to UPLOAD_DIR, e.g. tasks/12_ab12cd.jpg
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_by_name = Column(String, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class PhotoArchive(Base):
+    """One row per photo zip download. deleted_* is set when the photos are then removed from the app."""
+    __tablename__ = "photo_archives"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False, index=True)
+    zip_name = Column(String, nullable=True)
+    photo_count = Column(Integer, default=0)
+    manifest = Column(Text, nullable=True)  # JSON list of photo keys in the zip
+    downloaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    downloaded_by_name = Column(String, nullable=True)
+    downloaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    deleted_by_name = Column(String, nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_count = Column(Integer, nullable=True)
