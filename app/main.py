@@ -82,6 +82,7 @@ async def security_headers(request: Request, call_next):
         # Direct task photo files stay unavailable, even to signed-in staff.
         return JSONResponse({"detail": "Not found"}, status_code=404)
     request.state.yard_only = bool(user and user.role == "yard")
+    request.state.has_yard_access = bool(user and user_has_yard_access(user))
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -121,6 +122,14 @@ def require_admin(user: models.User):
         raise HTTPException(status_code=403, detail="Admin access only")
     return user
 
+def user_has_yard_access(user) -> bool:
+    """Admin, accounts and yard always have Yard check. Others only with yard_access=1."""
+    if not user:
+        return False
+    if (getattr(user, "role", "") or "") in ("admin", "accounts", "yard"):
+        return True
+    return bool(getattr(user, "yard_access", False))
+
 # Absolute paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -151,6 +160,8 @@ jinja_env = Environment(
 def render_template(name: str, **context):
     if "yard_only" not in context:
         context["yard_only"] = bool(getattr(getattr(context.get("request"), "state", None), "yard_only", False))
+    if "has_yard_access" not in context:
+        context["has_yard_access"] = bool(getattr(getattr(context.get("request"), "state", None), "has_yard_access", False))
     template = jinja_env.get_template(name)
     return HTMLResponse(template.render(**context))
 
@@ -316,7 +327,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         "full_name": user.full_name,
         "user_id": user.id,
         "must_change_password": bool(getattr(user, "must_change_password", False)),
-        "supplier_company": getattr(user, "supplier_company", None)
+        "supplier_company": getattr(user, "supplier_company", None),
+        "yard_access": user_has_yard_access(user)
     }
     resp = JSONResponse(payload)
     resp.set_cookie(
@@ -1699,6 +1711,8 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "role": u.role,
                 "supplier_company": getattr(u, "supplier_company", None),
                 "is_active": u.is_active,
+                "yard_access": bool(getattr(u, "yard_access", False)),
+                "has_yard_access": user_has_yard_access(u),
                 "created_at": u.created_at.isoformat() if u.created_at else None,
                 "password_changed_at": u.password_changed_at.date().isoformat() if getattr(u, "password_changed_at", None) else None
             } for u in users
@@ -1731,6 +1745,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
 
+    yard_access = bool(body.get("yard_access"))
     user = models.User(
         username=username,
         full_name=full_name,
@@ -1738,11 +1753,20 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
         must_change_password=True,
         role=role,
         supplier_company=company if role == "supplier" else None,
+        yard_access=yard_access,
         is_active=True
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+    if yard_access:
+        log_audit(
+            db,
+            current_user.id,
+            "Yard check access",
+            None,
+            f"Enabled yard check for user {user.id} on create",
+        )
 
     return {
         "success": True,
@@ -1750,7 +1774,9 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
             "id": user.id,
             "username": user.username,
             "full_name": user.full_name,
-            "role": user.role
+            "role": user.role,
+            "yard_access": bool(user.yard_access),
+            "has_yard_access": user_has_yard_access(user),
         }
     }
 
@@ -1763,6 +1789,39 @@ async def api_toggle_user(user_id: int, db: Session = Depends(get_db), current_u
     user.is_active = not user.is_active
     db.commit()
     return {"success": True, "is_active": user.is_active}
+
+@app.post("/api/admin/users/{user_id}/yard-access")
+async def api_set_yard_access(user_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_admin(current_user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if "yard_access" in body:
+        if type(body.get("yard_access")) is not bool:
+            raise HTTPException(status_code=400, detail="yard_access must be true or false")
+        new_val = body["yard_access"]
+    else:
+        new_val = not bool(user.yard_access)
+    previous = bool(getattr(user, "yard_access", False))
+    user.yard_access = new_val
+    db.commit()
+    if previous != bool(new_val):
+        log_audit(
+            db,
+            current_user.id,
+            "Yard check access",
+            None,
+            ("Enabled" if new_val else "Disabled") + f" yard check for user {user.id}",
+        )
+    return {
+        "success": True,
+        "yard_access": bool(user.yard_access),
+        "has_yard_access": user_has_yard_access(user),
+    }
 
 @app.post("/api/admin/users/{user_id}/reset-password")
 async def api_reset_password(user_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -4666,10 +4725,8 @@ async def api_job_photos_delete(job_id: int, request: Request, db: Session = Dep
     return {"success": True, "deleted": deleted, "message": text_line}
 
 # ---------- YARD CHECK (no client, price, task or photo data) ----------
-YARD_ROLES = ("admin", "accounts", "workshop", "yard")
-
 def require_yard(user):
-    if user.role not in YARD_ROLES:
+    if not user_has_yard_access(user):
         raise HTTPException(status_code=403, detail="Yard check access only")
 
 def yard_can_start(user):
@@ -4727,7 +4784,7 @@ def yard_round_payload(current):
 
 @app.get("/yard", response_class=HTMLResponse)
 async def yard_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
-    if current_user.role not in YARD_ROLES:
+    if not user_has_yard_access(current_user):
         return RedirectResponse(url="/dashboard")
     return render_template("yard.html", request=request, page_title="Yard check", yard_only=current_user.role == "yard", can_start=yard_can_start(current_user))
 

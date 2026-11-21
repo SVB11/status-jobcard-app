@@ -6,6 +6,7 @@ NEW_COLUMNS = {
         "must_change_password": "BOOLEAN",
         "password_changed_at": "DATETIME",
         "supplier_company": "VARCHAR",
+        "yard_access": "BOOLEAN DEFAULT 0",
     },
     "job_cards": {
         "vin_number": "VARCHAR",
