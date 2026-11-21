@@ -35,19 +35,39 @@ async def security_headers(request: Request, call_next):
     if path.startswith("/uploads/tasks/"):
         # Task photos are only served to logged-in users through /api/task-photos/{id}.
         return JSONResponse({"detail": "Not found"}, status_code=404)
-    allowed = path in ("/set-password", "/login", "/token", "/api/me/set-password", "/health", "/sw.js", "/manifest.json") or path.startswith("/static/") or path.startswith("/uploads/")
-    if not allowed:
-        raw = auth.token_from_request(request)
-        if raw:
-            db = SessionLocal()
-            try:
-                user = auth._user_from_token_string(raw, db)
-                if user and getattr(user, "must_change_password", False):
-                    if path.startswith("/api/"):
-                        return JSONResponse({"detail": "Set a new password before using the app."}, status_code=403)
-                    return RedirectResponse(url="/set-password")
-            finally:
-                db.close()
+    public_unauthenticated = path in (
+        "/",
+        "/set-password",
+        "/login",
+        "/token",
+        "/health",
+        "/sw.js",
+        "/manifest.json",
+        "/api/push/public-key",
+    ) or path.startswith("/static/")
+    raw = auth.token_from_request(request)
+    user = None
+    if raw:
+        db = SessionLocal()
+        try:
+            user = auth._user_from_token_string(raw, db)
+        finally:
+            db.close()
+        if user and not getattr(user, "is_active", True):
+            user = None
+    if not public_unauthenticated:
+        if user is None:
+            if path.startswith("/api/") or path.startswith("/uploads/"):
+                return JSONResponse(
+                    {"detail": "Could not validate credentials"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return RedirectResponse(url="/login")
+        if getattr(user, "must_change_password", False) and path not in ("/set-password", "/api/me/set-password"):
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Set a new password before using the app."}, status_code=403)
+            return RedirectResponse(url="/set-password")
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -221,7 +241,7 @@ async def api_push_public_key():
     return {"key": VAPID_PUBLIC_KEY, "enabled": True}
 
 @app.post("/api/push/subscribe")
-async def api_push_subscribe(request: Request, db: Session = Depends(get_db)):
+async def api_push_subscribe(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     user_id = body.get("user_id")
     sub = body.get("subscription") or {}
@@ -332,29 +352,29 @@ async def home(request: Request):
 # ---------- DASHBOARD ----------
 
 @app.get("/locations", response_class=HTMLResponse)
-async def locations_page(request: Request):
+async def locations_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("locations.html", request=request, page_title="Locations")
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("dashboard.html", request=request, page_title="Dashboard")
 
 @app.get("/stock", response_class=HTMLResponse)
-async def stock_page(request: Request):
+async def stock_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("stock.html", request=request, page_title="Workshop stock")
 
 @app.get("/supplier", response_class=HTMLResponse)
-async def supplier_page(request: Request):
+async def supplier_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("supplier.html", request=request, page_title="Supplier jobs")
 
 # ---------- CREATE JOB CARD ----------
 
 @app.get("/jobs/create", response_class=HTMLResponse)
-async def create_job_page(request: Request):
+async def create_job_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("create_job.html", request=request, page_title="Create Job Card")
 
 @app.get("/api/tasks-for-type")
-async def api_tasks_for_type(main_type: str, year: str = None, purpose: str = "sold"):
+async def api_tasks_for_type(main_type: str, year: str = None, purpose: str = "sold", current_user: models.User = Depends(auth.get_current_active_user)):
     """Return the standard tasks for a vehicle type (used by frontend)."""
     try:
         if (purpose or "").strip().lower() == "showroom":
@@ -373,7 +393,7 @@ async def api_tasks_for_type(main_type: str, year: str = None, purpose: str = "s
         ], "warning": str(exc)}
 
 @app.get("/api/jobs/open-ws")
-async def api_open_ws(stock: str, db: Session = Depends(get_db)):
+async def api_open_ws(stock: str, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     key = "".join((stock or "").split()).upper()
     if not key:
         return {"open": []}
@@ -393,7 +413,8 @@ async def api_open_ws(stock: str, db: Session = Depends(get_db)):
 @app.post("/api/jobs/create")
 async def api_create_job(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user),
 ):
     """Create a new Job Card with selected tasks."""
     try:
@@ -669,7 +690,7 @@ def job_allocated_to_company(job, company: str) -> bool:
     return False
 
 @app.get("/api/jobs")
-async def api_list_jobs(request: Request, status: str = None, salesman: str = None, created_by: int = None, archived: int = 0, db: Session = Depends(get_db)):
+async def api_list_jobs(request: Request, status: str = None, salesman: str = None, created_by: int = None, archived: int = 0, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     raw = auth.token_from_request(request)
     user = auth._user_from_token_string(raw, db) if raw else None
     if user and user.role == "supplier":
@@ -716,15 +737,15 @@ async def health():
 # ---------- JOB LIST PAGE ----------
 
 @app.get("/jobs", response_class=HTMLResponse)
-async def jobs_page(request: Request):
+async def jobs_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("jobs.html", request=request, page_title="Job Cards")
 
 @app.get("/jobs/archive", response_class=HTMLResponse)
-async def jobs_archive_page(request: Request):
+async def jobs_archive_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return RedirectResponse(url="/archive")
 
 @app.get("/archive", response_class=HTMLResponse)
-async def archive_page(request: Request):
+async def archive_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("archive.html", request=request, page_title="Archive")
 
 @app.get("/api/archive")
@@ -855,7 +876,7 @@ async def api_showroom_approval_queue(db: Session = Depends(get_db), current_use
     } for j in jobs]}
 
 @app.post("/api/jobs/{job_id}/accept")
-async def api_accept_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_accept_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -903,11 +924,11 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
 # ---------- JOB DETAIL ----------
 
 @app.get("/jobs/client-reports", response_class=HTMLResponse)
-async def client_reports_page(request: Request):
+async def client_reports_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("client_reports.html", request=request, page_title="Client reports")
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail_page(request: Request, job_id: int):
+async def job_detail_page(request: Request, job_id: int, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("job_detail.html", request=request, job_id=job_id, page_title="Job Detail")
 
 @app.get("/api/jobs/empty-check-queue")
@@ -998,7 +1019,7 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
     return {"jobs": out}
 
 @app.get("/api/jobs/{job_id}")
-async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1180,7 +1201,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
     }
 
 @app.post("/api/jobs/{job_id}/vehicle")
-async def api_update_vehicle(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_update_vehicle(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1229,7 +1250,7 @@ async def api_update_vehicle(job_id: int, request: Request, db: Session = Depend
 # ---------- TASK UPDATES ----------
 
 @app.post("/api/jobs/{job_id}/tasks/{task_id}/update")
-async def api_update_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_update_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1388,7 +1409,7 @@ async def api_update_task(job_id: int, task_id: int, request: Request, db: Sessi
     }
 
 @app.post("/api/jobs/{job_id}/tasks/add")
-async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1443,11 +1464,11 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
 # ---------- ADMIN: USER MANAGEMENT ----------
 
 @app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users_page(request: Request):
+async def admin_users_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("admin_users.html", request=request, page_title="User Management")
 
 @app.get("/admin/overrides", response_class=HTMLResponse)
-async def overrides_page(request: Request):
+async def overrides_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("overrides.html", request=request, page_title="Overrides")
 
 @app.get("/api/admin/overrides")
@@ -1472,7 +1493,7 @@ async def api_overrides(db: Session = Depends(get_db), current_user: models.User
     return {"events": out}
 
 @app.get("/admin/third-parties", response_class=HTMLResponse)
-async def admin_third_parties_page(request: Request):
+async def admin_third_parties_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("admin_third_parties.html", request=request, page_title="3rd Parties")
 
 @app.get("/api/admin/third-parties")
@@ -1814,7 +1835,7 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
     }
 
 @app.post("/api/jobs/{job_id}/close")
-async def api_close_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_close_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -1894,11 +1915,11 @@ async def api_reopen_job(job_id: int, request: Request, db: Session = Depends(ge
 from .pdi_config import get_pdi_for_type
 
 @app.get("/jobs/{job_id}/pdi", response_class=HTMLResponse)
-async def pdi_page(request: Request, job_id: int):
+async def pdi_page(request: Request, job_id: int, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("pdi.html", request=request, job_id=job_id, page_title="PDI Checklist")
 
 @app.get("/api/jobs/{job_id}/pdi")
-async def api_get_pdi(job_id: int, db: Session = Depends(get_db)):
+async def api_get_pdi(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1980,7 +2001,7 @@ async def api_get_pdi(job_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/jobs/{job_id}/pdi/items/{item_id}")
-async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -2169,7 +2190,7 @@ def grouped_third_parties(db: Session):
     return THIRD_PARTY_SERVICES
 
 @app.get("/api/lists")
-async def api_lists(db: Session = Depends(get_db)):
+async def api_lists(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     return {
         "locations": LOCATIONS,
         "activity_types": ACTIVITY_TYPES,
@@ -2254,7 +2275,7 @@ def _board_push(board, loc, item):
     board[bucket].append(item)
 
 @app.get("/api/locations-board")
-async def api_locations_board(db: Session = Depends(get_db)):
+async def api_locations_board(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     jobs = active_jobs(db).order_by(models.JobCard.created_at.desc()).all()
     board = {loc: [] for loc in LOCATIONS}
     board["Unspecified"] = []
@@ -2309,7 +2330,7 @@ async def api_locations_board(db: Session = Depends(get_db)):
     return {"board": board}
 
 @app.post("/api/jobs/{job_id}/location")
-async def api_update_location(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_update_location(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -2418,7 +2439,7 @@ async def api_confirm_location(job_id: int, request: Request, db: Session = Depe
     return {"success": True, "current_location": loc}
 
 @app.post("/api/jobs/{job_id}/updates")
-async def api_add_update(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_add_update(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     """Permanent update. Cannot be deleted."""
     try:
         body = await request.json()
@@ -2479,12 +2500,12 @@ async def api_add_update(job_id: int, request: Request, db: Session = Depends(ge
     return {"success": True, "id": update.id}
 
 @app.get("/jobs/{job_id}/print", response_class=HTMLResponse)
-async def print_job_page(request: Request, job_id: int):
+async def print_job_page(request: Request, job_id: int, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("print_job.html", request=request, job_id=job_id)
 
 
 @app.post("/api/jobs/{job_id}/third-party")
-async def api_add_third_party(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_add_third_party(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -2591,11 +2612,11 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
     return {"success": True, "id": booking.id}
 
 @app.get("/jobs/{job_id}/print-pdi", response_class=HTMLResponse)
-async def print_pdi_page(request: Request, job_id: int):
+async def print_pdi_page(request: Request, job_id: int, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("print_pdi.html", request=request, job_id=job_id)
 
 @app.get("/jobs/{job_id}/client-report", response_class=HTMLResponse)
-async def client_report_page(request: Request, job_id: int, db: Session = Depends(get_db)):
+async def client_report_page(request: Request, job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         report = _client_report_payload(job_id, db)
     except HTTPException:
@@ -2621,11 +2642,11 @@ def _client_report_payload(job_id: int, db: Session, current_user=None):
     return report
 
 @app.get("/api/jobs/{job_id}/client-report")
-async def api_client_report(job_id: int, db: Session = Depends(get_db)):
+async def api_client_report(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     return _client_report_payload(job_id, db)
 
 @app.get("/api/jobs/{job_id}/client-report.pdf")
-async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db)):
+async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     report = _client_report_payload(job_id, db)
     pdf = render_pdf(report)
     filename = f"{report.get('stock_number') or 'job'}_progress_report.pdf".replace(" ", "_")
@@ -2634,7 +2655,7 @@ async def api_client_report_pdf(job_id: int, db: Session = Depends(get_db)):
     })
 
 @app.post("/api/jobs/{job_id}/client-report.pdf")
-async def api_client_report_pdf_selected(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_client_report_pdf_selected(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     report = _client_report_payload(job_id, db)
     try:
         body = await request.json()
@@ -2664,7 +2685,7 @@ async def api_client_report_pdf_selected(job_id: int, request: Request, db: Sess
     })
 
 @app.get("/jobs/{job_id}/print-work", response_class=HTMLResponse)
-async def print_work_page(request: Request, job_id: int):
+async def print_work_page(request: Request, job_id: int, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("print_work.html", request=request, job_id=job_id)
 
 def _signer(db, job, field, party):
@@ -2678,7 +2699,7 @@ def _signer(db, job, field, party):
     return None
 
 @app.get("/api/jobs/{job_id}/pdf-work")
-async def api_pdf_work(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_pdf_work(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2689,7 +2710,7 @@ async def api_pdf_work(job_id: int, request: Request, db: Session = Depends(get_
     return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @app.get("/api/jobs/{job_id}/pdf-pdi")
-async def api_pdf_pdi(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_pdf_pdi(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2701,7 +2722,7 @@ async def api_pdf_pdi(job_id: int, request: Request, db: Session = Depends(get_d
     return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @app.post("/api/jobs/{job_id}/parts")
-async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -2748,7 +2769,7 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
     return {"success": True, "id": part.id}
 
 @app.post("/api/jobs/{job_id}/supplies")
-async def api_add_supply(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_add_supply(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
@@ -2780,7 +2801,7 @@ async def api_add_supply(job_id: int, request: Request, db: Session = Depends(ge
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/supplies/{item_id}/status")
-async def api_supply_status(job_id: int, item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_supply_status(job_id: int, item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
@@ -2808,7 +2829,7 @@ async def api_supply_status(job_id: int, item_id: int, request: Request, db: Ses
     return {"success": True}
 
 @app.get("/api/supplies")
-async def api_all_supplies(db: Session = Depends(get_db)):
+async def api_all_supplies(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     rows = db.query(models.SupplyItem).order_by(models.SupplyItem.id.desc()).all()
     out = []
     for s in rows:
@@ -2829,7 +2850,7 @@ async def api_all_supplies(db: Session = Depends(get_db)):
     return {"supplies": out}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/order-number")
-async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_set_part_order(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     try:
         body = await request.json()
     except:
@@ -3179,7 +3200,7 @@ def diary_service_label(task_name: str):
     return None
 
 @app.get("/api/workshop/bookings")
-async def api_workshop_bookings(db: Session = Depends(get_db)):
+async def api_workshop_bookings(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     out = []
     seen = set()
     tasks = db.query(models.JobTask).all()
@@ -3328,7 +3349,7 @@ def notify_signoff(db, job, message):
     notify_role(db, "accounts", message, job.id)
 
 @app.post("/api/jobs/{job_id}/request-update")
-async def api_request_update(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_request_update(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
@@ -3357,7 +3378,7 @@ async def api_request_update(job_id: int, request: Request, db: Session = Depend
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/clear-update-request")
-async def api_clear_update_request(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_clear_update_request(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
@@ -3377,7 +3398,7 @@ async def api_clear_update_request(job_id: int, request: Request, db: Session = 
     return {"success": True}
 
 @app.get("/api/update-requests")
-async def api_update_requests(db: Session = Depends(get_db)):
+async def api_update_requests(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     jobs = active_jobs(db).filter(models.JobCard.update_requested_at != None).order_by(models.JobCard.update_requested_at.desc()).all()
     return {"requests": [{
         "id": j.id,
@@ -3699,12 +3720,12 @@ async def api_supplier_workshop_reply(upd_id: int, request: Request, db: Session
     return {"success": True}
 
 @app.get("/api/stock-orders")
-async def api_stock_orders(db: Session = Depends(get_db)):
+async def api_stock_orders(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     rows = db.query(models.WorkshopStockOrder).order_by(models.WorkshopStockOrder.id.desc()).all()
     return {"orders": [stock_row(s) for s in rows]}
 
 @app.post("/api/stock-orders")
-async def api_add_stock_order(request: Request, db: Session = Depends(get_db)):
+async def api_add_stock_order(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     role = (body.get("role") or "").lower()
     if role not in ("stock", "admin", "accounts"):
@@ -3731,7 +3752,7 @@ async def api_add_stock_order(request: Request, db: Session = Depends(get_db)):
     return {"success": True, "id": row.id}
 
 @app.post("/api/stock-orders/{item_id}/status")
-async def api_stock_status(item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_stock_status(item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     role = (body.get("role") or "").lower()
     if role not in ("stock", "workshop", "admin", "accounts"):
@@ -3763,7 +3784,7 @@ async def api_stock_status(item_id: int, request: Request, db: Session = Depends
     return {"success": True}
 
 @app.post("/api/stock-orders/{item_id}/request-update")
-async def api_stock_request_update(item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_stock_request_update(item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     role = (body.get("role") or "").lower()
     if role not in ("admin", "accounts", "stock"):
@@ -3788,7 +3809,7 @@ async def api_stock_request_update(item_id: int, request: Request, db: Session =
     return {"success": True}
 
 @app.post("/api/stock-orders/{item_id}/clear-update-request")
-async def api_stock_clear_update(item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_stock_clear_update(item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     row = db.query(models.WorkshopStockOrder).filter(models.WorkshopStockOrder.id == item_id).first()
     if not row:
@@ -3803,7 +3824,7 @@ async def api_stock_clear_update(item_id: int, request: Request, db: Session = D
     return {"success": True}
 
 @app.post("/api/stock-orders/{item_id}/sign-received")
-async def api_stock_sign(item_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_stock_sign(item_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     role = (body.get("role") or "").lower()
     who = body.get("full_name") or user_name(db, body.get("user_id")) or "Staff"
@@ -3833,7 +3854,7 @@ async def api_stock_sign(item_id: int, request: Request, db: Session = Depends(g
     return {"success": True, "status": row.status}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/progress")
-async def api_part_progress(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_part_progress(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
     if not part:
@@ -3866,7 +3887,7 @@ async def api_part_progress(job_id: int, part_id: int, request: Request, db: Ses
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/parts/{part_id}/follow-up")
-async def api_part_followup(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_part_followup(job_id: int, part_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     part = db.query(models.PartItem).filter(models.PartItem.id == part_id, models.PartItem.job_card_id == job_id).first()
     if not part:
@@ -3889,7 +3910,7 @@ async def api_part_followup(job_id: int, part_id: int, request: Request, db: Ses
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/activity")
-async def api_set_activity(job_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_set_activity(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = await request.json()
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job:
@@ -3925,7 +3946,7 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
     return {"success": True}
 
 @app.get("/admin/print-bookings", response_class=HTMLResponse)
-async def admin_print_bookings_page(request: Request):
+async def admin_print_bookings_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     return render_template("print_admin_bookings.html", request=request)
 
 @app.get("/api/admin/job-bookings")
@@ -3964,7 +3985,7 @@ async def api_admin_job_bookings(db: Session = Depends(get_db), current_user: mo
     return {"jobs": out}
 
 @app.get("/api/workshop/parts")
-async def api_workshop_parts(db: Session = Depends(get_db)):
+async def api_workshop_parts(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     parts = db.query(models.PartItem).order_by(models.PartItem.created_at.desc()).all()
     out = []
     for p in parts:
@@ -3990,7 +4011,7 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
     return {"parts": out}
 
 @app.get("/api/notifications")
-async def api_notifications(user_id: int, db: Session = Depends(get_db)):
+async def api_notifications(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if user and user.role != "workshop":
         db.query(models.Notification).filter(
@@ -4019,7 +4040,7 @@ async def api_notifications(user_id: int, db: Session = Depends(get_db)):
     } for n in visible[:30]]}
 
 @app.post("/api/notifications/mark-read")
-async def api_mark_notifications_read(request: Request, db: Session = Depends(get_db)):
+async def api_mark_notifications_read(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = {}
     try:
         body = await request.json()
@@ -4042,7 +4063,7 @@ async def api_mark_notifications_read(request: Request, db: Session = Depends(ge
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/tasks/{task_id}/approve")
-async def api_approve_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_approve_task(job_id: int, task_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     body = {}
     try:
         body = await request.json()
@@ -4064,7 +4085,7 @@ async def api_approve_task(job_id: int, task_id: int, request: Request, db: Sess
     return {"success": True}
 
 @app.get("/api/pdi-fails")
-async def api_pdi_fails(db: Session = Depends(get_db)):
+async def api_pdi_fails(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     jobs = active_jobs(db).filter(models.JobCard.status == "PDI Failed - Returned to Workshop").order_by(models.JobCard.created_at.desc()).all()
     out = []
     for j in jobs:
