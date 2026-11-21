@@ -902,9 +902,100 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
 
 # ---------- JOB DETAIL ----------
 
+@app.get("/jobs/client-reports", response_class=HTMLResponse)
+async def client_reports_page(request: Request):
+    return render_template("client_reports.html", request=request, page_title="Client reports")
+
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
 async def job_detail_page(request: Request, job_id: int):
     return render_template("job_detail.html", request=request, job_id=job_id, page_title="Job Detail")
+
+@app.get("/api/jobs/empty-check-queue")
+async def api_empty_check_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    jobs = active_jobs(db).all()
+    out = []
+    for j in jobs:
+        if is_showroom(j) or type_family(j.main_type) != "tanker":
+            continue
+        if j.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery"):
+            continue
+        need = False
+        if current_user.role == "sales":
+            if (j.salesman_name or "") != current_user.full_name:
+                continue
+            need = not bool(j.empty_signed_sales)
+        elif current_user.role == "workshop":
+            need = not bool(j.empty_signed_workshop)
+        elif current_user.role in ("admin", "accounts"):
+            need = not (j.empty_signed_workshop and j.empty_signed_sales)
+        else:
+            continue
+        if not need:
+            continue
+        out.append({
+            "id": j.id,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "status": j.status,
+            "empty_signed_workshop": bool(j.empty_signed_workshop),
+            "empty_signed_sales": bool(j.empty_signed_sales),
+        })
+    return {"jobs": out}
+
+@app.get("/api/jobs/signoff-queue")
+async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    open_jobs = active_jobs(db).all()
+    changed = False
+    for j in open_jobs:
+        if j.status in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Pending Admin Approval"):
+            continue
+        tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == j.id).all()
+        if work_is_done(tasks) and mark_work_complete(db, j):
+            changed = True
+    if changed:
+        db.commit()
+    statuses = ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery")
+    jobs = active_jobs(db).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
+    out = []
+    for j in jobs:
+        need_pdi = False
+        need_ready = False
+        showroom = is_showroom(j)
+        if showroom and current_user.role == "sales":
+            continue
+        if current_user.role == "sales":
+            if (j.salesman_name or "") != current_user.full_name:
+                continue
+            need_pdi = not bool(j.pdi_signed_sales)
+            need_ready = not bool(j.ready_sales)
+        elif current_user.role == "workshop":
+            need_pdi = (not showroom) and (not bool(j.pdi_signed_workshop))
+            need_ready = not bool(j.ready_workshop)
+        elif current_user.role in ("admin", "accounts"):
+            need_pdi = (not showroom) and (not (j.pdi_signed_sales and j.pdi_signed_workshop))
+            need_ready = not (j.ready_workshop if showroom else (j.ready_sales and j.ready_workshop))
+        else:
+            continue
+        if not (need_pdi or need_ready or open_blocking_tasks(j)):
+            continue
+        action = "Sign PDI" if need_pdi else "Mark ready"
+        open_tasks = open_blocking_tasks(j)
+        if open_tasks:
+            action = "Ready - tasks outstanding"
+        out.append({
+            "id": j.id,
+            "stock_number": j.stock_number,
+            "vehicle_description": j.vehicle_description,
+            "year": j.year,
+            "status": j.status,
+            "salesman_name": j.salesman_name,
+            "need_pdi": need_pdi,
+            "need_ready": need_ready,
+            "open_tasks": open_tasks,
+            "action": action,
+        })
+    return {"jobs": out}
 
 @app.get("/api/jobs/{job_id}")
 async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_db)):
@@ -1722,39 +1813,6 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
         "empty_signed_sales": bool(job.empty_signed_sales),
     }
 
-@app.get("/api/jobs/empty-check-queue")
-async def api_empty_check_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    jobs = active_jobs(db).all()
-    out = []
-    for j in jobs:
-        if is_showroom(j) or type_family(j.main_type) != "tanker":
-            continue
-        if j.status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery"):
-            continue
-        need = False
-        if current_user.role == "sales":
-            if (j.salesman_name or "") != current_user.full_name:
-                continue
-            need = not bool(j.empty_signed_sales)
-        elif current_user.role == "workshop":
-            need = not bool(j.empty_signed_workshop)
-        elif current_user.role in ("admin", "accounts"):
-            need = not (j.empty_signed_workshop and j.empty_signed_sales)
-        else:
-            continue
-        if not need:
-            continue
-        out.append({
-            "id": j.id,
-            "stock_number": j.stock_number,
-            "vehicle_description": j.vehicle_description,
-            "year": j.year,
-            "status": j.status,
-            "empty_signed_workshop": bool(j.empty_signed_workshop),
-            "empty_signed_sales": bool(j.empty_signed_sales),
-        })
-    return {"jobs": out}
-
 @app.post("/api/jobs/{job_id}/close")
 async def api_close_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     try:
@@ -2535,10 +2593,6 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
 @app.get("/jobs/{job_id}/print-pdi", response_class=HTMLResponse)
 async def print_pdi_page(request: Request, job_id: int):
     return render_template("print_pdi.html", request=request, job_id=job_id)
-
-@app.get("/jobs/client-reports", response_class=HTMLResponse)
-async def client_reports_page(request: Request):
-    return render_template("client_reports.html", request=request, page_title="Client reports")
 
 @app.get("/jobs/{job_id}/client-report", response_class=HTMLResponse)
 async def client_report_page(request: Request, job_id: int, db: Session = Depends(get_db)):
@@ -3934,60 +3988,6 @@ async def api_workshop_parts(db: Session = Depends(get_db)):
             "year": job.year if job else "",
         })
     return {"parts": out}
-
-@app.get("/api/jobs/signoff-queue")
-async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
-    open_jobs = active_jobs(db).all()
-    changed = False
-    for j in open_jobs:
-        if j.status in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery", "Pending Admin Approval"):
-            continue
-        tasks = db.query(models.JobTask).filter(models.JobTask.job_card_id == j.id).all()
-        if work_is_done(tasks) and mark_work_complete(db, j):
-            changed = True
-    if changed:
-        db.commit()
-    statuses = ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery")
-    jobs = active_jobs(db).filter(models.JobCard.status.in_(statuses)).order_by(models.JobCard.stock_number).all()
-    out = []
-    for j in jobs:
-        need_pdi = False
-        need_ready = False
-        showroom = is_showroom(j)
-        if showroom and current_user.role == "sales":
-            continue
-        if current_user.role == "sales":
-            if (j.salesman_name or "") != current_user.full_name:
-                continue
-            need_pdi = not bool(j.pdi_signed_sales)
-            need_ready = not bool(j.ready_sales)
-        elif current_user.role == "workshop":
-            need_pdi = (not showroom) and (not bool(j.pdi_signed_workshop))
-            need_ready = not bool(j.ready_workshop)
-        elif current_user.role in ("admin", "accounts"):
-            need_pdi = (not showroom) and (not (j.pdi_signed_sales and j.pdi_signed_workshop))
-            need_ready = not (j.ready_workshop if showroom else (j.ready_sales and j.ready_workshop))
-        else:
-            continue
-        if not (need_pdi or need_ready or open_blocking_tasks(j)):
-            continue
-        action = "Sign PDI" if need_pdi else "Mark ready"
-        open_tasks = open_blocking_tasks(j)
-        if open_tasks:
-            action = "Ready - tasks outstanding"
-        out.append({
-            "id": j.id,
-            "stock_number": j.stock_number,
-            "vehicle_description": j.vehicle_description,
-            "year": j.year,
-            "status": j.status,
-            "salesman_name": j.salesman_name,
-            "need_pdi": need_pdi,
-            "need_ready": need_ready,
-            "open_tasks": open_tasks,
-            "action": action,
-        })
-    return {"jobs": out}
 
 @app.get("/api/notifications")
 async def api_notifications(user_id: int, db: Session = Depends(get_db)):

@@ -249,24 +249,33 @@
         const token = localStorage.getItem('token');
         const userId = localStorage.getItem('user_id');
         if (!token || !userId) { alert('Log in first, then tap Enable phone pings.'); return; }
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') { alert('Notifications were blocked. Allow notifications for this site in phone settings.'); return; }
-        const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        await navigator.serviceWorker.ready;
-        const keyRes = await fetch('/api/push/public-key');
-        const keyData = await keyRes.json();
-        if (!keyData.key) { alert('Phone pings are not configured on the server.'); return; }
-        const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(keyData.key)
-        });
-        const save = await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: parseInt(userId), subscription: sub })
-        });
-        if (!save.ok) { alert('Could not save ping on the server'); return; }
-        alert('Phone pings are on for this device.');
+        try {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') { alert('Notifications were blocked. Allow notifications for this site in phone settings.'); return; }
+            const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+            await navigator.serviceWorker.ready;
+            const keyRes = await fetch('/api/push/public-key');
+            const keyData = await keyRes.json();
+            if (!keyData.key || keyData.enabled === false) { alert('Phone pings are not configured on the server.'); return; }
+            const existing = await reg.pushManager.getSubscription();
+            if (existing) {
+                await existing.unsubscribe();
+            }
+            const sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(keyData.key)
+            });
+            const save = await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: parseInt(userId), subscription: sub })
+            });
+            if (!save.ok) { alert('Could not save ping on the server'); return; }
+            alert('Phone pings are on for this device.');
+        } catch (err) {
+            var msg = (err && err.message) ? err.message : String(err);
+            alert('Could not enable phone pings: ' + msg);
+        }
     }
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
