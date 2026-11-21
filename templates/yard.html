@@ -10,17 +10,19 @@
 .yard-summary {display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0}
 .yard-summary div {background:#12161ce8;border:1px solid #2a3340;border-radius:12px;padding:12px}
 .yard-summary strong {display:block;font-size:25px;color:#7ec2ff}
-.yard-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}
-.yard-row {background:#12161cf2;border:1px solid #2a3340;border-radius:14px;padding:16px}
-.yard-row h2 {font-size:18px;font-weight:800;margin-bottom:12px;color:#7ec2ff}
-.yard-ticks {display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.yard-tick {min-height:72px;background:#1a2028;border:1px solid #3a4450;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px;font-weight:700;color:#e8edf3}
+.yard-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:5px}
+.yard-row {background:#12161cf2;border:1px solid #2a3340;border-radius:12px;padding:5px 6px 5px 10px;display:grid;grid-template-columns:64px 1fr;column-gap:6px;align-items:start}
+.yard-row h2 {font-size:14px;letter-spacing:0;font-weight:800;margin:0;color:#7ec2ff;min-height:42px;display:flex;align-items:center;overflow-wrap:break-word;min-width:0;line-height:1.2}
+.yard-ticks {display:grid;grid-template-columns:1fr 1fr;gap:5px;min-width:0}
+.yard-ticks > div {min-width:0}
+.yard-tick {min-height:42px;background:#1a2028;border:1px solid #3a4450;border-radius:9px;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:5px;padding:4px 5px;font-weight:700;font-size:12.5px;line-height:1.15;color:#e8edf3;text-align:center}
 .yard-tick[aria-pressed=true] {background:#14532d;border-color:#4ade80}
-.yard-tick .tick-symbol {font-size:25px;line-height:25px}
-.yard-by {font-size:11px;line-height:1.5;color:#9aa6b4;margin-top:8px;min-height:34px;overflow-wrap:anywhere}
+.yard-tick .tick-symbol {font-size:17px;line-height:17px;flex:none}
+.yard-by {font-size:10px;line-height:1.25;letter-spacing:0;color:#9aa6b4;margin-top:2px;padding:0 1px;overflow-wrap:anywhere}
 .yard-note {color:#9aa6b4;font-size:13px;margin:8px 0}
 #yardError {color:#fca5a5;margin:12px 0}
-@media(max-width:480px){.yard-summary div{padding:9px;font-size:12px}.yard-summary strong{font-size:23px}.yard-toolbar select{width:100%}}
+@media(max-width:480px){.yard-summary div{padding:9px;font-size:12px}.yard-summary strong{font-size:23px}.yard-toolbar select{width:100%}.yard-grid{grid-template-columns:1fr}}
+@media(max-width:360px){.yard-row{padding:6px;column-gap:6px;grid-template-columns:56px 1fr}.yard-row h2{font-size:14px}.yard-tick{font-size:12px;gap:4px;padding:4px}.yard-tick .tick-symbol{font-size:15px}.yard-by{font-size:10px}}
 </style>
 {% endblock %}
 {% block content %}
