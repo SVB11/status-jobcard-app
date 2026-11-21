@@ -940,7 +940,7 @@
                 if (u.work_doing) html += '<div class="text-xs">Work: ' + u.work_doing + '</div>';
                 if (u.parts_needed) html += '<div class="text-xs text-orange-400">Parts needed: ' + u.parts_needed + '</div>';
                 if (u.note) html += '<div class="text-xs">Note: ' + u.note + '</div>';
-                if (u.photo_path) html += '<div class="mt-1"><a href="'+u.photo_path+'" target="_blank"><img src="'+u.photo_path+'" class="max-h-28 rounded"></a></div>';
+                if (u.photo_path) html += '<div class="mt-1"><a href="'+u.photo_path+'" data-viewer-src="'+u.photo_path+'" data-viewer-label="Supplier update photo"><img src="'+u.photo_path+'" class="max-h-28 rounded cursor-pointer"></a></div>';
                 html += '<div class="text-xs text-gray-500">' + (u.created_by_name||'') + '</div>';
                 if (u.parts_needed && !u.workshop_parts_decision) {
                     html += '<div class="flex flex-wrap gap-2 mt-2"><button type="button" onclick="supDecide('+u.id+',\'workshop_assist\')" class="text-xs px-3 py-2 bg-[#025daa] text-white rounded">Workshop can assist</button><button type="button" onclick="supDecide('+u.id+',\'supplier_supply\')" class="text-xs px-3 py-2 bg-[#2a3340] text-white rounded">Supplier must supply</button></div>';
