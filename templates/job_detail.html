@@ -13,6 +13,18 @@
 
 {% block content %}
 <div id="salesViewNote" class="hidden mb-4 p-3 bg-blue-50 text-blue-800 text-sm rounded-lg">View only for work updates. You can complete and sign the PDI. Workshop updates location, parts, 3rd party and extras.</div>
+<div id="loading" class="text-gray-400">Loading job...</div>
+<div id="content" class="hidden space-y-6">
+    <div class="job-head flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+            <div id="jobOverline" class="nl-overline flex flex-wrap items-center gap-2"><span id="jobStatusChip" class="nl-chip hidden"></span><span id="jobPriorityChip" class="nl-chip hidden"></span></div>
+            <h1 class="text-2xl font-bold text-white uppercase tracking-wide" id="jobNumber"></h1>
+            <p id="jobIdHint" class="hidden text-xs text-[#9aa6b4] mt-1"></p>
+            <p class="text-[#9aa6b4]"><span id="jobTypeBadge" class="text-xs px-2 py-1 rounded bg-[#025daa] text-white mr-2">SOLD</span><span id="vehicleLine"></span></p>
+        </div>
+        <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
+    </div>
+    <div id="stageBar" class="nl-stagebar" aria-label="Where this job is"><ol class="nl-stages" id="stageList"></ol></div>
 <div id="emptyCheckJobBox" class="hidden mb-4 rounded-xl border-2 border-orange-500">
     <div class="glass-inner">
         <div class="font-semibold uppercase text-orange-300">Tanker empty check</div>
@@ -22,21 +34,15 @@
     </div>
 </div>
 <div id="washReqBox" class="hidden mb-4 p-4 rounded-xl border border-[#025daa] bg-[#025daa22]">
-    <div class="font-semibold uppercase text-sm mb-2">Request wash</div>
+    <details id="washReqFold">
+    <summary class="font-semibold uppercase text-sm mb-2">Request wash</summary>
+    <div class="wash-body">
     <p class="text-xs text-[#9aa6b4] mb-2">For marketing photos. Workshop will move it to Wash Bay.</p>
     <textarea id="washNote" class="w-full mb-2 px-3 py-2 rounded text-sm" rows="2" placeholder="Wash for photos / marketing"></textarea>
     <button type="button" onclick="requestWash()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded uppercase">Send wash request</button>
-</div>
-<div id="loading" class="text-gray-400">Loading job...</div>
-<div id="content" class="hidden space-y-6">
-    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div>
-            <h1 class="text-2xl font-bold text-white uppercase tracking-wide" id="jobNumber"></h1>
-            <p id="jobIdHint" class="hidden text-xs text-[#9aa6b4] mt-1"></p>
-            <p class="text-[#9aa6b4]"><span id="jobTypeBadge" class="text-xs px-2 py-1 rounded bg-[#025daa] text-white mr-2">SOLD</span><span id="vehicleLine"></span></p>
-        </div>
-        <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
     </div>
+    </details>
+</div>
     <div id="stockPhotoWrap" class="hidden">
         <img id="stockPhoto" class="stock-hero" alt="Vehicle">
     </div>
@@ -48,6 +54,9 @@
         <a href="#workshopExtras" class="px-3 py-2 bg-[#025daa] text-white rounded-lg whitespace-nowrap font-semibold">Current activity</a>
     </div>
 
+    <details id="infoFold" class="nl-fold">
+    <summary>Vehicle &amp; client and job info <span class="sum-hint" id="infoFoldHint"></span></summary>
+    <div class="nl-fold-body">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white rounded-xl shadow"><div class="glass-inner">
             <h2 class="font-semibold text-status-blue mb-3">Vehicle & Client</h2>
@@ -91,6 +100,8 @@
             </dl>
         </div></div>
     </div>
+    </div>
+    </details>
 
     <div id="photoArchiveBox" class="hidden bg-white rounded-xl shadow"><div class="glass-inner">
         <h2 class="font-semibold text-status-blue mb-2">Job photos</h2>
@@ -1783,5 +1794,94 @@
     }
 
     loadJob();
+</script>
+<script>
+/* New look (visual only): stage bar, status chips, info fold and tab highlight.
+   Reads what the page already shows; changes no job data. */
+(function(){
+    var STAGES = [
+        { key: 'Submitted to Workshop', label: 'Sales created' },
+        { key: 'Accepted by Workshop', label: 'Workshop accepted' },
+        { key: 'In Progress', label: 'In progress' },
+        { key: 'Work Completed', label: 'Work done' },
+        { key: 'PDI', label: 'PDI', pdi: true },
+        { key: 'Ready for Delivery', label: 'Ready' },
+        { key: 'Delivered / Closed', label: 'Delivered' }
+    ];
+    function stageIndex(status, list) {
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].pdi && (status === 'PDI in Progress' || status === 'PDI Completed')) return i;
+            if (list[i].key === status) return i;
+        }
+        if (status === 'PDI Failed - Returned to Workshop') {
+            for (var j = 0; j < list.length; j++) if (list[j].key === 'In Progress') return j;
+        }
+        return -1;
+    }
+    function render() {
+        var stEl = document.getElementById('status');
+        var status = stEl ? (stEl.textContent || '').trim() : '';
+        var badge = document.getElementById('jobTypeBadge');
+        var showroom = badge && (badge.textContent || '').trim().toUpperCase() === 'SHOWROOM';
+        var list = STAGES.filter(function(s) { return !(showroom && s.pdi); });
+        var bar = document.getElementById('stageBar');
+        var ol = document.getElementById('stageList');
+        var idx = stageIndex(status, list);
+        var failed = status === 'PDI Failed - Returned to Workshop';
+        if (bar && ol) {
+            if (idx < 0) { bar.classList.remove('is-ready'); ol.innerHTML = ''; }
+            else {
+                ol.innerHTML = '';
+                list.forEach(function(s, i) {
+                    var li = document.createElement('li');
+                    var done = i < idx || (i === idx && status === 'Delivered / Closed');
+                    li.className = done ? 'is-done' : (i === idx ? (failed ? 'is-warn' : 'is-now') : '');
+                    if (i === idx) li.setAttribute('aria-current', 'step');
+                    li.innerHTML = '<span class="dot"></span><span class="lbl"></span>';
+                    li.querySelector('.lbl').textContent = s.label;
+                    ol.appendChild(li);
+                });
+                bar.classList.add('is-ready');
+            }
+        }
+        var chip = document.getElementById('jobStatusChip');
+        if (chip) {
+            chip.textContent = status;
+            chip.className = 'nl-chip ' + (failed ? 'is-amber' : (status === 'Delivered / Closed' || status === 'Ready for Delivery' ? 'is-green' : 'is-blue')) + (status ? '' : ' hidden');
+        }
+        var pr = document.getElementById('priority');
+        var pc = document.getElementById('jobPriorityChip');
+        if (pr && pc) {
+            var p = (pr.textContent || '').trim();
+            pc.textContent = p;
+            pc.className = 'nl-chip ' + (p === 'Urgent' || p === 'High' ? 'is-amber' : '') + (p && p !== 'Normal' ? '' : ' hidden');
+        }
+        var hint = document.getElementById('infoFoldHint');
+        var loc = document.getElementById('location');
+        if (hint) hint.textContent = loc ? (loc.textContent || '').trim() : '';
+    }
+    var fold = document.getElementById('infoFold');
+    if (fold && window.matchMedia && window.matchMedia('(min-width: 768px)').matches) fold.open = true;
+    var timer = null;
+    var mo = new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(render, 30); });
+    ['status', 'jobTypeBadge', 'priority', 'location'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) mo.observe(el, { childList: true, characterData: true, subtree: true });
+    });
+    render();
+
+    var links = Array.prototype.slice.call(document.querySelectorAll('.sticky-sub a[href^="#"]'));
+    function spy() {
+        var best = null;
+        links.forEach(function(a) {
+            var t = document.querySelector(a.getAttribute('href'));
+            if (!t || !t.offsetParent) return;
+            var top = t.getBoundingClientRect().top;
+            if (top < 200) best = a;
+        });
+        links.forEach(function(a) { a.classList.toggle('is-current', a === (best || links[0])); });
+    }
+    if (links.length) { window.addEventListener('scroll', spy, { passive: true }); spy(); }
+})();
 </script>
 {% endblock %}
