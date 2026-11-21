@@ -17,6 +17,7 @@ from .lists_config import LOCATIONS, WORKSHOP_BAYS, ACTIVITY_TYPES, EXTRA_WORK_P
 from .migrate import migrate_schema
 from .stock_photos import match_stock_photo
 from .client_report import build_report, render_pdf, whatsapp_text
+from .display import job_display_id, job_display_label, stock_repeat_counts, with_display
 
 # Create tables and seed
 Base.metadata.create_all(bind=engine)
@@ -156,6 +157,13 @@ def generate_job_number(db: Session) -> str:
     else:
         num = 1
     return f"{prefix}{num:04d}"
+
+def stock_counts_exact(db, stock_value) -> dict:
+    stock = (stock_value or "").strip()
+    if not stock:
+        return {}
+    n = db.query(models.JobCard).filter(models.JobCard.stock_number == stock_value).count()
+    return {stock: n}
 
 def log_audit(db: Session, user_id: int, action: str, job_card_id: int = None, details: str = None):
     entry = models.AuditLog(
@@ -398,16 +406,17 @@ async def api_open_ws(stock: str, db: Session = Depends(get_db), current_user: m
     if not key:
         return {"open": []}
     jobs = active_jobs(db).all()
+    matched = [j for j in jobs if "".join((j.stock_number or "").split()).upper() == key]
+    counts = stock_repeat_counts(matched)
     open_jobs = []
-    for j in jobs:
-        if "".join((j.stock_number or "").split()).upper() == key:
-            open_jobs.append({
-                "id": j.id,
-                "job_number": j.job_number,
-                "stock_number": j.stock_number,
-                "status": j.status,
-                "job_purpose": getattr(j, "job_purpose", None) or "sold",
-            })
+    for j in matched:
+        open_jobs.append(with_display({
+            "id": j.id,
+            "job_number": j.job_number,
+            "stock_number": j.stock_number,
+            "status": j.status,
+            "job_purpose": getattr(j, "job_purpose", None) or "sold",
+        }, j, counts))
     return {"open": open_jobs}
 
 @app.post("/api/jobs/create")
@@ -505,7 +514,7 @@ async def api_create_job(
         db.commit()
         if created_by_id:
             log_audit(db, created_by_id, "Converted showroom to sales", job.id, job.stock_number)
-        msg = f"{job.stock_number} showroom job is now a sales job for {job.client_name}"
+        msg = f"{job_display_id(job)} showroom job is now a sales job for {job.client_name}"
         notify_role(db, "workshop", msg, job.id)
         notify_role(db, "admin", msg, job.id)
         notify_role(db, "accounts", msg, job.id)
@@ -514,7 +523,7 @@ async def api_create_job(
             "converted": True,
             "job_number": job.job_number,
             "job_id": job.id,
-            "message": f"{job.job_number} converted from showroom to sales. Showroom tasks kept.",
+            "message": f"{job_display_id(job)} converted from showroom to sales. Showroom tasks kept.",
         }
 
     job_number = generate_job_number(db)
@@ -582,19 +591,19 @@ async def api_create_job(
     # Audit
     if created_by_id:
         log_audit(db, created_by_id, "Created Job Card", job.id,
-                  f"Job {job_number} for {job.stock_number} – {job.vehicle_description}")
+                  f"Job {job_display_id(job)} – {job.vehicle_description}")
     if purpose == "showroom":
-        msg = f"SHOWROOM job {job.stock_number} — {job.vehicle_description} needs admin approval"
+        msg = f"SHOWROOM job {job_display_id(job)} — {job.vehicle_description} needs admin approval"
         notify_role(db, "admin", msg, job.id)
         notify_role(db, "accounts", msg, job.id)
         notify_role(db, "workshop", msg, job.id)
-        done_msg = f"Showroom job {job.job_number} created. Waiting for admin approval before work starts."
+        done_msg = f"Showroom job {job_display_id(job)} created. Waiting for admin approval before work starts."
     else:
-        msg = f"New job card {job.stock_number} — {job.vehicle_description}"
+        msg = f"New job card {job_display_id(job)} — {job.vehicle_description}"
         notify_role(db, "workshop", msg, job.id)
         notify_role(db, "admin", msg, job.id)
         notify_role(db, "accounts", msg, job.id)
-        done_msg = f"Job Card {job.job_number} submitted to Workshop successfully."
+        done_msg = f"Job Card {job_display_id(job)} submitted to Workshop successfully."
 
     return {
         "success": True,
@@ -662,13 +671,13 @@ def archive_job(db, job, user_id=None, by_name="System", reason="Job delivered a
     db.add(models.JobUpdate(
         job_card_id=job.id,
         category="progress",
-        description=f"Job delivered and archived {job.job_number}",
+        description=f"Job delivered and archived {job_display_id(job)}",
         notes=reason,
         created_by_name=by_name or "System",
         created_by=user_id,
     ))
     if user_id:
-        log_audit(db, user_id, "Job delivered and archived", job.id, f"{job.job_number} {reason}")
+        log_audit(db, user_id, "Job delivered and archived", job.id, f"{job_display_id(job)} {reason}")
     db.commit()
     return job
 
@@ -703,9 +712,10 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
     if created_by:
         query = query.filter(models.JobCard.created_by == created_by)
     jobs = query.limit(400).all()
+    counts = stock_repeat_counts(jobs)
     result = []
     for j in jobs:
-        result.append({
+        result.append(with_display({
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
@@ -727,7 +737,7 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
             "ready_sales": bool(j.ready_sales),
             "ready_workshop": bool(j.ready_workshop),
             "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
-        })
+        }, j, counts))
     return {"jobs": result}
 
 @app.get("/health")
@@ -753,13 +763,15 @@ async def api_archive(q: str = "", db: Session = Depends(get_db), current_user: 
     require_admin_only(current_user)
     rows = db.query(models.JobCard).filter(models.JobCard.archived_at != None).order_by(models.JobCard.archived_at.desc()).all()
     needle = (q or "").strip().lower()
+    # Count repeats across the full archive, not just the filtered page.
+    counts = stock_repeat_counts(rows)
     out = []
     for j in rows:
         hay = " ".join([j.stock_number or "", j.job_number or "", j.vin_number or "", j.registration_number or "", j.client_name or "", j.vehicle_description or ""]).lower()
         if needle and needle not in hay:
             continue
         who = user_name(db, j.archived_by) or ""
-        out.append({
+        out.append(with_display({
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
@@ -772,7 +784,7 @@ async def api_archive(q: str = "", db: Session = Depends(get_db), current_user: 
             "archived_at": j.archived_at.isoformat() if j.archived_at else None,
             "archived_by": who,
             "status": j.status,
-        })
+        }, j, counts))
     return {"jobs": out}
 
 @app.post("/api/archive/{job_id}/restore")
@@ -796,12 +808,12 @@ async def api_restore_archive(job_id: int, request: Request, db: Session = Depen
     db.add(models.JobUpdate(
         job_card_id=job.id,
         category="progress",
-        description=f"Restored to active {job.job_number}",
+        description=f"Restored to active {job_display_id(job)}",
         notes=reason,
         created_by_name=current_user.full_name,
         created_by=current_user.id,
     ))
-    log_audit(db, current_user.id, "Restored to active", job.id, f"{job.job_number} {reason}")
+    log_audit(db, current_user.id, "Restored to active", job.id, f"{job_display_id(job)} {reason}")
     db.commit()
     return {"success": True}
 
@@ -811,7 +823,7 @@ async def api_archive_detail(job_id: int, db: Session = Depends(get_db), current
     job = db.query(models.JobCard).filter(models.JobCard.id == job_id).first()
     if not job or not is_archived(job):
         raise HTTPException(status_code=404, detail="Archived job not found")
-    return {
+    return with_display({
         "id": job.id,
         "job_number": job.job_number,
         "stock_number": job.stock_number,
@@ -835,7 +847,7 @@ async def api_archive_detail(job_id: int, db: Session = Depends(get_db), current
         "pdi": [{"check_item": p.check_item, "status": p.status, "notes": p.notes} for p in (job.pdi_items or [])],
         "updates": [{"description": u.description, "notes": u.notes, "created_by_name": u.created_by_name, "created_at": u.created_at.isoformat() if u.created_at else None} for u in (job.updates or [])],
         "audit": [{"action": a.action, "details": a.details, "timestamp": a.timestamp.isoformat() if a.timestamp else None} for a in (job.audit_logs or [])],
-    }
+    }, job, stock_counts_exact(db, job.stock_number))
 
 # ---------- ACCEPT JOB ----------
 
@@ -857,7 +869,7 @@ async def api_approve_showroom(job_id: int, db: Session = Depends(get_db), curre
         created_by=current_user.id,
     ))
     log_audit(db, current_user.id, "Approved showroom job", job.id, job.stock_number)
-    notify_role(db, "workshop", f"Showroom job approved: {job.stock_number} — {job.vehicle_description}", job.id)
+    notify_role(db, "workshop", f"Showroom job approved: {job_display_id(job)} — {job.vehicle_description}", job.id)
     db.commit()
     return {"success": True, "status": job.status}
 
@@ -906,20 +918,20 @@ async def api_accept_job(job_id: int, request: Request, db: Session = Depends(ge
     db.commit()
 
     if user_id:
-        log_audit(db, user_id, "Accepted Job Card", job.id, f"Job {job.job_number} accepted by Workshop")
+        log_audit(db, user_id, "Accepted Job Card", job.id, f"Job {job_display_id(job)} accepted by Workshop")
 
     # Photo reminder ping. Information only: any error here is ignored so accept always succeeds.
     try:
         names = [t.task_name for t in (job.tasks or []) if needs_photo_reminder(job, t)]
         if names:
-            notify_role(db, "workshop", f"Photo reminder: take BEFORE and AFTER photos on {job.stock_number} — " + ", ".join(names[:4]) + (" …" if len(names) > 4 else ""), job.id)
+            notify_role(db, "workshop", f"Photo reminder: take BEFORE and AFTER photos on {job_display_id(job)} — " + ", ".join(names[:4]) + (" …" if len(names) > 4 else ""), job.id)
             db.commit()
     except Exception:
         db.rollback()
 
     # TODO: create notification for the salesman
 
-    return {"success": True, "message": f"Job {job.job_number} accepted", "status": job.status}
+    return {"success": True, "message": f"Job {job_display_id(job)} accepted", "status": job.status}
 
 # ---------- JOB DETAIL ----------
 
@@ -1103,7 +1115,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
         delta = datetime.utcnow() - job.workshop_entered_at.replace(tzinfo=None)
         workshop_hours = round(delta.total_seconds() / 3600, 1)
 
-    return {
+    return with_display({
         "id": job.id,
         "job_number": job.job_number,
         "stock_number": job.stock_number,
@@ -1198,7 +1210,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
             "deleted_at_sast": sast_text(a.deleted_at),
             "deleted_count": a.deleted_count,
         } for a in photo_archive_rows if a.deleted_at],
-    }
+    }, job, stock_counts_exact(db, job.stock_number))
 
 @app.post("/api/jobs/{job_id}/vehicle")
 async def api_update_vehicle(job_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -1443,7 +1455,7 @@ async def api_add_task(job_id: int, request: Request, db: Session = Depends(get_
     db.commit()
     db.refresh(task)
     if task.needs_approval:
-        notify_role(db, "admin", f"EXTRA needs approval on {job.stock_number}: {task_name}", job.id)
+        notify_role(db, "admin", f"EXTRA needs approval on {job_display_id(job)}: {task_name}", job.id)
         db.commit()
 
     if user_id:
@@ -1478,7 +1490,7 @@ async def api_overrides(db: Session = Depends(get_db), current_user: models.User
     out = []
     for e in rows:
         job = db.query(models.JobCard).filter(models.JobCard.id == e.job_card_id).first()
-        out.append({
+        out.append(with_display({
             "job_id": e.job_card_id,
             "job_number": job.job_number if job else "",
             "stock_number": job.stock_number if job else "",
@@ -1489,7 +1501,7 @@ async def api_overrides(db: Session = Depends(get_db), current_user: models.User
             "reason": e.reason,
             "override": bool(e.override),
             "when": e.timestamp.isoformat() if e.timestamp else None,
-        })
+        }, job, stock_counts_exact(db, job.stock_number) if job else {}))
     return {"events": out}
 
 @app.get("/admin/third-parties", response_class=HTMLResponse)
@@ -1581,6 +1593,10 @@ async def api_admin_pending_extras(db: Session = Depends(get_db), current_user: 
             "description": t.description,
             "last_updated_by_name": t.last_updated_by_name or job.salesman_name
         })
+    job_ids = list({row["job_id"] for row in out})
+    job_map = {j.id: j for j in db.query(models.JobCard).filter(models.JobCard.id.in_(job_ids)).all()} if job_ids else {}
+    counts = stock_repeat_counts(job_map.values())
+    out = [with_display(row, job_map.get(row["job_id"]), counts) for row in out]
     return {"tasks": out}
 
 @app.get("/api/admin/users")
@@ -1763,14 +1779,14 @@ async def api_mark_ready(job_id: int, request: Request, db: Session = Depends(ge
     if user_id:
         log_audit(db, user_id, "Marked Ready for Delivery", job.id, f"Marked by {party}")
     if is_showroom(job) and party == "workshop":
-        notify_role(db, "workshop", f"Showroom job {job.stock_number} signed off by workshop", job.id)
-        notify_role(db, "admin", f"Showroom job {job.stock_number} signed off by workshop", job.id)
+        notify_role(db, "workshop", f"Showroom job {job_display_id(job)} signed off by workshop", job.id)
+        notify_role(db, "admin", f"Showroom job {job_display_id(job)} signed off by workshop", job.id)
     elif job.ready_sales and job.ready_workshop:
-        notify_signoff(db, job, f"{job.stock_number} is ready for delivery")
+        notify_signoff(db, job, f"{job_display_id(job)} is ready for delivery")
     elif party == "workshop" and not job.ready_sales:
-        notify_salesman(db, job, f"Workshop marked {job.stock_number} ready — sales must mark ready")
+        notify_salesman(db, job, f"Workshop marked {job_display_id(job)} ready — sales must mark ready")
     elif party == "sales" and not job.ready_workshop:
-        notify_role(db, "workshop", f"Sales marked {job.stock_number} ready — workshop must mark ready", job.id)
+        notify_role(db, "workshop", f"Sales marked {job_display_id(job)} ready — workshop must mark ready", job.id)
     db.commit()
 
     return {
@@ -1822,11 +1838,11 @@ async def api_empty_sign(job_id: int, request: Request, db: Session = Depends(ge
     ))
     log_audit(db, current_user.id, "Tanker empty check", job.id, party)
     if job.empty_signed_workshop and job.empty_signed_sales:
-        notify_signoff(db, job, f"Tanker empty check complete on {job.stock_number} — can mark ready / deliver")
+        notify_signoff(db, job, f"Tanker empty check complete on {job_display_id(job)} — can mark ready / deliver")
     elif party == "workshop":
-        notify_salesman(db, job, f"Workshop signed tanker empty check on {job.stock_number} — sales must sign")
+        notify_salesman(db, job, f"Workshop signed tanker empty check on {job_display_id(job)} — sales must sign")
     else:
-        notify_role(db, "workshop", f"Sales signed tanker empty check on {job.stock_number} — workshop must sign", job.id)
+        notify_role(db, "workshop", f"Sales signed tanker empty check on {job_display_id(job)} — workshop must sign", job.id)
     db.commit()
     return {
         "success": True,
@@ -1888,25 +1904,25 @@ async def api_reopen_job(job_id: int, request: Request, db: Session = Depends(ge
     db.add(models.JobUpdate(
         job_card_id=job.id,
         category="progress",
-        description=f"Reopened {job.job_number}",
+        description=f"Reopened {job_display_id(job)}",
         notes=reason,
         created_by_name=current_user.full_name,
         created_by=current_user.id,
     ))
-    log_audit(db, current_user.id, "Reopened job", job.id, f"{job.job_number} {reason}")
+    log_audit(db, current_user.id, "Reopened job", job.id, f"{job_display_id(job)} {reason}")
     db.add(models.IntegrityEvent(
         job_card_id=job.id,
         event_type="reopen",
         user_id=current_user.id,
         reason=reason,
     ))
-    notify_role(db, "admin", f"{current_user.full_name} reopened {job.stock_number}: {reason}", job.id)
+    notify_role(db, "admin", f"{current_user.full_name} reopened {job_display_id(job)}: {reason}", job.id)
     db.query(models.Notification).filter(
         models.Notification.user_id == current_user.id,
         models.Notification.job_card_id == job.id,
         models.Notification.message.like(f"{current_user.full_name} reopened%")
     ).delete(synchronize_session=False)
-    notify_salesman(db, job, f"{job.stock_number} was reopened: {reason}")
+    notify_salesman(db, job, f"{job_display_id(job)} was reopened: {reason}")
     db.commit()
     return {"success": True, "status": job.status}
 
@@ -1979,7 +1995,7 @@ async def api_get_pdi(job_id: int, db: Session = Depends(get_db), current_user: 
         })
 
     return {
-        "job": {
+        "job": with_display({
             "id": job.id,
             "job_number": job.job_number,
             "stock_number": job.stock_number,
@@ -1996,7 +2012,7 @@ async def api_get_pdi(job_id: int, db: Session = Depends(get_db), current_user: 
             "pdi_signed_sales_at": job.pdi_signed_sales_at.isoformat() if job.pdi_signed_sales_at else None,
             "pdi_signed_workshop_by_name": user_name(db, job.pdi_signed_workshop_by),
             "pdi_signed_sales_by_name": user_name(db, job.pdi_signed_sales_by)
-        },
+        }, job, stock_counts_exact(db, job.stock_number)),
         "items": items
     }
 
@@ -2041,7 +2057,7 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
             job.pdi_signed_sales = False
             job.ready_sales = False
             job.ready_workshop = False
-            msg = f"PDI FAIL on {job.stock_number}: {item.check_item} — {note} (by {inspector})"
+            msg = f"PDI FAIL on {job_display_id(job)}: {item.check_item} — {note} (by {inspector})"
             db.add(models.JobTask(
                 job_card_id=job.id,
                 task_name="PDI Fail: " + (item.check_item or "Item")[:80],
@@ -2119,12 +2135,12 @@ async def api_sign_pdi(job_id: int, request: Request, db: Session = Depends(get_
     if user_id:
         log_audit(db, user_id, "Signed PDI", job.id, f"PDI signed by {party}")
     if job.pdi_signed_workshop and job.pdi_signed_sales:
-        notify_signoff(db, job, f"PDI signed off on {job.stock_number} — mark ready for delivery")
+        notify_signoff(db, job, f"PDI signed off on {job_display_id(job)} — mark ready for delivery")
     elif party == "workshop" and not job.pdi_signed_sales:
-        notify_salesman(db, job, f"Workshop signed PDI on {job.stock_number} — sales must sign and mark ready")
-        notify_role(db, "admin", f"Workshop signed PDI on {job.stock_number} — waiting for sales", job.id)
+        notify_salesman(db, job, f"Workshop signed PDI on {job_display_id(job)} — sales must sign and mark ready")
+        notify_role(db, "admin", f"Workshop signed PDI on {job_display_id(job)} — waiting for sales", job.id)
     elif party == "sales" and not job.pdi_signed_workshop:
-        notify_role(db, "workshop", f"Sales signed PDI on {job.stock_number} — workshop must sign and mark ready", job.id)
+        notify_role(db, "workshop", f"Sales signed PDI on {job_display_id(job)} — workshop must sign and mark ready", job.id)
     db.commit()
 
     return {
@@ -2280,8 +2296,9 @@ async def api_locations_board(db: Session = Depends(get_db), current_user: model
     board = {loc: [] for loc in LOCATIONS}
     board["Unspecified"] = []
     board["Delivered / Out"] = []
+    loc_counts = stock_repeat_counts(jobs)
     for j in jobs:
-        base = {
+        base = with_display({
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
@@ -2291,8 +2308,8 @@ async def api_locations_board(db: Session = Depends(get_db), current_user: model
             "priority": j.priority,
             "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year),
             "job_purpose": getattr(j, "job_purpose", None) or "sold",
-        }
-        vehicle = f"{j.stock_number} {j.vehicle_description} {j.year or ''}".strip()
+        }, j, loc_counts)
+        vehicle = f"{job_display_label(j, loc_counts)} {j.vehicle_description} {j.year or ''}".strip()
         if (j.status or "") in CLOSED_STATUSES or (j.status or "").lower().startswith("delivered"):
             item = dict(base)
             item["label"] = vehicle
@@ -2482,8 +2499,8 @@ async def api_add_update(job_id: int, request: Request, db: Session = Depends(ge
             last_updated_by_name=name
         )
         db.add(extra_task)
-        notify_role(db, "admin", f"EXTRA needs approval on {job.stock_number}: {description}", job.id)
-        notify_role(db, "accounts", f"EXTRA needs approval on {job.stock_number}: {description}", job.id)
+        notify_role(db, "admin", f"EXTRA needs approval on {job_display_id(job)}: {description}", job.id)
+        notify_role(db, "accounts", f"EXTRA needs approval on {job_display_id(job)}: {description}", job.id)
     # Also persist latest 3rd party / parts onto the job card when provided
     if category == "third_party":
         if body.get("third_party_place"):
@@ -2705,8 +2722,8 @@ async def api_pdf_work(job_id: int, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Job not found")
     workshop = _signer(db, job, "ready_workshop_by", "workshop") if job.ready_workshop else None
     sales = _signer(db, job, "ready_sales_by", "sales") if job.ready_sales else None
-    pdf = build_work_pdf(job, workshop, sales)
-    name = f"{job.stock_number or job.job_number} {job.vehicle_description or ''} completed work.pdf".replace("/", "-")
+    pdf = build_work_pdf(job, workshop, sales, display_label=job_display_label(job, stock_counts_exact(db, job.stock_number)))
+    name = f"{job_display_id(job)} {job.vehicle_description or ''} completed work.pdf".replace("/", "-")
     return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @app.get("/api/jobs/{job_id}/pdf-pdi")
@@ -2717,8 +2734,8 @@ async def api_pdf_pdi(job_id: int, request: Request, db: Session = Depends(get_d
     items = list(job.pdi_items or [])
     workshop = user_name(db, job.pdi_signed_workshop_by) if job.pdi_signed_workshop else None
     sales = user_name(db, job.pdi_signed_sales_by) if job.pdi_signed_sales else None
-    pdf = build_pdi_pdf(job, items, workshop, sales)
-    name = f"{job.stock_number or job.job_number} {job.vehicle_description or ''} PDI.pdf".replace("/", "-")
+    pdf = build_pdi_pdf(job, items, workshop, sales, display_label=job_display_label(job, stock_counts_exact(db, job.stock_number)))
+    name = f"{job_display_id(job)} {job.vehicle_description or ''} PDI.pdf".replace("/", "-")
     return Response(content=pdf.read(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @app.post("/api/jobs/{job_id}/parts")
@@ -2764,7 +2781,7 @@ async def api_add_part(job_id: int, request: Request, db: Session = Depends(get_
         is_custom=True,
         status="Not Started"
     ))
-    notify_role(db, "workshop", f"Part to be ordered: {desc} on {job.stock_number}", job.id)
+    notify_role(db, "workshop", f"Part to be ordered: {desc} on {job_display_id(job)}", job.id)
     db.commit()
     return {"success": True, "id": part.id}
 
@@ -3228,7 +3245,8 @@ async def api_workshop_bookings(db: Session = Depends(get_db), current_user: mod
             "stock_number": job.stock_number,
             "vehicle_description": job.vehicle_description,
             "year": job.year,
-            "label": f"{job.stock_number} {job.vehicle_description or ''} {job.year or ''}".strip(),
+            "label": f"{job_display_id(job)} {job.vehicle_description or ''} {job.year or ''}".strip(),
+            "_job": job,
         })
     rows = db.query(models.ThirdPartyBooking).order_by(models.ThirdPartyBooking.booked_date).all()
     for b in rows:
@@ -3250,8 +3268,17 @@ async def api_workshop_bookings(db: Session = Depends(get_db), current_user: mod
             "stock_number": job.stock_number,
             "vehicle_description": job.vehicle_description,
             "year": job.year,
-            "label": f"{job.stock_number} {job.vehicle_description or ''} {job.year or ''}".strip(),
+            "label": f"{job_display_id(job)} {job.vehicle_description or ''} {job.year or ''}".strip(),
+            "_job": job,
         })
+    booking_jobs = [row.pop("_job") for row in out]
+    counts = stock_repeat_counts(booking_jobs)
+    decorated = []
+    for row, job in zip(out, booking_jobs):
+        row = with_display(row, job, counts)
+        row["label"] = f"{job_display_label(job, counts)} {job.vehicle_description or ''} {job.year or ''}".strip()
+        decorated.append(row)
+    out = decorated
     out.sort(key=lambda x: (x.get("booked_date") or "9999", x.get("stock_number") or ""))
     return {"bookings": out}
 
@@ -3329,13 +3356,13 @@ def mark_work_complete(db, job, user_id=None):
     job.status = "Work Completed"
     job.work_completed_at = datetime.utcnow()
     if user_id:
-        log_audit(db, user_id, "Work Completed", job.id, f"Work tasks done on {job.job_number}. Wash is only at collection")
+        log_audit(db, user_id, "Work Completed", job.id, f"Work tasks done on {job_display_id(job)}. Wash is only at collection")
     if is_showroom(job):
-        notify_signoff(db, job, f"Showroom work completed on {job.stock_number} — workshop mark ready. No sales sign-off, PDI or empty check")
+        notify_signoff(db, job, f"Showroom work completed on {job_display_id(job)} — workshop mark ready. No sales sign-off, PDI or empty check")
     else:
-        notify_signoff(db, job, f"Work completed on {job.stock_number} — sign PDI and mark ready. Wash bay is only before the client collects")
+        notify_signoff(db, job, f"Work completed on {job_display_id(job)} — sign PDI and mark ready. Wash bay is only before the client collects")
         if type_family(job.main_type) == "tanker":
-            notify_signoff(db, job, f"TANKER EMPTY CHECK: {job.stock_number} — confirm compartments and pipelines to APIs are empty before delivery")
+            notify_signoff(db, job, f"TANKER EMPTY CHECK: {job_display_id(job)} — confirm compartments and pipelines to APIs are empty before delivery")
     return True
 
 def work_is_done(tasks):
@@ -3361,7 +3388,7 @@ async def api_request_update(job_id: int, request: Request, db: Session = Depend
     job.update_requested_at = datetime.utcnow()
     job.update_requested_by = who
     job.update_request_note = note or None
-    msg = f"UPDATE REQUEST: {job.stock_number} {job.vehicle_description} — {who} needs a workshop update"
+    msg = f"UPDATE REQUEST: {job_display_id(job)} {job.vehicle_description} — {who} needs a workshop update"
     if note:
         msg += f" ({note})"
     notify_role(db, "workshop", msg, job.id)
@@ -3598,7 +3625,7 @@ async def api_supplier_update(
         ext = os.path.splitext(photo.filename)[1].lower()
         if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic"):
             raise HTTPException(status_code=400, detail="Photo must be jpg, png or heic")
-        fname = f"{job.stock_number}_{uuid.uuid4().hex[:8]}{ext}"
+        fname = f"{job_display_id(job)}_{uuid.uuid4().hex[:8]}{ext}"
         dest = os.path.join(UPLOAD_DIR, "supplier", fname)
         with open(dest, "wb") as f:
             f.write(await photo.read())
@@ -3678,7 +3705,7 @@ async def api_supplier_update(
         if work_is_done(all_tasks):
             mark_work_complete(db, job, current_user.id)
 
-    msg = f"SUPPLIER {company} on {job.stock_number}: {status_val}"
+    msg = f"SUPPLIER {company} on {job_display_id(job)}: {status_val}"
     if row.parts_needed:
         msg += " — parts needed (workshop note only)"
     if photo_path:
@@ -3936,7 +3963,7 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
         created_by=body.get("user_id"),
     )
     # Current activity is a note only. A real extra job is added under Work / Prep Tasks.
-    msg = f"Update on {job.stock_number}: {job.current_location or ''} {job.current_activity or ''}".strip()
+    msg = f"Update on {job_display_id(job)}: {job.current_location or ''} {job.current_activity or ''}".strip()
     sales = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True, models.User.full_name == job.salesman_name).all()
     for u in sales:
         db.add(models.Notification(user_id=u.id, job_card_id=job.id, message=msg))
@@ -3953,13 +3980,14 @@ async def admin_print_bookings_page(request: Request, current_user: models.User 
 async def api_admin_job_bookings(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_admin(current_user)
     jobs = active_jobs(db).order_by(models.JobCard.created_at.desc()).all()
+    counts = stock_repeat_counts(jobs)
     out = []
     for job in jobs:
         parts = db.query(models.PartItem).filter(models.PartItem.job_card_id == job.id).all()
         extras = db.query(models.JobTask).filter(models.JobTask.job_card_id == job.id, models.JobTask.is_custom == True).all()
         if not parts and not extras:
             continue
-        out.append({
+        out.append(with_display({
             "id": job.id,
             "job_number": job.job_number,
             "stock_number": job.stock_number,
@@ -3981,17 +4009,19 @@ async def api_admin_job_bookings(db: Session = Depends(get_db), current_user: mo
                 "status": e.status,
                 "needs_approval": bool(getattr(e, "needs_approval", False))
             } for e in extras]
-        })
+        }, job, counts))
     return {"jobs": out}
 
 @app.get("/api/workshop/parts")
 async def api_workshop_parts(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     parts = db.query(models.PartItem).order_by(models.PartItem.created_at.desc()).all()
     out = []
+    jobs_for_parts = []
     for p in parts:
         job = db.query(models.JobCard).filter(models.JobCard.id == p.job_card_id).first()
         if job and is_archived(job):
             continue
+        jobs_for_parts.append(job)
         out.append({
             "id": p.id,
             "job_id": p.job_card_id,
@@ -4008,6 +4038,8 @@ async def api_workshop_parts(db: Session = Depends(get_db), current_user: models
             "vehicle_description": job.vehicle_description if job else "",
             "year": job.year if job else "",
         })
+    counts = stock_repeat_counts([j for j in jobs_for_parts if j])
+    out = [with_display(row, job, counts) for row, job in zip(out, jobs_for_parts)]
     return {"parts": out}
 
 @app.get("/api/notifications")
@@ -4087,10 +4119,11 @@ async def api_approve_task(job_id: int, task_id: int, request: Request, db: Sess
 @app.get("/api/pdi-fails")
 async def api_pdi_fails(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     jobs = active_jobs(db).filter(models.JobCard.status == "PDI Failed - Returned to Workshop").order_by(models.JobCard.created_at.desc()).all()
+    counts = stock_repeat_counts(jobs)
     out = []
     for j in jobs:
         fails = db.query(models.PDIItem).filter(models.PDIItem.job_card_id == j.id, models.PDIItem.status == "Fail").all()
-        out.append({
+        out.append(with_display({
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
@@ -4098,7 +4131,7 @@ async def api_pdi_fails(db: Session = Depends(get_db), current_user: models.User
             "year": j.year,
             "salesman_name": j.salesman_name,
             "fails": [{"item": f.check_item, "notes": f.notes, "by": f.initials} for f in fails]
-        })
+        }, j, counts))
     return {"jobs": out}
 
 def can_book_wash(user) -> bool:
@@ -4138,8 +4171,8 @@ async def api_wash_request(job_id: int, request: Request, db: Session = Depends(
         created_by=current_user.id,
     ))
     db.commit()
-    notify_role(db, "workshop", f"Wash requested for {job.stock_number} — {job.vehicle_description}", job.id)
-    notify_role(db, "admin", f"Wash requested for {job.stock_number}", job.id)
+    notify_role(db, "workshop", f"Wash requested for {job_display_id(job)} — {job.vehicle_description}", job.id)
+    notify_role(db, "admin", f"Wash requested for {job_display_id(job)}", job.id)
     return {"success": True}
 
 @app.post("/api/wash-requests")
@@ -4425,7 +4458,7 @@ async def api_task_photo_upload(job_id: int, task_id: int, stage: str = Form(...
         db.add(row)
         rows.append(row)
     db.commit()
-    log_audit(db, current_user.id, "Task photo added", job.id, f"{job.job_number} {task.task_name}: {len(rows)} {stage} photo(s)")
+    log_audit(db, current_user.id, "Task photo added", job.id, f"{job_display_id(job)} {task.task_name}: {len(rows)} {stage} photo(s)")
     return {"success": True, "added": len(rows)}
 
 @app.get("/api/task-photos/{photo_id}")
@@ -4453,7 +4486,7 @@ async def api_task_photo_skipped(job_id: int, task_id: int, request: Request, db
     stage = (body.get("stage") or "").strip().lower()
     if stage not in ("before", "after"):
         stage = "photo"
-    log_audit(db, current_user.id, "Task photo skipped", job.id, f"{job.job_number} {task.task_name}: {stage} photo skipped")
+    log_audit(db, current_user.id, "Task photo skipped", job.id, f"{job_display_id(job)} {task.task_name}: {stage} photo skipped")
     return {"success": True}
 
 @app.post("/api/jobs/{job_id}/photos/download")
@@ -4480,7 +4513,7 @@ async def api_job_photos_download(job_id: int, db: Session = Depends(get_db), cu
                               downloaded_by=current_user.id, downloaded_by_name=current_user.full_name, downloaded_at=datetime.utcnow())
     db.add(rec)
     db.commit()
-    log_audit(db, current_user.id, "Photos downloaded", job.id, f"{job.job_number} {zip_name}: {len(items)} photos")
+    log_audit(db, current_user.id, "Photos downloaded", job.id, f"{job_display_id(job)} {zip_name}: {len(items)} photos")
     return Response(content=buf.getvalue(), media_type="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{zip_name}"',
         "X-Photo-Archive-Id": str(rec.id),
@@ -4536,7 +4569,7 @@ async def api_job_photos_delete(job_id: int, request: Request, db: Session = Dep
     db.add(models.JobUpdate(job_card_id=job.id, category="progress", description=text_line,
                             notes="Photos downloaded as zip and removed from the app", created_by_name=current_user.full_name, created_by=current_user.id))
     db.commit()
-    log_audit(db, current_user.id, "Photos archived and deleted", job.id, f"{job.job_number} {rec.zip_name}: {deleted} photos deleted from the app")
+    log_audit(db, current_user.id, "Photos archived and deleted", job.id, f"{job_display_id(job)} {rec.zip_name}: {deleted} photos deleted from the app")
     for path in files_to_remove:
         try:
             if path and os.path.isfile(path):

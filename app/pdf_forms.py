@@ -11,6 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from .display import job_display_id, job_display_label
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO = os.path.join(BASE, "static", "images", "status_logo_white_trim.png")
@@ -154,14 +155,15 @@ def footer(canvas, doc, label):
     canvas.restoreState()
 
 
-def vehicle_pairs(job):
+def vehicle_pairs(job, display_label=None):
+    unit = display_label or job_display_label(job)
     return [
-        ("Stock number", job.stock_number), ("Job number", job.job_number),
-        ("Make / model", job.vehicle_description), ("Year", job.year),
-        ("Type", f"{job.main_type or ''} / {job.sub_type or ''}".strip(" /")), ("VIN", getattr(job, "vin_number", None)),
-        ("Registration", getattr(job, "registration_number", None)), ("Location", job.current_location),
-        ("Client", job.client_name), ("Salesman", job.salesman_name),
-        ("Quote / invoice", getattr(job, "quotation_invoice_number", None)), ("Target date", job.target_delivery_date),
+        ("Stock number", unit), ("Year", job.year),
+        ("Make / model", job.vehicle_description), ("Type", f"{job.main_type or ''} / {job.sub_type or ''}".strip(" /")),
+        ("VIN", getattr(job, "vin_number", None)), ("Registration", getattr(job, "registration_number", None)),
+        ("Location", job.current_location), ("Salesman", job.salesman_name),
+        ("Client", job.client_name), ("Quote / invoice", getattr(job, "quotation_invoice_number", None)),
+        ("Target date", job.target_delivery_date), ("Status", job.status),
     ]
 
 
@@ -170,14 +172,15 @@ def noise(text):
     return "update request" in s or "requested an update" in s or "morning location" in s or "ask louis" in s
 
 
-def build_work_pdf(job, workshop_name, sales_name):
+def build_work_pdf(job, workshop_name, sales_name, display_label=None):
     global S
     S = _styles()
+    label = display_label or job_display_label(job)
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job.stock_number} completed work")
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job_display_id(job)} completed work")
     story = []
-    story += header("COMPLETED WORK", f"Job card &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), job.status or ""])
-    story.append(info_block(vehicle_pairs(job)))
+    story += header("COMPLETED WORK", f"Job card &nbsp;·&nbsp; {label}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), job.status or ""])
+    story.append(info_block(vehicle_pairs(job, label)))
     done, open_rows = [], []
     for t in job.tasks or []:
         if (t.task_name or "").lower().startswith("activity:") or noise(t.task_name):
@@ -204,20 +207,21 @@ def build_work_pdf(job, workshop_name, sales_name):
     ]))
     story.append(Spacer(1, 6))
     story.append(Paragraph("Status Truck Sales &nbsp;·&nbsp; Boksburg &nbsp;·&nbsp; Internal use only &nbsp;·&nbsp; www.statustrucksales.co.za", S["Foot"]))
-    label = f"{job.stock_number or ''}  ·  {job.vehicle_description or ''}  ·  Completed work"
-    doc.build(story, onFirstPage=lambda c, d: footer(c, d, label), onLaterPages=lambda c, d: footer(c, d, label))
+    footer_label = f"{label}  ·  {job.vehicle_description or ''}  ·  Completed work"
+    doc.build(story, onFirstPage=lambda c, d: footer(c, d, footer_label), onLaterPages=lambda c, d: footer(c, d, footer_label))
     buf.seek(0)
     return buf
 
 
-def build_pdi_pdf(job, items, workshop_name, sales_name):
+def build_pdi_pdf(job, items, workshop_name, sales_name, display_label=None):
     global S
     S = _styles()
+    label = display_label or job_display_label(job)
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job.stock_number} PDI")
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=14 * mm, title=f"{job_display_id(job)} PDI")
     story = []
-    story += header("PDI CHECKLIST", f"Pre-delivery inspection &nbsp;·&nbsp; {job.stock_number or ''} &nbsp;·&nbsp; {job.job_number or ''}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), "PDI signed" if (workshop_name and sales_name) else job.status or ""])
-    story.append(info_block(vehicle_pairs(job)[:10]))
+    story += header("PDI CHECKLIST", f"Pre-delivery inspection &nbsp;·&nbsp; {label}", ["ADMIN OVERRIDE" if getattr(job, "admin_override", False) else "FILE COPY", datetime.utcnow().strftime("%d %b %Y"), "PDI signed" if (workshop_name and sales_name) else job.status or ""])
+    story.append(info_block(vehicle_pairs(job, label)[:10]))
     rows = []
     for item in items:
         rows.append([item.check_item, item.status or "—", item.notes or ""])
@@ -229,7 +233,7 @@ def build_pdi_pdf(job, items, workshop_name, sales_name):
     ]))
     story.append(Spacer(1, 6))
     story.append(Paragraph("Status Truck Sales &nbsp;·&nbsp; Boksburg &nbsp;·&nbsp; Internal use only &nbsp;·&nbsp; www.statustrucksales.co.za", S["Foot"]))
-    label = f"{job.stock_number or ''}  ·  {job.vehicle_description or ''}  ·  PDI"
-    doc.build(story, onFirstPage=lambda c, d: footer(c, d, label), onLaterPages=lambda c, d: footer(c, d, label))
+    footer_label = f"{label}  ·  {job.vehicle_description or ''}  ·  PDI"
+    doc.build(story, onFirstPage=lambda c, d: footer(c, d, footer_label), onLaterPages=lambda c, d: footer(c, d, footer_label))
     buf.seek(0)
     return buf
