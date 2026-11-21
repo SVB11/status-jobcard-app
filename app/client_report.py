@@ -3,6 +3,7 @@
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
+from .display import job_display_id
 
 WEBSITE = "www.statustrucksales.co.za"
 
@@ -229,7 +230,7 @@ def build_report(job, tasks, parts=None):
         "registration": job.registration_number or "",
         "vin": job.vin_number or "",
         "quote": job.quotation_invoice_number or "",
-        "stock_number": job.stock_number or "",
+        "stock_number": job_display_id(job),
         "job_status": job_status,
         "status_line": STATUS_LINE.get(job_status, "The vehicle is currently being prepared"),
         "next_step": NEXT_STEP.get(job_status, "We will update you as preparation continues."),
