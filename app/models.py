@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, UniqueConstraint, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -163,6 +163,13 @@ class JobTask(Base):
     booked_date = Column(String, nullable=True)
     test_result = Column(String, nullable=True)
     fail_list = Column(Text, nullable=True)
+    # Who is doing the task (set when it moves to In Progress). Additive columns.
+    responsible_user_id = Column(Integer, nullable=True)
+    responsible_name = Column(String, nullable=True)
+    assisting_names = Column(Text, nullable=True)
+    paint_team = Column(String, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    assigned_by_name = Column(String, nullable=True)
     completed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -400,3 +407,38 @@ class PhotoArchive(Base):
     deleted_by_name = Column(String, nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_count = Column(Integer, nullable=True)
+
+
+class StockTake(Base):
+    """Yard check round. closed_at is NULL for the current one; closed rounds are read-only."""
+    __tablename__ = "stock_takes"
+
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime, server_default=func.now())
+    started_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    started_by_name = Column(String, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    closed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    closed_by_name = Column(String, nullable=True)
+    total_jobs = Column(Integer, nullable=True)
+    on_site_count = Column(Integer, nullable=True)
+    sticker_count = Column(Integer, nullable=True)
+    results = Column(Text, nullable=True)  # JSON snapshot written when the round is closed
+
+
+class StockTakeItem(Base):
+    """One open job's ticks in a yard check round."""
+    __tablename__ = "stock_take_items"
+    __table_args__ = (UniqueConstraint("stock_take_id", "job_card_id"),)
+
+    id = Column(Integer, primary_key=True)
+    stock_take_id = Column(Integer, ForeignKey("stock_takes.id"), nullable=False)
+    job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    on_site = Column(Boolean, default=False)
+    on_site_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    on_site_by_name = Column(String, nullable=True)
+    on_site_at = Column(DateTime, nullable=True)
+    sticker_fitted = Column(Boolean, default=False)
+    sticker_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sticker_by_name = Column(String, nullable=True)
+    sticker_at = Column(DateTime, nullable=True)

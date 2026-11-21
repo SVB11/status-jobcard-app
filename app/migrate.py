@@ -56,6 +56,12 @@ NEW_COLUMNS = {
         "approved_by_name": "VARCHAR",
         "test_result": "VARCHAR",
         "fail_list": "TEXT",
+        "responsible_user_id": "INTEGER",
+        "responsible_name": "VARCHAR",
+        "assisting_names": "TEXT",
+        "paint_team": "VARCHAR",
+        "assigned_at": "DATETIME",
+        "assigned_by_name": "VARCHAR",
     },
     "supplier_updates": {
         "photo_path": "VARCHAR",
@@ -145,6 +151,39 @@ def migrate_schema():
                 deleted_count INTEGER
             )
         """))
+        # Yard check (stock take + WS stickers). Additive only.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS stock_takes (
+                id INTEGER PRIMARY KEY,
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                started_by INTEGER REFERENCES users(id),
+                started_by_name VARCHAR,
+                closed_at DATETIME,
+                closed_by INTEGER REFERENCES users(id),
+                closed_by_name VARCHAR,
+                total_jobs INTEGER,
+                on_site_count INTEGER,
+                sticker_count INTEGER,
+                results TEXT
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS stock_take_items (
+                id INTEGER PRIMARY KEY,
+                stock_take_id INTEGER NOT NULL REFERENCES stock_takes(id),
+                job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+                on_site BOOLEAN DEFAULT 0,
+                on_site_by INTEGER REFERENCES users(id),
+                on_site_by_name VARCHAR,
+                on_site_at DATETIME,
+                sticker_fitted BOOLEAN DEFAULT 0,
+                sticker_by INTEGER REFERENCES users(id),
+                sticker_by_name VARCHAR,
+                sticker_at DATETIME,
+                UNIQUE (stock_take_id, job_card_id)
+            )
+        """))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_stock_takes_one_current ON stock_takes ((closed_at IS NULL)) WHERE closed_at IS NULL"))
         # Re-read columns. The inspector cache does not see columns added above.
         if "job_cards" in tables:
             job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(job_cards)")).fetchall()}
