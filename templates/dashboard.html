@@ -2,6 +2,125 @@
 
 {% block title %}Dashboard{% endblock %}
 
+{% block head %}
+<style>
+    details.dash-fold > summary {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    details.dash-fold > summary::before {
+        content: "";
+        width: 0.45em;
+        height: 0.45em;
+        border-right: 2px solid #7ec2ff;
+        border-bottom: 2px solid #7ec2ff;
+        transform: rotate(-45deg);
+        transition: transform .15s ease;
+        flex: 0 0 auto;
+        margin-right: 4px;
+    }
+    details.dash-fold[open] > summary::before {
+        transform: rotate(45deg);
+        margin-top: -2px;
+    }
+    details.dash-fold > summary .fold-count {
+        color: #7ec2ff;
+        font-weight: 800;
+    }
+    details.dash-fold.fold-purple { box-shadow: inset 4px 0 0 #a855f7; }
+    details.dash-fold.fold-orange { box-shadow: inset 4px 0 0 #f97316; }
+    details.dash-fold.fold-green { box-shadow: inset 4px 0 0 #16a34a; }
+    details.dash-fold.fold-cyan { box-shadow: inset 4px 0 0 #06b6d4; }
+    details.dash-fold.fold-blue { box-shadow: inset 4px 0 0 #025daa; }
+    details.dash-fold.fold-amber { box-shadow: inset 4px 0 0 #f59e0b; }
+    details.dash-fold.fold-red { box-shadow: inset 4px 0 0 #b91c1c; }
+
+    #shortcutTileGrid { display: none !important; }
+    details.dash-item { display: none; }
+    #moreFold { display: block; }
+    #moreFold details.dash-item,
+    #attentionReveal details.dash-item { display: block; }
+    #attentionReveal details.dash-item > summary { display: none !important; }
+    .needs-wrap {
+        background: rgba(255,255,255,0.10);
+        border: 1px solid rgba(255,255,255,0.22);
+        border-radius: 16px;
+        padding: 12px 14px;
+        margin-bottom: 14px;
+        backdrop-filter: blur(20px) saturate(140%);
+        -webkit-backdrop-filter: blur(20px) saturate(140%);
+    }
+    .needs-label {
+        font-size: 11px; font-weight: 800; letter-spacing: .08em;
+        text-transform: uppercase; color: #7ec2ff; margin-bottom: 8px;
+    }
+    .needs-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+    .needs-empty { color: #9aa6b4; font-size: 13px; }
+    .needs-pill {
+        display: inline-flex; align-items: center;
+        border-radius: 999px;
+        padding: 8px 14px;
+        min-height: 44px;
+        font-weight: 800;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        font-size: 12px;
+        border: 1px solid rgba(255,255,255,.22);
+        background: rgba(12,16,22,0.72);
+        color: #e8edf3;
+        cursor: pointer;
+    }
+    .needs-pill .n { color: #7ec2ff; margin-left: 6px; }
+    .needs-pill.is-on { box-shadow: 0 0 0 2px #7ec2ff; }
+    .needs-pill.tone-purple { box-shadow: inset 4px 0 0 #a855f7; }
+    .needs-pill.tone-orange { box-shadow: inset 4px 0 0 #f97316; }
+    .needs-pill.tone-green { box-shadow: inset 4px 0 0 #16a34a; }
+    .needs-pill.tone-cyan { box-shadow: inset 4px 0 0 #06b6d4; }
+    .needs-pill.tone-blue { box-shadow: inset 4px 0 0 #025daa; }
+    .needs-pill.tone-amber { box-shadow: inset 4px 0 0 #f59e0b; }
+    .needs-pill.tone-red { box-shadow: inset 4px 0 0 #b91c1c; }
+    .needs-pill.is-on.tone-cyan { box-shadow: inset 4px 0 0 #06b6d4, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-orange { box-shadow: inset 4px 0 0 #f97316, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-green { box-shadow: inset 4px 0 0 #16a34a, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-purple { box-shadow: inset 4px 0 0 #a855f7, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-blue { box-shadow: inset 4px 0 0 #025daa, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-amber { box-shadow: inset 4px 0 0 #f59e0b, 0 0 0 2px #7ec2ff; }
+    .needs-pill.is-on.tone-red { box-shadow: inset 4px 0 0 #b91c1c, 0 0 0 2px #7ec2ff; }
+    .shortcut-icons {
+        display: flex; flex-wrap: wrap; gap: 8px;
+        margin: 0 0 16px;
+    }
+    .shortcut-icons a {
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        width: 72px; padding: 8px 4px 6px;
+        color: #e8edf3; text-decoration: none;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.16);
+    }
+    .shortcut-icons .tile-ico { width: 44px; height: 44px; }
+    .shortcut-icons .lbl {
+        font-size: 10px; font-weight: 700; letter-spacing: .05em;
+        text-transform: uppercase; text-align: center; color: #9aa6b4; line-height: 1.2;
+    }
+    .attention-reveal {
+        margin: 0 0 16px;
+        background: rgba(255,255,255,0.10);
+        border: 1px solid rgba(255,255,255,0.22);
+        border-radius: 16px;
+        padding: 8px;
+        backdrop-filter: blur(20px) saturate(140%);
+        -webkit-backdrop-filter: blur(20px) saturate(140%);
+    }
+    .attention-reveal.hidden { display: none !important; }
+    .attention-reveal-inner { background: rgba(12,16,22,0.78); border-radius: 12px; padding: 12px 14px; }
+
+</style>
+{% endblock %}
+
+
 {% block header_right %}
 <div class="flex items-center gap-3">
     <span id="userInfo" class="text-sm text-gray-600"></span>
@@ -12,52 +131,10 @@
 {% block content %}
 <div class="mb-5">
     <h1 class="text-2xl font-bold uppercase tracking-wide">Dashboard</h1>
-    <p class="text-sm text-[#9aa6b4]">Tiles and locations first. Open a section only when you need it.</p>
+    <p class="text-sm text-[#9aa6b4]">Needs attention first. Everything else is under More.</p>
 </div>
 
-<div id="showroomBox" class="hidden mb-6 rounded-xl border-2 border-purple-500 p-4">
-    <h2 class="font-bold uppercase tracking-wide text-purple-300">Showroom jobs waiting approval</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Workshop created these for stock / showroom prep. Admin must approve before work starts.</p>
-    <div id="showroomList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="emptyCheckBox" class="hidden mb-6 rounded-xl border-2 border-orange-500 p-4">
-    <h2 class="font-bold uppercase tracking-wide text-orange-300">Tanker empty check</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Confirm compartments and pipelines to APIs are empty. Workshop and sales must both sign before ready / delivery.</p>
-    <div id="emptyCheckList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="signoffBox" class="hidden mb-6 rounded-xl border-2 border-green-600 p-4">
-    <h2 class="font-bold uppercase tracking-wide text-green-300">Sign off / mark ready</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Work is done. Sign the PDI and mark ready. Wash bay is only before the client collects. It does not block sign-off.</p>
-    <div id="signoffList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="washDashBox" class="hidden mb-6 rounded-xl border-2 border-cyan-500 p-4">
-    <h2 class="font-bold uppercase tracking-wide text-cyan-300">Wash requests</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Marketing photos. Book a vehicle and workshop will move it to Wash Bay.</p>
-    <div id="washBookForm" class="hidden mb-4 p-3 rounded border border-[#025daa] bg-[#025daa22]">
-        <div class="text-xs uppercase font-semibold mb-2">Book a wash — showroom or yard stock</div>
-        <p class="text-xs text-[#9aa6b4] mb-2">No job card needed. Type the WS number, make and type.</p>
-        <input id="washStock" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="WS number *">
-        <input id="washMake" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Make *  e.g. GRW, Volvo, Afrit">
-        <input id="washType" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Type *  e.g. 50000Lt fuel tanker, truck tractor">
-        <input id="washDashNote" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Note — photos / marketing">
-        <button type="button" onclick="bookWashFromDash()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded uppercase">Send wash request</button>
-    </div>
-    <div id="washDashList" class="space-y-2 text-sm">Loading...</div>
-</div>
-<div id="morningLocBox" class="hidden mb-6 rounded-xl border-2 border-[#025daa] bg-[#025daa22] p-4">
-    <h2 class="font-bold uppercase tracking-wide text-[#7ec2ff]">Morning location check</h2>
-    <p class="text-sm text-[#d5dde6] mb-3">Workshop: confirm where every open WS is before the day starts. Same bay is fine — just confirm it.</p>
-    <div id="morningLocMeta" class="text-xs text-[#9aa6b4] mb-2"></div>
-    <div id="morningLocList" class="space-y-2 text-sm"></div>
-</div>
-
-<div id="pendingExtrasBox" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg text-amber-800 mb-1 uppercase">Extras waiting for your approval <span id="pendingExtrasCount"></span></h2>
-    <p class="text-sm text-amber-700 mb-4">Shows here as soon as workshop adds extra work. Approve without opening the job.</p>
-    <div id="pendingExtrasList" class="space-y-2 text-sm">Loading...</div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+<div id="shortcutTileGrid" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
     <a href="/jobs/client-reports" id="reportsCard" class="hidden bg-white rounded-xl shadow hover:shadow-md transition">
         <div class="glass-inner">
         <div class="tile-row">
@@ -137,20 +214,74 @@
     </a>
 </div>
 
+<div id="needsStripWrap" class="needs-wrap">
+    <div class="needs-label">Needs attention</div>
+    <div id="needsStrip" class="needs-strip"></div>
+</div>
+<div id="shortcutIconRow" class="shortcut-icons" aria-label="Shortcuts"></div>
+<div id="attentionReveal" class="attention-reveal hidden"><div class="attention-reveal-inner" id="attentionRevealInner"></div></div>
+<details id="moreFold" class="dash-fold">
+    <summary>More <span id="moreFoldCount" class="fold-count"></span></summary>
+    <div id="moreFoldBody"></div>
+</details>
+
+<details id="showroomBox" class="hidden dash-fold fold-purple">
+    <summary>Showroom jobs waiting approval <span class="fold-count"></span></summary>
+    <p class="text-sm text-[#d5dde6] mb-3">Workshop created these for stock / showroom prep. Admin must approve before work starts.</p>
+    <div id="showroomList" class="space-y-2 text-sm">Loading...</div>
+</details>
+<details id="emptyCheckBox" class="hidden dash-fold fold-orange">
+    <summary>Tanker empty check <span class="fold-count"></span></summary>
+    <p class="text-sm text-[#d5dde6] mb-3">Confirm compartments and pipelines to APIs are empty. Workshop and sales must both sign before ready / delivery.</p>
+    <div id="emptyCheckList" class="space-y-2 text-sm">Loading...</div>
+</details>
+<details id="signoffBox" class="hidden dash-fold fold-green">
+    <summary>Sign off / mark ready <span class="fold-count"></span></summary>
+    <p class="text-sm text-[#d5dde6] mb-3">Work is done. Sign the PDI and mark ready. Wash bay is only before the client collects. It does not block sign-off.</p>
+    <div id="signoffList" class="space-y-2 text-sm">Loading...</div>
+</details>
+<details id="washDashBox" class="hidden dash-fold fold-cyan">
+    <summary>Wash requests <span class="fold-count"></span></summary>
+    <p class="text-sm text-[#d5dde6] mb-3">Marketing photos. Book a vehicle and workshop will move it to Wash Bay.</p>
+    <div id="washBookForm" class="hidden mb-4 p-3 rounded border border-[#025daa] bg-[#025daa22]">
+        <div class="text-xs uppercase font-semibold mb-2">Book a wash — showroom or yard stock</div>
+        <p class="text-xs text-[#9aa6b4] mb-2">No job card needed. Type the WS number, make and type.</p>
+        <input id="washStock" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="WS number *">
+        <input id="washMake" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Make *  e.g. GRW, Volvo, Afrit">
+        <input id="washType" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Type *  e.g. 50000Lt fuel tanker, truck tractor">
+        <input id="washDashNote" class="w-full mb-2 px-3 py-2 rounded text-sm bg-[#0d1116] border border-[#2a3340]" placeholder="Note — photos / marketing">
+        <button type="button" onclick="bookWashFromDash()" class="px-4 py-2 bg-[#025daa] text-white text-sm rounded uppercase">Send wash request</button>
+    </div>
+    <div id="washDashList" class="space-y-2 text-sm">Loading...</div>
+</details>
+<details id="morningLocBox" class="hidden dash-fold fold-blue">
+    <summary>Morning location check <span class="fold-count"></span></summary>
+    <p class="text-sm text-[#d5dde6] mb-3">Workshop: confirm where every open WS is before the day starts. Same bay is fine — just confirm it.</p>
+    <div id="morningLocMeta" class="text-xs text-[#9aa6b4] mb-2"></div>
+    <div id="morningLocList" class="space-y-2 text-sm"></div>
+</details>
+
+<details id="pendingExtrasBox" class="hidden dash-fold fold-amber">
+    <summary>Extras waiting for your approval <span id="pendingExtrasCount" class="fold-count"></span></summary>
+    <p class="text-sm text-amber-700 mb-4">Shows here as soon as workshop adds extra work. Approve without opening the job.</p>
+    <div id="pendingExtrasList" class="space-y-2 text-sm">Loading...</div>
+</details>
+
+
 <details id="supplierDashBox" class="hidden dash-fold">
-    <summary>Supplier updates</summary>
+    <summary>Supplier updates <span class="fold-count"></span></summary>
     <h2 class="hidden">Supplier updates</h2>
     <p class="text-sm text-gray-500 mb-4">PFT / FK notes. Parts listed here are a workshop note only — not a Chantelle order.</p>
     <div id="supplierDashList" class="space-y-2 text-sm">Loading...</div>
 </details>
 <details id="workshopCountBox" class="hidden dash-fold">
-    <summary>Workshop update counts</summary>
+    <summary>Workshop update counts <span class="fold-count"></span></summary>
     <h2 class="hidden">Workshop update counts</h2>
     <p class="text-sm text-gray-500 mb-4">How many times each workshop user updated a job.</p>
     <div id="workshopCountList" class="space-y-3 text-sm">Loading...</div>
 </details>
 <details id="salesCountBox" class="hidden dash-fold">
-    <summary>Sales and showroom job counts</summary>
+    <summary>Sales and showroom job counts <span class="fold-count"></span></summary>
     <h2 class="hidden">Sales and showroom job counts</h2>
     <p class="text-sm text-gray-500 mb-2">Sold jobs stay separate from showroom jobs.</p>
     <div id="salesCountList" class="space-y-3 text-sm">Loading...</div>
@@ -159,26 +290,26 @@
 
 
 <details id="myJobsBox" class="hidden dash-fold">
-    <summary>My job cards</summary>
+    <summary>My job cards <span class="fold-count"></span></summary>
     <h2 class="hidden">My job cards</h2>
     <p class="text-sm text-gray-500 mb-4">Jobs you created. View activity here. After creation only Workshop updates the work. You complete and sign the PDI.</p>
     <div id="myJobsList" class="space-y-2 text-sm">Loading...</div>
 </details>
 
 <details id="allJobsBox" class="hidden dash-fold">
-    <summary>All job cards</summary>
+    <summary>All job cards <span class="fold-count"></span></summary>
     <h2 class="hidden">All job cards</h2>
     <p class="text-sm text-gray-500 mb-4">Quick view of every job. Open a card for full info and PDI.</p>
     <div id="allJobsList" class="space-y-2 text-sm">Loading...</div>
 </details>
 
-<div id="pdiFailBox" class="hidden bg-red-50 border border-red-300 rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg text-red-700 mb-1">PDI failed — back to workshop</h2>
+<details id="pdiFailBox" class="hidden dash-fold fold-red">
+    <summary>PDI failed — back to workshop <span class="fold-count"></span></summary>
     <p class="text-sm text-red-600 mb-4">Fix these items, then retick Pass and sign PDI again.</p>
     <div id="pdiFailList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 <details id="jobBookingsBox" class="hidden dash-fold">
-    <summary>Parts and extras by job</summary>
+    <summary>Parts and extras by job <span class="fold-count"></span></summary>
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
         <div>
             <h2 class="font-bold text-lg">Parts and extras by job</h2>
@@ -189,48 +320,48 @@
     <div id="jobBookingsList" class="space-y-3 text-sm">Loading...</div>
 </details>
 <details id="suppliesDashBox" class="hidden dash-fold">
-    <summary>Hoses / couplers / suzi</summary>
+    <summary>Hoses / couplers / suzi <span class="fold-count"></span></summary>
     <h2 class="hidden">HOSES / COUPLERS / SUZI</h2>
     <p class="text-sm text-gray-500 mb-4">Booked and completed supply items on open job cards.</p>
     <div id="suppliesDashList" class="space-y-2 text-sm">Loading...</div>
 </details>
 <details id="stockDashBox" class="hidden dash-fold">
-    <summary>Workshop stock to order</summary>
+    <summary>Workshop stock to order <span class="fold-count"></span></summary>
     <h2 class="hidden">WORKSHOP STOCK TO ORDER</h2>
     <p class="text-sm text-gray-500 mb-4">Keep-on-hand items. Open the tab to update ordered / received and sign off.</p>
     <div id="stockDashList" class="space-y-2 text-sm">Loading...</div>
     <a href="/stock" class="inline-block mt-3 text-sm text-status-blue font-semibold">Open workshop stock tab</a>
 </details>
 <details id="partsDashBox" class="hidden dash-fold">
-    <summary>Parts to be ordered</summary>
+    <summary>Parts to be ordered <span class="fold-count"></span></summary>
     <h2 class="hidden">Parts to be ordered</h2>
     <p class="text-sm text-gray-500 mb-4">Track parts outstanding, ordered and follow-ups.</p>
     <div id="partsDashList" class="space-y-2 text-sm">Loading...</div>
 </details>
-<div id="updateReqBox" class="hidden bg-white rounded-xl shadow p-6 mb-8 border-2 border-orange-500">
-    <h2 class="font-bold text-lg mb-1 text-orange-500">SALES UPDATE REQUESTS</h2>
+<details id="updateReqBox" class="hidden dash-fold fold-orange">
+    <summary>Sales update requests <span class="fold-count"></span></summary>
     <p class="text-sm text-gray-500 mb-4">Sales asked for an update because the job feels slow. Open the job and post current activity, then clear the request.</p>
     <div id="updateReqList" class="space-y-2 text-sm">Loading...</div>
-</div>
+</details>
 <details id="notifyBox" class="hidden dash-fold">
-    <summary>Notifications</summary>
+    <summary>Notifications <span class="fold-count"></span></summary>
     <h2 class="hidden">Notifications</h2>
     <div id="notifyList" class="space-y-2 text-sm">Loading...</div>
 </details>
 <details id="bookingsBox" class="hidden dash-fold">
-    <summary>3rd party bookings diary</summary>
+    <summary>3rd party bookings diary <span class="fold-count"></span></summary>
     <h2 class="hidden">3rd party bookings diary</h2>
     <p class="text-sm text-gray-500 mb-4">Filled from Work / Prep Tasks (Pressure, Barrel, Calibration, Roadworthy, As Is). You do not need to type it again under 3rd Party Bookings.</p>
     <div id="bookingsList" class="space-y-2 text-sm">Loading...</div>
 </details>
 
-<div id="locationBoardWrap" class="bg-white rounded-xl shadow p-6 mb-8">
-    <h2 class="font-bold text-lg mb-1">Vehicle Locations</h2>
+<details id="locationBoardWrap" class="dash-fold fold-blue">
+    <summary>Vehicle locations <span class="fold-count"></span></summary>
     <p class="text-sm text-gray-500 mb-4">Where every active vehicle is right now</p>
     <div id="locationBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <p class="text-sm text-gray-400">Loading locations...</p>
     </div>
-</div>
+</details>
 
 <div id="firstLoginBox" class="hidden bg-amber-50 border-2 border-amber-500 rounded-xl shadow p-6 mb-8">
     <h2 class="font-bold text-lg mb-2">First login — choose your own password</h2>
@@ -243,8 +374,9 @@
     <p id="pwMsg" class="text-sm mt-2 hidden"></p>
 </div>
 
-<div id="systemStatusBox" class="hidden bg-white rounded-xl shadow p-6">
-    <h2 class="font-bold text-lg mb-3">System Status</h2>
+<details id="systemStatusBox" class="hidden dash-fold">
+    <summary>System status and backups</summary>
+    <h2 class="hidden">System Status</h2>
     <ul class="text-sm text-gray-600 space-y-1 mb-4">
         <li>✅ Login system active</li>
         <li>✅ Digital PDI + dual sign-off</li>
@@ -268,11 +400,202 @@
         <button type="button" onclick="downloadBackup('/api/admin/export/custom-tasks.csv', datedName('manual_tasks', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Manual tasks CSV</button>
         <button type="button" onclick="downloadBackup('/api/admin/export/parts.csv', datedName('parts', 'csv'))" class="px-3 py-2 bg-status-blue text-white text-sm rounded">Parts CSV</button>
     </div>
-</div>
+</details>
 {% endblock %}
 
 {% block scripts %}
 <script>
+
+
+    var DASH_SECTIONS = [
+        {id:'showroomBox', title:'Showroom approval', tab:'action', attention:true, tone:'purple', icon:'clipboard'},
+        {id:'emptyCheckBox', title:'Tanker empty check', tab:'action', attention:true, tone:'orange', icon:'tank'},
+        {id:'signoffBox', title:'Sign off / mark ready', tab:'action', attention:true, tone:'green', icon:'check'},
+        {id:'washDashBox', title:'Wash requests', tab:'action', attention:true, tone:'cyan', icon:'sparkle'},
+        {id:'morningLocBox', title:'Morning location check', tab:'action', attention:true, tone:'blue', icon:'sun'},
+        {id:'pendingExtrasBox', title:'Extras approval', tab:'action', attention:true, tone:'amber', icon:'plus'},
+        {id:'pdiFailBox', title:'PDI failed', tab:'action', attention:true, tone:'red', icon:'alert'},
+        {id:'updateReqBox', title:'Sales update requests', tab:'action', attention:true, tone:'orange', icon:'megaphone'},
+        {id:'supplierDashBox', title:'Supplier updates', tab:'parts', attention:false, tone:'', icon:'truck'},
+        {id:'workshopCountBox', title:'Workshop update counts', tab:'jobs', attention:false, tone:'', icon:'users'},
+        {id:'salesCountBox', title:'Sales and showroom counts', tab:'jobs', attention:false, tone:'', icon:'chart'},
+        {id:'myJobsBox', title:'My job cards', tab:'jobs', attention:false, tone:'', icon:'user'},
+        {id:'allJobsBox', title:'All job cards', tab:'jobs', attention:false, tone:'', icon:'folder'},
+        {id:'jobBookingsBox', title:'Parts and extras by job', tab:'parts', attention:false, tone:'', icon:'list'},
+        {id:'suppliesDashBox', title:'Hoses / couplers / suzi', tab:'parts', attention:false, tone:'', icon:'link'},
+        {id:'stockDashBox', title:'Workshop stock to order', tab:'parts', attention:false, tone:'', icon:'box'},
+        {id:'partsDashBox', title:'Parts to be ordered', tab:'parts', attention:false, tone:'', icon:'cart'},
+        {id:'notifyBox', title:'Notifications', tab:'jobs', attention:false, tone:'', icon:'bell'},
+        {id:'bookingsBox', title:'3rd party bookings diary', tab:'parts', attention:false, tone:'', icon:'calendar'},
+        {id:'locationBoardWrap', title:'Vehicle locations', tab:'yard', attention:false, tone:'blue', icon:'map'},
+        {id:'systemStatusBox', title:'System status and backups', tab:'system', attention:false, tone:'', icon:'gear'}
+    ];
+    function dashIcon(name) {
+        var paths = {
+            clipboard:'<rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 5V4h6v1M8 10h8M8 14h8M8 18h5"/>',
+            tank:'<path d="M4 10h16v8H4z"/><path d="M7 10V8h10v2M8 18v2M16 18v2"/>',
+            check:'<path d="M20 6L9 17l-5-5"/>',
+            sparkle:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/>',
+            sun:'<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
+            plus:'<path d="M12 5v14M5 12h14"/>',
+            alert:'<path d="M12 8v5M12 17h.01"/><path d="M10.3 4.9L2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.9a2 2 0 0 0-3.4 0z"/>',
+            megaphone:'<path d="M4 10v4h3l7 4V6L7 10H4z"/><path d="M19 9a4 4 0 0 1 0 6"/>',
+            truck:'<path d="M3 8h11v9H3zM14 12h5l2 3v2h-7"/>',
+            users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+            chart:'<path d="M4 19h16M7 16V9M12 16V5M17 16v-6"/>',
+            user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+            folder:'<path d="M3 7h5l2 2h11v10H3z"/>',
+            list:'<path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"/>',
+            link:'<path d="M10 13a5 5 0 0 0 7.5.1l2-2a5 5 0 0 0-7-7l-1.1 1"/><path d="M14 11a5 5 0 0 0-7.5-.1l-2 2a5 5 0 0 0 7 7l1.1-1"/>',
+            box:'<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/>',
+            cart:'<circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.5 11h11L21 7H7"/>',
+            bell:'<path d="M18 8A6 6 0 1 0 6 8c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+            calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/>',
+            map:'<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
+            gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'
+        };
+        return '<svg viewBox="0 0 24 24">' + (paths[name] || paths.folder) + '</svg>';
+    }
+    function dashMeta(id) {
+        for (var i = 0; i < DASH_SECTIONS.length; i++) if (DASH_SECTIONS[i].id === id) return DASH_SECTIONS[i];
+        return null;
+    }
+    function dashVisible(box) {
+        return !!(box && !box.classList.contains('hidden'));
+    }
+    function dashCount(box) {
+        var n = box ? box.getAttribute('data-count') : '';
+        if (n === null || n === '') return 0;
+        n = parseInt(n, 10);
+        return isNaN(n) ? 0 : n;
+    }
+    function ensurePlaceholders() {
+        DASH_SECTIONS.forEach(function(s) {
+            var box = document.getElementById(s.id);
+            if (!box) return;
+            box.classList.add('dash-item');
+            if (!document.getElementById(s.id + '-ph')) {
+                var ph = document.createElement('div');
+                ph.id = s.id + '-ph';
+                ph.className = 'dash-ph';
+                box.parentNode.insertBefore(ph, box);
+            }
+        });
+    }
+    function parkSection(box) {
+        if (!box) return;
+        var ph = document.getElementById(box.id + '-ph');
+        if (ph && ph.parentNode) ph.parentNode.insertBefore(box, ph);
+        box.classList.remove('is-in-modal');
+        box.open = false;
+    }
+
+    var dashCReady = false;
+    var dashRevealId = null;
+    function closeAttention() {
+        var reveal = document.getElementById('attentionReveal');
+        var inner = document.getElementById('attentionRevealInner');
+        if (dashRevealId) {
+            var box = document.getElementById(dashRevealId);
+            if (box) {
+                var more = document.getElementById('moreFoldBody');
+                if (more) more.appendChild(box);
+                box.open = false;
+                box.classList.remove('is-in-modal');
+            }
+        }
+        dashRevealId = null;
+        if (reveal) reveal.classList.add('hidden');
+        document.querySelectorAll('.needs-pill').forEach(function(p) { p.classList.remove('is-on'); });
+        if (typeof refreshDashChrome === 'function') {
+            /* recount More after move */
+        }
+    }
+    function openAttention(id) {
+        var box = document.getElementById(id);
+        var inner = document.getElementById('attentionRevealInner');
+        var reveal = document.getElementById('attentionReveal');
+        if (!dashVisible(box) || !inner) return;
+        if (dashRevealId === id) { closeAttention(); refreshDashChrome(); return; }
+        if (dashRevealId) closeAttention();
+        inner.appendChild(box);
+        box.open = true;
+        box.classList.add('is-in-modal');
+        dashRevealId = id;
+        reveal.classList.remove('hidden');
+        document.querySelectorAll('.needs-pill').forEach(function(p) {
+            p.classList.toggle('is-on', p.getAttribute('data-section') === id);
+        });
+    }
+    function refreshDashChrome() {
+        ensurePlaceholders();
+        var more = document.getElementById('moreFoldBody');
+        var strip = document.getElementById('needsStrip');
+        var icons = document.getElementById('shortcutIconRow');
+        if (!more || !strip) return;
+        if (!dashCReady) {
+            var grid = document.getElementById('shortcutTileGrid');
+            if (grid && icons) {
+                grid.querySelectorAll('a').forEach(function(a) {
+                    if (a.classList.contains('hidden')) return;
+                    var href = a.getAttribute('href');
+                    var ico = a.querySelector('.tile-ico');
+                    var titleEl = a.querySelector('.text-lg, .font-bold');
+                    var label = titleEl ? titleEl.textContent.trim() : 'Open';
+                    var short = label.replace('Workshop stock to order', 'Stock').replace('User Management', 'Users').replace('Create Job Card', 'Create').replace('All Job Cards', 'Jobs').replace('Workshop jobs', 'Workshop').replace('Client reports', 'Reports').replace('3rd Party list', '3rd party');
+                    var b = document.createElement('a');
+                    b.href = href;
+                    b.innerHTML = (ico ? ico.outerHTML : '') + '<span class="lbl">' + short + '</span>';
+                    icons.appendChild(b);
+                });
+            }
+            dashCReady = true;
+        }
+        var pills = '';
+        var moreCount = 0;
+        DASH_SECTIONS.forEach(function(s) {
+            var box = document.getElementById(s.id);
+            if (!dashVisible(box)) return;
+            var n = dashCount(box);
+            var isReveal = (dashRevealId === s.id);
+            if (s.attention && n > 0) {
+                pills += '<button type="button" class="needs-pill' + (s.tone ? ' tone-' + s.tone : '') + (isReveal ? ' is-on' : '') + '" data-section="' + s.id + '">' +
+                    s.title + '<span class="n">' + n + '</span></button>';
+                if (!isReveal) {
+                    /* keep attention items parked, not in More, while they have a pill */
+                    var ph = document.getElementById(s.id + '-ph');
+                    if (ph) ph.parentNode.insertBefore(box, ph);
+                    box.open = false;
+                }
+            } else {
+                if (!isReveal) {
+                    more.appendChild(box);
+                    box.open = false;
+                    moreCount += 1;
+                }
+            }
+        });
+        strip.innerHTML = pills || '<span class="needs-empty">Nothing needs attention right now.</span>';
+        strip.querySelectorAll('[data-section]').forEach(function(btn) {
+            btn.onclick = function() { openAttention(btn.getAttribute('data-section')); refreshDashChrome(); };
+        });
+        var mc = document.getElementById('moreFoldCount');
+        if (mc) mc.textContent = moreCount ? '(' + moreCount + ')' : '';
+        if (dashRevealId) {
+            var openBox = document.getElementById(dashRevealId);
+            if (!dashVisible(openBox) || dashCount(openBox) === 0) closeAttention();
+        }
+    }
+
+    function setFoldCount(boxId, n) {
+        var box = document.getElementById(boxId);
+        if (!box) return;
+        var el = box.querySelector('.fold-count');
+        if (el) el.textContent = (typeof n === 'number' && !isNaN(n)) ? '(' + n + ')' : '';
+        if (typeof n === 'number' && !isNaN(n)) box.setAttribute('data-count', String(n));
+        setTimeout(function() { if (typeof refreshDashChrome === 'function') refreshDashChrome(); }, 0);
+    }
+
     // Simple auth check
     const token = localStorage.getItem('token');
     if (!token) {
@@ -289,6 +612,7 @@
         function show(id) {
             var el = document.getElementById(id);
             if (el) el.classList.remove('hidden');
+            setTimeout(function() { if (typeof refreshDashChrome === 'function') refreshDashChrome(); }, 0);
         }
         if (isAdmin) {
             show('adminCard');
@@ -389,6 +713,7 @@
             loadLocationBoard();
             loadPdiFails();
         }
+        setTimeout(function() { if (typeof refreshDashChrome === 'function') refreshDashChrome(); }, 0);
         }
     }
 
@@ -398,6 +723,7 @@
             const data = await res.json();
             const jobs = data.jobs || [];
             const box = document.getElementById('jobBookingsList');
+            setFoldCount('jobBookingsBox', jobs.length);
             if (!jobs.length) { box.innerHTML = '<p class="text-gray-400">No parts or extras on open jobs</p>'; return; }
             box.innerHTML = jobs.map(function(j) {
                 const parts = (j.parts || []).map(function(p) {
@@ -457,7 +783,8 @@
             const rows = data.tasks || [];
             const box = document.getElementById('pendingExtrasList');
             const cnt = document.getElementById('pendingExtrasCount');
-            if (cnt) cnt.textContent = rows.length ? '(' + rows.length + ')' : '';
+            if (cnt) cnt.textContent = rows.length ? String(rows.length) : '0';
+            setFoldCount('pendingExtrasBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-amber-600">No extras waiting</p>'; return; }
             box.innerHTML = rows.map(function(t) {
                 return '<div class="p-3 bg-white border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">' +
@@ -527,6 +854,8 @@
             const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             const data = await res.json();
             const jobs = data.jobs || [];
+            if (targetId === 'myJobsList') setFoldCount('myJobsBox', jobs.length);
+            if (targetId === 'allJobsList') setFoldCount('allJobsBox', jobs.length);
             if (!jobs.length) { box.innerHTML = '<p class="text-gray-400">No jobs yet</p>'; return; }
             box.innerHTML = jobs.map(jobRow).join('');
         } catch (err) {
@@ -541,6 +870,7 @@
             const rows = data.jobs || [];
             const wrap = document.getElementById('pdiFailBox');
             const box = document.getElementById('pdiFailList');
+            setFoldCount('pdiFailBox', rows.length);
             if (!rows.length) {
                 wrap.classList.add('hidden');
                 return;
@@ -566,6 +896,7 @@
             const rows = data.supplies || [];
             const box = document.getElementById('suppliesDashList');
             if (!box) return;
+            setFoldCount('suppliesDashBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No hoses, couplers or suzi booked</p>'; return; }
             box.innerHTML = rows.map(function(s) {
                 return '<a href="/jobs/' + s.job_id + '" class="block p-3 bg-gray-50 rounded-lg">' +
@@ -581,6 +912,7 @@
             const data = await res.json();
             const rows = data.parts || [];
             const box = document.getElementById('partsDashList');
+            setFoldCount('partsDashBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open parts</p>'; return; }
             box.innerHTML = rows.map(function(p) {
                 return '<a href="/jobs/' + p.job_id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
@@ -601,6 +933,7 @@
             const box = document.getElementById('supplierDashList');
             const rows = data.updates || [];
             if (!box) return;
+            setFoldCount('supplierDashBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No supplier updates yet</p>'; return; }
             box.innerHTML = rows.map(function(u) {
                 let html = '<div class="p-3 rounded-lg border border-[#2a3340]"><div class="font-semibold">' + (u.stock_number||'') + ' · ' + (u.company||'') + ' — ' + u.status + '</div>';
@@ -635,6 +968,7 @@
             const box = document.getElementById('workshopCountList');
             const rows = data.workshop || [];
             if (!box) return;
+            setFoldCount('workshopCountBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No workshop users</p>'; return; }
             box.innerHTML = rows.map(function(u) {
                 return '<div class="p-3 rounded-lg border border-[#2a3340] font-semibold">' + u.name + ' — ' + u.total + ' updates</div>';
@@ -650,6 +984,7 @@
             if (!box) return;
             const sold = data.sold || [];
             const show = data.showroom || [];
+            setFoldCount('salesCountBox', sold.length + show.length);
             let html = '<div class="font-semibold uppercase text-xs tracking-wide text-[#7ec2ff]">Sold jobs</div>';
             html += sold.map(function(u) {
                 return '<div class="p-3 rounded-lg border border-[#2a3340]"><div class="font-semibold">' + u.name + '</div><div class="text-xs text-[#9aa6b4]">Booked ' + u.booked + ' · Open ' + u.open + ' · Delivered ' + u.delivered + '</div></div>';
@@ -670,6 +1005,7 @@
             const rows = (data.orders || []).filter(function(r){ return r.status !== 'Closed'; });
             const box = document.getElementById('stockDashList');
             if (!box) return;
+            setFoldCount('stockDashBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open stock orders</p>'; return; }
             const dashRole = (localStorage.getItem('role') || '').toLowerCase();
             const canAsk = (dashRole === 'admin' || dashRole === 'accounts' || dashRole === 'stock');
@@ -706,6 +1042,7 @@
             const rows = data.requests || [];
             const box = document.getElementById('updateReqList');
             if (!box) return;
+            setFoldCount('updateReqBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No open update requests</p>'; return; }
             box.innerHTML = rows.map(function(r) {
                 return '<a href="/jobs/' + r.id + '" class="block p-3 bg-orange-900 bg-opacity-40 rounded-lg border border-orange-500">' +
@@ -743,6 +1080,7 @@
                     '<div class="font-semibold">Ready to sign · ' + j.stock_number + ' ' + (j.vehicle_description || '') + '</div>' +
                     '<div class="text-xs text-[#9aa6b4]">' + j.action + (j.salesman_name ? ' · ' + j.salesman_name : '') + '</div></a>';
             });
+            setFoldCount('notifyBox', rows.length + sign.length);
             if (!rows.length && !sign.length) { box.innerHTML = '<p class="text-gray-400">No notifications</p>'; return; }
             html += rows.map(function(n) {
                 const link = n.job_card_id ? '<a href="/jobs/' + n.job_card_id + '" class="block">' : '<div>';
@@ -761,6 +1099,7 @@
             const data = await res.json();
             const rows = data.bookings || [];
             const box = document.getElementById('bookingsList');
+            setFoldCount('bookingsBox', rows.length);
             if (!rows.length) { box.innerHTML = '<p class="text-gray-400">No bookings yet</p>'; return; }
             box.innerHTML = rows.map(function(b) {
                 const extra = (b.status ? ' | ' + b.status : '') + (b.test_result ? ' | Test ' + b.test_result : '');
@@ -797,6 +1136,9 @@
                 });
                 html += '</div>';
             });
+            var locCount = 0;
+            Object.keys(board).forEach(function(loc) { locCount += (board[loc] || []).length; });
+            setFoldCount('locationBoardWrap', locCount);
             document.getElementById('locationBoard').innerHTML = html || '<p class="text-sm text-gray-400">No vehicles on the board</p>';
         } catch (err) {
             document.getElementById('locationBoard').innerHTML = '<p class="text-sm text-red-500">Could not load locations</p>';
@@ -815,6 +1157,7 @@
             const res = await fetch('/api/jobs/showroom-approval-queue', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             if (!res.ok) return;
             const rows = (await res.json()).jobs || [];
+            setFoldCount('showroomBox', rows.length);
             if (!rows.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
             const canApprove = (role === 'admin' || role === 'accounts');
@@ -845,6 +1188,7 @@
             const res = await fetch('/api/jobs/empty-check-queue', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
             if (!res.ok) return;
             const rows = (await res.json()).jobs || [];
+            setFoldCount('emptyCheckBox', rows.length);
             if (!rows.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
             document.getElementById('emptyCheckList').innerHTML = rows.map(function(j) {
@@ -864,6 +1208,7 @@
             if (!res.ok) return;
             const data = await res.json();
             const rows = data.jobs || [];
+            setFoldCount('signoffBox', rows.length);
             if (!rows.length) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
             document.getElementById('signoffList').innerHTML = rows.map(function(j) {
@@ -911,6 +1256,7 @@
             const data = await res.json();
             const rows = data.requests || [];
             const list = document.getElementById('washDashList');
+            setFoldCount('washDashBox', rows.length);
             if (!rows.length) { list.innerHTML = '<div class="text-[#9aa6b4]">No open wash requests</div>'; return; }
             list.innerHTML = rows.map(function(r) {
                 const buttons = canUpdate
@@ -959,6 +1305,7 @@
                 box.classList.add('hidden');
                 return;
             }
+            setFoldCount('morningLocBox', pending.length);
             box.classList.remove('hidden');
             document.getElementById('morningLocMeta').textContent = (data.confirmed || 0) + ' of ' + (data.total || 0) + ' confirmed today';
             const locs = data.locations || [];
