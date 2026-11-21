@@ -733,7 +733,7 @@
                     return '<div class="text-xs">• ' + e.task_name + ' — ' + e.status + (e.needs_approval ? ' (waiting approval)' : '') + '</div>';
                 }).join('') || '<div class="text-xs text-gray-400">No extras</div>';
                 return '<div class="p-3 bg-gray-50 rounded-lg border">' +
-                    '<a href="/jobs/' + j.id + '" class="font-medium text-status-blue">' + j.job_number + ' — ' + j.stock_number + ' ' + (j.vehicle_description || '') + '</a>' +
+                    '<a href="/jobs/' + j.id + '" class="font-medium text-status-blue">' + jobDisplayLabel(j) + ' ' + (j.vehicle_description || '') + '</a>' +
                     '<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2"><div><div class="text-xs font-semibold">Parts</div>' + parts + '</div><div><div class="text-xs font-semibold">Extras</div>' + extras + '</div></div></div>';
             }).join('');
         } catch (err) {
@@ -843,7 +843,7 @@
 
     function jobRow(j) {
         return '<a href="/jobs/' + j.id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
-            '<div class="font-medium">' + j.job_number + ' — ' + j.stock_number + ' ' + j.vehicle_description + ' ' + (j.year || '') + '</div>' +
+            '<div class="font-medium">' + jobDisplayLabel(j) + ' ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</div>' +
             '<div class="text-xs text-gray-500">' + j.status + (j.current_location ? ' | ' + j.current_location : '') +
             ' | Sales: ' + j.salesman_name + '</div></a>';
     }

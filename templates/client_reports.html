@@ -59,7 +59,7 @@
         if (!mine.length) { box.innerHTML = '<p class="text-[#9aa6b4]">No open sales jobs on your name.</p>'; return; }
         box.innerHTML = mine.map(function(j) {
             return '<div class="app-glass"><div class="glass-inner">' +
-                '<div class="font-bold">' + (j.stock_number || j.job_number) + ' · ' + (j.vehicle_description || '') + '</div>' +
+                '<div class="font-bold">' + jobDisplayLabel(j) + ' · ' + (j.vehicle_description || '') + '</div>' +
                 '<div class="text-xs text-[#9aa6b4] mt-1">' + (j.client_name || '') + ' · ' + (j.status || '') + '</div>' +
                 '<div class="flex flex-wrap gap-2 mt-3">' +
                 '<button type="button" class="px-3 py-2 bg-green-700 text-white rounded text-xs uppercase" onclick="shareOne(' + j.id + ')">WhatsApp</button>' +

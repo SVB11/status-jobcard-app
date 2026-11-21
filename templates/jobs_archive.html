@@ -58,7 +58,7 @@
         box.innerHTML = rows.map(function(j) {
             return '<div class="g-card">' +
                 (j.photo_url ? '<img class="stock-thumb mb-3" src="' + j.photo_url + '" alt="">' : '') +
-                '<a href="/jobs/' + j.id + '" class="text-lg font-bold tracking-wide block">' + (j.stock_number || j.job_number) + '</a>' +
+                '<a href="/jobs/' + j.id + '" class="text-lg font-bold tracking-wide block">' + jobDisplayId(j) + '</a>' + (jobDisplayHint(j) ? '<div class="text-xs text-[#9aa6b4]">' + jobDisplayHint(j) + '</div>' : '') +
                 '<div class="text-sm mt-1">' + (j.vehicle_description || '') + '</div>' +
                 '<div class="text-xs text-[#9aa6b4] mt-1 uppercase">' + (j.year || '') + ' · ' + (j.status || '') + '</div>' +
                 '<button type="button" data-id="' + j.id + '" class="del-btn mt-3 px-3 py-2 bg-red-800 text-white text-xs uppercase rounded">Delete from archive</button>' +

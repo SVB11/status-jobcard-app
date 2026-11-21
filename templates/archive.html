@@ -29,7 +29,7 @@ async function load() {
     if (!rows.length) { box.innerHTML = '<div class="text-[#9aa6b4]">No archived jobs</div>'; return; }
     box.innerHTML = rows.map(function(j) {
         return '<div class="g-card p-4">' +
-            '<div class="font-bold">' + (j.stock_number || '') + ' · ' + (j.job_number || '') + '</div>' +
+            '<div class="font-bold">' + jobDisplayLabel(j) + '</div>' +
             '<div class="text-sm">' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</div>' +
             '<div class="text-xs text-[#9aa6b4]">' + (j.client_name || '') + ' · Delivered ' + (j.delivered_at || '').replace('T',' ').substring(0,16) + ' · Archived by ' + (j.archived_by || '') + '</div>' +
             '<div class="mt-2 flex gap-2">' +
@@ -46,8 +46,8 @@ async function openJob(id) {
     const box = document.getElementById('detail');
     box.classList.remove('hidden');
     function lines(arr, fn) { return (arr || []).map(fn).join('') || '<div class="text-[#9aa6b4]">None</div>'; }
-    box.innerHTML = '<h2 class="font-bold uppercase">' + j.stock_number + ' ' + j.vehicle_description + '</h2>' +
-        '<p class="text-xs text-[#9aa6b4] mb-3">' + j.job_number + ' · ' + (j.client_name || '') + ' · VIN ' + (j.vin_number || '') + ' · Reg ' + (j.registration_number || '') + '</p>' +
+    box.innerHTML = '<h2 class="font-bold uppercase">' + jobDisplayLabel(j) + ' ' + (j.vehicle_description || '') + '</h2>' +
+        '<p class="text-xs text-[#9aa6b4] mb-3">' + (j.client_name || '') + ' · VIN ' + (j.vin_number || '') + ' · Reg ' + (j.registration_number || '') + '</p>' +
         '<div class="text-sm mb-2">Tasks</div>' + lines(j.tasks, function(t){ return '<div>' + t.task_name + ' — ' + (t.status || '') + (t.notes ? ' · ' + t.notes : '') + '</div>'; }) +
         '<div class="text-sm mt-3 mb-2">Parts</div>' + lines(j.parts, function(p){ return '<div>' + p.description + ' · ' + (p.quantity || '') + ' · ' + (p.order_number || '') + '</div>'; }) +
         '<div class="text-sm mt-3 mb-2">Third parties</div>' + lines(j.bookings, function(b){ return '<div>' + b.service + ' @ ' + b.provider + ' · ' + (b.booked_date || '') + '</div>'; }) +
