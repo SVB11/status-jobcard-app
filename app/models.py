@@ -51,6 +51,7 @@ class User(Base):
     role = Column(String, nullable=False)  # sales, workshop, accounts, admin, stock, supplier
     supplier_company = Column(String, nullable=True)
     yard_access = Column(Boolean, default=False)
+    stock_manager = Column(Boolean, default=False)  # may upload/add/remove yard stock and add photos
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -425,6 +426,8 @@ class StockTake(Base):
     on_site_count = Column(Integer, nullable=True)
     sticker_count = Column(Integer, nullable=True)
     results = Column(Text, nullable=True)  # JSON snapshot written when the round is closed
+    source = Column(String, nullable=True)  # NULL/jobs = open job cards (original); list = yard stock list
+    upload_id = Column(Integer, nullable=True)  # yard_stock_uploads.id (no FK: avoids a create-order cycle)
 
 
 class StockTakeItem(Base):
@@ -435,6 +438,94 @@ class StockTakeItem(Base):
     id = Column(Integer, primary_key=True)
     stock_take_id = Column(Integer, ForeignKey("stock_takes.id"), nullable=False)
     job_card_id = Column(Integer, ForeignKey("job_cards.id"), nullable=False)
+    on_site = Column(Boolean, default=False)
+    on_site_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    on_site_by_name = Column(String, nullable=True)
+    on_site_at = Column(DateTime, nullable=True)
+    sticker_fitted = Column(Boolean, default=False)
+    sticker_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sticker_by_name = Column(String, nullable=True)
+    sticker_at = Column(DateTime, nullable=True)
+
+
+class YardStockUpload(Base):
+    """A parsed stock list awaiting or past confirmation. Only allow-listed fields are kept:
+    no price, CRM, extras or mileage, and the uploaded file itself is never stored."""
+    __tablename__ = "yard_stock_uploads"
+
+    id = Column(Integer, primary_key=True)
+    file_type = Column(String, nullable=False)  # pdf / xlsx
+    file_name = Column(String, nullable=True)   # sanitised display name only
+    row_count = Column(Integer, default=0)
+    flagged_count = Column(Integer, default=0)
+    preview = Column(Text, nullable=True)       # JSON: [{data, issues, include}], warnings, counts
+    status = Column(String, default="preview")  # preview / confirmed / discarded
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_by_name = Column(String, nullable=True)
+    uploaded_at = Column(DateTime, server_default=func.now())
+    confirmed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    confirmed_by_name = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    stock_take_id = Column(Integer, ForeignKey("stock_takes.id"), nullable=True)
+
+
+class YardStockUnit(Base):
+    """One vehicle on the yard stock list. Never hard-deleted; removal is a soft status."""
+    __tablename__ = "yard_stock_units"
+
+    id = Column(Integer, primary_key=True)
+    stock_number = Column(String, nullable=False)      # as listed, spaces removed, upper case
+    match_key = Column(String, nullable=True, index=True)  # conservative WS/CWS/SPWS key, see yard_stock_parser.match_key
+    section = Column(String, nullable=True)
+    year = Column(String, nullable=True)
+    make = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    registrations = Column(String, nullable=True)
+    availability = Column(String, nullable=True)
+    source = Column(String, nullable=False, default="upload")  # upload / single / yard_find
+    status = Column(String, nullable=False, default="active")   # active / pending / rejected / removed / replaced
+    upload_id = Column(Integer, ForeignKey("yard_stock_uploads.id"), nullable=True)
+    listed_at = Column(DateTime, server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_name = Column(String, nullable=True)
+    photo_path = Column(String, nullable=True)  # relative to UPLOAD_DIR, yard/<random>.<ext>
+    photo_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    photo_by_name = Column(String, nullable=True)
+    photo_at = Column(DateTime, nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_by_name = Column(String, nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    decision_note = Column(Text, nullable=True)
+    removed_at = Column(DateTime, nullable=True)
+    removed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    removed_by_name = Column(String, nullable=True)
+    removed_kind = Column(String, nullable=True)  # manual / delivered / replaced
+    removed_reason = Column(Text, nullable=True)
+    removed_job_id = Column(Integer, ForeignKey("job_cards.id"), nullable=True)
+
+
+class YardUnitPhoto(Base):
+    """Append-only photo log: who added or replaced a vehicle photo and when. Old files are kept."""
+    __tablename__ = "yard_unit_photos"
+
+    id = Column(Integer, primary_key=True)
+    unit_id = Column(Integer, ForeignKey("yard_stock_units.id"), nullable=False, index=True)
+    photo_path = Column(String, nullable=False)
+    replaced_path = Column(String, nullable=True)
+    added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    added_by_name = Column(String, nullable=True)
+    added_at = Column(DateTime, server_default=func.now())
+
+
+class StockTakeUnitItem(Base):
+    """Ticks for a stock-list unit in a list-based yard check round."""
+    __tablename__ = "stock_take_unit_items"
+    __table_args__ = (UniqueConstraint("stock_take_id", "unit_id"),)
+
+    id = Column(Integer, primary_key=True)
+    stock_take_id = Column(Integer, ForeignKey("stock_takes.id"), nullable=False)
+    unit_id = Column(Integer, ForeignKey("yard_stock_units.id"), nullable=False)
     on_site = Column(Boolean, default=False)
     on_site_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     on_site_by_name = Column(String, nullable=True)
