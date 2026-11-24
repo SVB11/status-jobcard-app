@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 import json
+import re
 import uuid
 
 from .database import engine, get_db, Base, SQLITE_FILE, SessionLocal
@@ -78,17 +79,19 @@ async def security_headers(request: Request, call_next):
             if path.startswith("/api/") or path.startswith("/uploads/"):
                 return JSONResponse({"detail": "Yard users can only use the Yard check."}, status_code=403)
             return RedirectResponse(url="/yard")
-    if path.startswith("/uploads/tasks/"):
-        # Direct task photo files stay unavailable, even to signed-in staff.
+    if path.startswith("/uploads/tasks/") or path.startswith("/uploads/yard/"):
+        # Direct task and yard photo files stay unavailable, even to signed-in staff.
         return JSONResponse({"detail": "Not found"}, status_code=404)
     request.state.yard_only = bool(user and user.role == "yard")
     request.state.has_yard_access = bool(user and user_has_yard_access(user))
+    request.state.is_stock_manager = bool(user and is_stock_manager(user))
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Cache-Control"] = "no-store"
+    if not (path.startswith("/api/yard/stock/units/") and path.endswith("/photo") and response.status_code == 200):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 def login_blocked(username: str):
@@ -162,6 +165,8 @@ def render_template(name: str, **context):
         context["yard_only"] = bool(getattr(getattr(context.get("request"), "state", None), "yard_only", False))
     if "has_yard_access" not in context:
         context["has_yard_access"] = bool(getattr(getattr(context.get("request"), "state", None), "has_yard_access", False))
+    if "is_stock_manager" not in context:
+        context["is_stock_manager"] = bool(getattr(getattr(context.get("request"), "state", None), "is_stock_manager", False))
     template = jinja_env.get_template(name)
     return HTMLResponse(template.render(**context))
 
@@ -769,7 +774,7 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
             "pdi_signed_workshop": bool(j.pdi_signed_workshop),
             "ready_sales": bool(j.ready_sales),
             "ready_workshop": bool(j.ready_workshop),
-            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year)
+            "photo_url": job_photo_url(j, yard_photo_map_cached(db))
         }, j, counts))
     return {"jobs": result}
 
@@ -1162,7 +1167,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
         "main_type": job.main_type,
         "job_purpose": getattr(job, "job_purpose", None) or "sold",
         "sub_type": job.sub_type,
-        "photo_url": match_stock_photo(job.vehicle_description, job.main_type, job.sub_type, job.year),
+        "photo_url": job_photo_url(job, yard_photo_map_cached(db)),
         "vin_number": getattr(job, "vin_number", None),
         "chassis_number": getattr(job, "chassis_number", None),
         "registration_number": getattr(job, "registration_number", None),
@@ -1713,6 +1718,8 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "is_active": u.is_active,
                 "yard_access": bool(getattr(u, "yard_access", False)),
                 "has_yard_access": user_has_yard_access(u),
+                "stock_manager": bool(getattr(u, "stock_manager", False)),
+                "is_stock_manager": is_stock_manager(u),
                 "created_at": u.created_at.isoformat() if u.created_at else None,
                 "password_changed_at": u.password_changed_at.date().isoformat() if getattr(u, "password_changed_at", None) else None
             } for u in users
@@ -1822,6 +1829,29 @@ async def api_set_yard_access(user_id: int, request: Request, db: Session = Depe
         "yard_access": bool(user.yard_access),
         "has_yard_access": user_has_yard_access(user),
     }
+
+@app.post("/api/admin/users/{user_id}/stock-manager")
+async def api_set_stock_manager(user_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    """Admin grants or removes the stock-list permission (upload list, add/remove vehicles, photos, approve yard finds)."""
+    require_admin(current_user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if type(body.get("stock_manager")) is not bool:
+        raise HTTPException(status_code=400, detail="stock_manager must be true or false")
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body["stock_manager"] and user.role in ("supplier", "yard"):
+        raise HTTPException(status_code=400, detail="Suppliers and yard logins cannot manage the stock list")
+    previous = bool(getattr(user, "stock_manager", False))
+    user.stock_manager = body["stock_manager"]
+    db.commit()
+    if previous != body["stock_manager"]:
+        log_audit(db, current_user.id, "Stock list access", None,
+                  ("Enabled" if body["stock_manager"] else "Disabled") + f" stock list management for user {user.id}")
+    return {"success": True, "stock_manager": bool(user.stock_manager), "is_stock_manager": is_stock_manager(user)}
 
 @app.post("/api/admin/users/{user_id}/reset-password")
 async def api_reset_password(user_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -2452,7 +2482,7 @@ async def api_locations_board(db: Session = Depends(get_db), current_user: model
             "year": j.year,
             "status": j.status,
             "priority": j.priority,
-            "photo_url": match_stock_photo(j.vehicle_description, j.main_type, j.sub_type, j.year),
+            "photo_url": job_photo_url(j, yard_photo_map_cached(db)),
             "job_purpose": getattr(j, "job_purpose", None) or "sold",
         }, j, loc_counts)
         vehicle = f"{job_display_label(j, loc_counts)} {j.vehicle_description} {j.year or ''}".strip()
@@ -4780,21 +4810,28 @@ def yard_summary(rows):
 def yard_round_payload(current):
     return {"id": current.id, "started_at": yard_stamp(current.started_at),
             "started_by": current.started_by_name, "closed_at": yard_stamp(current.closed_at),
-            "closed_by": current.closed_by_name}
+            "closed_by": current.closed_by_name, "source": current.source or "jobs"}
 
 @app.get("/yard", response_class=HTMLResponse)
 async def yard_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
     if not user_has_yard_access(current_user):
         return RedirectResponse(url="/dashboard")
-    return render_template("yard.html", request=request, page_title="Yard check", yard_only=current_user.role == "yard", can_start=yard_can_start(current_user))
+    return render_template("yard.html", request=request, page_title="Yard check", yard_only=current_user.role == "yard", can_start=yard_can_start(current_user), can_manage=is_stock_manager(current_user), sections=YARD_SECTIONS)
 
 @app.get("/api/yard/current")
 async def api_yard_current(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_yard(current_user)
     yard_lock(db)
     current = yard_current(db)
-    rows = yard_rows(db, current)
-    result = {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "can_start": yard_can_start(current_user)}
+    if current.source == "list":
+        # Stock-list round: vehicles from the confirmed list (auto-dropped once their sales job is delivered).
+        yard_sync_delivered(db)
+        rows = yard_list_rows(db, current)
+        result = {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "can_start": yard_can_start(current_user),
+                  "mode": "list", "pending": yard_pending_rows(db, current_user), "can_manage": is_stock_manager(current_user)}
+    else:
+        rows = yard_rows(db, current)
+        result = {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "can_start": yard_can_start(current_user)}
     db.commit()
     return result
 
@@ -4809,6 +4846,23 @@ async def api_yard_tick(round_id: int, request: Request, db: Session = Depends(g
     current = db.query(models.StockTake).filter(models.StockTake.id == round_id).first()
     if not current or current.closed_at:
         raise HTTPException(status_code=409, detail="This stock take is closed. Refresh to use the current one.")
+    if current.source == "list":
+        if type(body.get("unit_id")) is not int:
+            raise HTTPException(status_code=400, detail="Choose a vehicle")
+        unit = db.query(models.YardStockUnit).filter(models.YardStockUnit.id == body.get("unit_id"), models.YardStockUnit.status == "active").first()
+        if not unit:
+            raise HTTPException(status_code=404, detail="Vehicle is not on the yard list")
+        uitem = db.query(models.StockTakeUnitItem).filter(models.StockTakeUnitItem.stock_take_id == current.id, models.StockTakeUnitItem.unit_id == unit.id).first()
+        if not uitem:
+            uitem = models.StockTakeUnitItem(stock_take_id=current.id, unit_id=unit.id)
+            db.add(uitem)
+        setattr(uitem, field, body["checked"])
+        prefix = "on_site" if field == "on_site" else "sticker"
+        setattr(uitem, prefix + "_by", current_user.id)
+        setattr(uitem, prefix + "_by_name", current_user.full_name)
+        setattr(uitem, prefix + "_at", datetime.utcnow())
+        db.commit()
+        return {"success": True}
     job = active_jobs(db).filter(models.JobCard.id == body.get("job_id")).first()
     if not job:
         raise HTTPException(status_code=404, detail="Open WS number not found")
@@ -4831,6 +4885,12 @@ async def api_yard_start(db: Session = Depends(get_db), current_user: models.Use
         raise HTTPException(status_code=403, detail="Only admin/accounts can start a new stock take.")
     yard_lock(db)
     current = yard_current(db)
+    if current.source == "list":
+        # A fresh round on the same confirmed stock list.
+        yard_sync_delivered(db)
+        new = yard_close_and_start(db, current, current_user, "list", current.upload_id)
+        db.commit()
+        return {"success": True, "id": new.id, "closed_id": current.id}
     rows = yard_rows(db, current)
     summary = yard_summary(rows)
     current.closed_at = datetime.utcnow()
@@ -4857,4 +4917,484 @@ async def api_yard_history_detail(round_id: int, db: Session = Depends(get_db), 
     if not current:
         raise HTTPException(status_code=404, detail="Past stock take not found")
     rows = json.loads(current.results or "[]")
-    return {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "read_only": True}
+    return {"round": yard_round_payload(current), "rows": rows, "summary": yard_summary(rows), "read_only": True,
+            "mode": "list" if current.source == "list" else "jobs"}
+
+# ---------- YARD STOCK LIST (stock managers; no price, CRM, extras or mileage) ----------
+from .yard_stock_parser import parse_pdf as yard_parse_pdf, parse_xlsx as yard_parse_xlsx, StockParseError, stock_key as yard_stock_key, match_key as yard_match_key, validate_row as yard_validate_row, SECTIONS as YARD_SECTIONS, clean as yard_clean
+
+YARD_PHOTO_DIR = os.path.join(UPLOAD_DIR, "yard")
+os.makedirs(YARD_PHOTO_DIR, exist_ok=True)
+MAX_STOCK_FILE_BYTES = 10 * 1024 * 1024
+MAX_YARD_PHOTO_BYTES = 15 * 1024 * 1024
+YARD_PHOTO_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic"}
+
+def is_stock_manager(user) -> bool:
+    """Admin/accounts (is_admin_user) always; anyone else only with the admin-granted stock_manager flag."""
+    if not user or not getattr(user, "is_active", True) or (getattr(user, "role", "") or "") in ("supplier", "yard"):
+        return False
+    return is_admin_user(user) or bool(getattr(user, "stock_manager", False))
+
+def require_stock_manager(user):
+    if not is_stock_manager(user):
+        raise HTTPException(status_code=403, detail="Stock list managers only")
+
+def yard_photo_kind(raw: bytes):
+    """Return the file extension from the file's own bytes, never from its name or browser type."""
+    if raw[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return ".webp"
+    if raw[4:8] == b"ftyp" and raw[8:12] in (b"heic", b"heix", b"mif1", b"msf1", b"hevc", b"heim", b"heis"):
+        return ".heic"
+    return None
+
+async def yard_save_photo(upload: UploadFile) -> str:
+    if upload is None or not getattr(upload, "filename", None):
+        raise HTTPException(status_code=400, detail="A photo is required")
+    raw = await upload.read(MAX_YARD_PHOTO_BYTES + 1)
+    if len(raw) > MAX_YARD_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo is larger than 15 MB")
+    ext = yard_photo_kind(raw)
+    if not ext or len(raw) < 100:
+        raise HTTPException(status_code=400, detail="Photo must be a JPEG, PNG, WEBP or HEIC image")
+    rel = f"yard/{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(UPLOAD_DIR, rel), "wb") as fh:
+        fh.write(raw)
+    return rel
+
+def yard_unit_photo_url(unit):
+    if not unit or not unit.photo_path:
+        return None
+    stamp = int(unit.photo_at.timestamp()) if unit.photo_at else 0
+    return f"/api/yard/stock/units/{unit.id}/photo?v={stamp}"
+
+def yard_audit(db, user_id, action, details):
+    # Added to the caller's transaction. Never contains prices, client data or photo bytes.
+    db.add(models.AuditLog(user_id=user_id, action=action, details=details))
+
+def yard_system_user_id(db):
+    admin = db.query(models.User).filter(models.User.role == "admin").order_by(models.User.id).first()
+    return admin.id if admin else 1
+
+def yard_delivered_sales_jobs(db):
+    """Sales jobs (job_purpose 'sold', or blank on older cards) at Delivered / Closed. Showroom jobs never count."""
+    q = db.query(models.JobCard).filter(models.JobCard.status == DELIVERED_STATUS)
+    out = {}
+    for job in q.all():
+        if (job.job_purpose or "sold") == "showroom":
+            continue
+        key = yard_match_key(job.stock_number)
+        if key:
+            out.setdefault(key, []).append(job)
+    return out
+
+def yard_sync_delivered(db):
+    """Soft-remove active list vehicles whose sales job was delivered after the vehicle was listed.
+    Only unambiguous keys: a key shared by two active vehicles is never auto-removed."""
+    units = db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()
+    counts = {}
+    for u in units:
+        if u.match_key:
+            counts[u.match_key] = counts.get(u.match_key, 0) + 1
+    delivered = yard_delivered_sales_jobs(db)
+    removed = 0
+    for u in units:
+        if not u.match_key or counts.get(u.match_key) != 1:
+            continue
+        jobs = [j for j in delivered.get(u.match_key, []) if (j.delivered_at or j.archived_at)]
+        jobs = [j for j in jobs if u.listed_at is None or (j.delivered_at or j.archived_at).replace(tzinfo=None) > u.listed_at]
+        if not jobs:
+            continue
+        job = sorted(jobs, key=lambda j: (j.delivered_at or j.archived_at).replace(tzinfo=None))[-1]
+        u.status = "removed"
+        u.removed_kind = "delivered"
+        u.removed_at = datetime.utcnow()
+        u.removed_by_name = "System"
+        u.removed_job_id = job.id
+        u.removed_reason = f"Sales job {job.job_number} delivered"
+        yard_audit(db, yard_system_user_id(db), "Yard stock auto-removed", f"{u.stock_number} off the yard list: {job.job_number} delivered")
+        removed += 1
+    if removed:
+        db.flush()
+    return removed
+
+def yard_photo_map(db):
+    """match_key -> unit with a photo, only where exactly one listed vehicle owns that key (active first)."""
+    units = db.query(models.YardStockUnit).filter(models.YardStockUnit.photo_path != None, models.YardStockUnit.status.in_(("active", "removed", "replaced"))).all()
+    by_key = {}
+    for u in units:
+        if u.match_key:
+            by_key.setdefault(u.match_key, []).append(u)
+    out = {}
+    for key, group in by_key.items():
+        active = [u for u in group if u.status == "active"]
+        if len(active) == 1:
+            out[key] = active[0]
+        elif not active and len({u.stock_number for u in group}) == 1:
+            out[key] = sorted(group, key=lambda u: u.photo_at or datetime.min)[-1]
+    return out
+
+def job_photo_url(job, photo_map=None):
+    """A real yard photo for the same WS replaces the generic stand-in; otherwise the stand-in as before."""
+    if photo_map:
+        unit = photo_map.get(yard_match_key(job.stock_number))
+        if unit:
+            return yard_unit_photo_url(unit)
+    return match_stock_photo(job.vehicle_description, job.main_type, job.sub_type, job.year)
+
+def yard_unit_payload(u, full=False):
+    data = {
+        "unit_id": u.id, "stock_number": u.stock_number, "section": u.section, "year": u.year,
+        "make": u.make, "model": u.model, "description": u.description, "registrations": u.registrations,
+        "availability": u.availability, "photo_url": yard_unit_photo_url(u), "status": u.status, "source": u.source,
+        "photo_by": u.photo_by_name, "photo_at": yard_stamp(u.photo_at),
+    }
+    if full:
+        data.update({
+            "created_by": u.created_by_name, "listed_at": yard_stamp(u.listed_at),
+            "decided_by": u.decided_by_name, "decided_at": yard_stamp(u.decided_at), "decision_note": u.decision_note,
+            "removed_kind": u.removed_kind, "removed_by": u.removed_by_name, "removed_at": yard_stamp(u.removed_at),
+            "removed_reason": u.removed_reason,
+        })
+    return data
+
+def yard_list_rows(db, current):
+    units = db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()
+    order = {s: i for i, s in enumerate(YARD_SECTIONS)}
+    units.sort(key=lambda u: (order.get(u.section, 99), u.stock_number))
+    items = {i.unit_id: i for i in db.query(models.StockTakeUnitItem).filter(models.StockTakeUnitItem.stock_take_id == current.id).all()}
+    rows = []
+    for u in units:
+        item = items.get(u.id)
+        row = yard_unit_payload(u)
+        row.update({
+            "label": u.stock_number,
+            "on_site": bool(item and item.on_site),
+            "on_site_by": item.on_site_by_name if item else None,
+            "on_site_at": yard_stamp(item.on_site_at) if item else None,
+            "sticker_fitted": bool(item and item.sticker_fitted),
+            "sticker_by": item.sticker_by_name if item else None,
+            "sticker_at": yard_stamp(item.sticker_at) if item else None,
+        })
+        rows.append(row)
+    return rows
+
+def yard_pending_rows(db, user):
+    q = db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "pending")
+    if not is_stock_manager(user):
+        q = q.filter(models.YardStockUnit.created_by == user.id)
+    return [yard_unit_payload(u, full=True) for u in q.order_by(models.YardStockUnit.id).all()]
+
+def yard_close_and_start(db, current, user, source, upload_id=None):
+    """Close the current round exactly as /api/yard/start does (snapshot kept) and open a new one."""
+    rows = yard_list_rows(db, current) if current.source == "list" else yard_rows(db, current)
+    summary = yard_summary(rows)
+    current.closed_at = datetime.utcnow()
+    current.closed_by = user.id
+    current.closed_by_name = user.full_name
+    current.total_jobs, current.on_site_count, current.sticker_count = summary["total"], summary["on_site"], summary["stickers"]
+    current.results = json.dumps(rows)
+    db.flush()
+    new = models.StockTake(started_at=datetime.utcnow(), started_by=user.id, started_by_name=user.full_name, source=source, upload_id=upload_id)
+    db.add(new)
+    db.flush()
+    return new
+
+def yard_form_fields(form):
+    row = {k: yard_clean(form.get(k), 600 if k == "description" else 120) for k in ("stock_number", "section", "year", "make", "model", "description", "registrations", "availability")}
+    row["stock_number"] = yard_stock_key(row["stock_number"])
+    row["section"] = row["section"].upper()
+    if not row["stock_number"] or len(row["stock_number"]) > 32:
+        raise HTTPException(status_code=400, detail="Enter the WS / stock number")
+    if row["section"] not in YARD_SECTIONS:
+        raise HTTPException(status_code=400, detail="Choose a section")
+    if not row["make"] and not row["description"]:
+        raise HTTPException(status_code=400, detail="Enter the make or a description")
+    return row
+
+@app.get("/yard/stock", response_class=HTMLResponse)
+async def yard_stock_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
+    if not is_stock_manager(current_user):
+        return RedirectResponse(url="/yard" if user_has_yard_access(current_user) else "/dashboard")
+    return render_template("yard_stock.html", request=request, page_title="Stock list", sections=YARD_SECTIONS)
+
+@app.post("/api/yard/stock/upload")
+async def api_yard_stock_upload(file: UploadFile = File(None), db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    if file is None or not getattr(file, "filename", None):
+        raise HTTPException(status_code=400, detail="Choose the stock list file (PDF or .xlsx)")
+    raw = await file.read(MAX_STOCK_FILE_BYTES + 1)
+    if len(raw) > MAX_STOCK_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Stock list file is larger than 10 MB")
+    name = os.path.basename(file.filename or "")
+    ext = os.path.splitext(name)[1].lower()
+    try:
+        if ext == ".pdf" and raw[:5] == b"%PDF-":
+            parsed, kind = yard_parse_pdf(raw), "pdf"
+        elif ext == ".xlsx" and raw[:4] == b"PK\x03\x04":
+            parsed, kind = yard_parse_xlsx(raw), "xlsx"
+        else:
+            raise HTTPException(status_code=400, detail="Upload the stock list as a PDF or .xlsx file")
+    except StockParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        raw = None  # the original file is never written to disk
+    yard_sync_delivered(db)
+    delivered = yard_delivered_sales_jobs(db)
+    active = {u.stock_number: u for u in db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()}
+    for row in parsed["rows"]:
+        d = row["data"]
+        jobs = delivered.get(yard_match_key(d["stock_number"]) or "", [])
+        if jobs:
+            row["issues"].append("Job cards show this WS delivered (" + ", ".join(sorted(j.job_number for j in jobs))[:80] + "): check it is still in stock")
+        if any(i.startswith("Duplicate stock number") for i in row["issues"]):
+            row["include"] = False
+        unit = active.get(d["stock_number"])
+        row["existing"] = bool(unit)
+        row["has_photo"] = bool(unit and unit.photo_path)
+    listed = {r["data"]["stock_number"] for r in parsed["rows"]}
+    # Only vehicles that came from an earlier list upload drop off; hand-added vehicles and approved finds stay until removed by hand.
+    parsed["dropping"] = sorted(s for s, u in active.items() if s not in listed and u.source == "upload")
+    safe_name = re.sub(r"[^A-Za-z0-9 ._()-]", "_", name)[:120]
+    for old in db.query(models.YardStockUpload).filter(models.YardStockUpload.status == "preview").all():
+        old.status = "discarded"
+    up = models.YardStockUpload(file_type=kind, file_name=safe_name, row_count=len(parsed["rows"]),
+                                flagged_count=sum(bool(r["issues"]) for r in parsed["rows"]),
+                                preview=json.dumps(parsed), status="preview",
+                                uploaded_by=current_user.id, uploaded_by_name=current_user.full_name)
+    db.add(up)
+    db.flush()
+    yard_audit(db, current_user.id, "Yard stock list uploaded", f"Upload {up.id} ({kind}): {up.row_count} rows, {up.flagged_count} flagged; preview only")
+    db.commit()
+    return {"upload_id": up.id, "file_type": kind, "file_name": safe_name, **parsed}
+
+@app.get("/api/yard/stock/upload/{upload_id}")
+async def api_yard_stock_upload_get(upload_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    up = db.query(models.YardStockUpload).filter(models.YardStockUpload.id == upload_id).first()
+    if not up:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return {"upload_id": up.id, "status": up.status, "file_type": up.file_type, "file_name": up.file_name, **json.loads(up.preview or "{}")}
+
+@app.post("/api/yard/stock/upload/{upload_id}/discard")
+async def api_yard_stock_upload_discard(upload_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    up = db.query(models.YardStockUpload).filter(models.YardStockUpload.id == upload_id, models.YardStockUpload.status == "preview").first()
+    if not up:
+        raise HTTPException(status_code=404, detail="No preview to discard")
+    up.status = "discarded"
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/yard/stock/upload/{upload_id}/confirm")
+async def api_yard_stock_upload_confirm(upload_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    include = body.get("include")
+    if not isinstance(include, list) or not all(type(i) is int for i in include):
+        raise HTTPException(status_code=400, detail="Send the list of rows to include")
+    yard_lock(db)
+    up = db.query(models.YardStockUpload).filter(models.YardStockUpload.id == upload_id).first()
+    if not up or up.status != "preview":
+        raise HTTPException(status_code=409, detail="This preview was already confirmed or replaced. Upload again.")
+    preview = json.loads(up.preview or "{}")
+    rows = preview.get("rows", [])
+    picked = sorted(set(i for i in include if 0 <= i < len(rows)))
+    if not picked:
+        raise HTTPException(status_code=400, detail="Include at least one vehicle")
+    chosen = {}
+    for i in picked:
+        data, _issues = yard_validate_row(rows[i]["data"])
+        if not data["stock_number"]:
+            raise HTTPException(status_code=400, detail=f"Line {i + 1} has no stock number")
+        if data["stock_number"] in chosen:
+            raise HTTPException(status_code=400, detail=f"{data['stock_number']} is included twice. Untick one.")
+        chosen[data["stock_number"]] = data
+    yard_sync_delivered(db)
+    now = datetime.utcnow()
+    active = {u.stock_number: u for u in db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()}
+    kept = added = dropped = 0
+    for stock, data in chosen.items():
+        unit = active.get(stock)
+        if unit:
+            # Same vehicle on the new list: refresh its details, keep its photo and listing date.
+            for k in ("section", "year", "make", "model", "description", "registrations", "availability"):
+                setattr(unit, k, data[k])
+            unit.upload_id = up.id
+            kept += 1
+        else:
+            db.add(models.YardStockUnit(stock_number=stock, match_key=yard_match_key(stock), source="upload", status="active",
+                                        upload_id=up.id, listed_at=now, created_by=current_user.id, created_by_name=current_user.full_name,
+                                        **{k: data[k] for k in ("section", "year", "make", "model", "description", "registrations", "availability")}))
+            added += 1
+    for stock, unit in active.items():
+        # Hand-added vehicles (single) and approved yard finds are kept; they go only by hand or on Delivered.
+        if stock not in chosen and unit.source == "upload":
+            unit.status = "replaced"
+            unit.removed_kind = "replaced"
+            unit.removed_at = now
+            unit.removed_by = current_user.id
+            unit.removed_by_name = current_user.full_name
+            unit.removed_reason = f"Not on stock list upload {up.id}"
+            dropped += 1
+    db.flush()
+    current = yard_current(db)
+    new = yard_close_and_start(db, current, current_user, "list", up.id)
+    up.status = "confirmed"
+    up.confirmed_by, up.confirmed_by_name, up.confirmed_at = current_user.id, current_user.full_name, now
+    up.stock_take_id = new.id
+    yard_audit(db, current_user.id, "Yard stock list confirmed",
+               f"Upload {up.id}: {len(chosen)} vehicles ({added} new, {kept} kept, {dropped} off the list). Stock take {current.id} closed, {new.id} started.")
+    db.commit()
+    return {"success": True, "round_id": new.id, "closed_id": current.id, "added": added, "kept": kept, "dropped": dropped}
+
+@app.get("/api/yard/stock/units")
+async def api_yard_stock_units(status: str = "active", db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    if status not in ("active", "pending", "removed"):
+        raise HTTPException(status_code=400, detail="Unknown list")
+    yard_sync_delivered(db)
+    db.commit()
+    statuses = ("removed", "replaced", "rejected") if status == "removed" else (status,)
+    units = db.query(models.YardStockUnit).filter(models.YardStockUnit.status.in_(statuses)).all()
+    order = {s: i for i, s in enumerate(YARD_SECTIONS)}
+    units.sort(key=lambda u: (order.get(u.section, 99), u.stock_number) if status != "removed" else (-(u.removed_at or u.decided_at or datetime.min).timestamp(),))
+    return {"units": [yard_unit_payload(u, full=True) for u in units[:500]],
+            "counts": {s: db.query(models.YardStockUnit).filter(models.YardStockUnit.status == s).count() for s in ("active", "pending")}}
+
+async def yard_create_unit(request, db, current_user, status, source):
+    form = await request.form()
+    row = yard_form_fields(form)
+    photo = form.get("photo")
+    if not hasattr(photo, "read"):
+        raise HTTPException(status_code=400, detail="A photo is required")
+    existing = db.query(models.YardStockUnit).filter(models.YardStockUnit.stock_number == row["stock_number"], models.YardStockUnit.status.in_(("active", "pending"))).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"{row['stock_number']} is already on the list" + (" (waiting for approval)" if existing.status == "pending" else ""))
+    rel = await yard_save_photo(photo)
+    now = datetime.utcnow()
+    unit = models.YardStockUnit(match_key=yard_match_key(row["stock_number"]), source=source, status=status, listed_at=now,
+                                created_by=current_user.id, created_by_name=current_user.full_name,
+                                photo_path=rel, photo_by=current_user.id, photo_by_name=current_user.full_name, photo_at=now, **row)
+    db.add(unit)
+    db.flush()
+    db.add(models.YardUnitPhoto(unit_id=unit.id, photo_path=rel, added_by=current_user.id, added_by_name=current_user.full_name, added_at=now))
+    return unit
+
+@app.post("/api/yard/stock/units")
+async def api_yard_stock_add(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    unit = await yard_create_unit(request, db, current_user, "active", "single")
+    yard_audit(db, current_user.id, "Yard stock vehicle added", f"{unit.stock_number} added with photo")
+    db.commit()
+    return {"success": True, "unit": yard_unit_payload(unit, full=True)}
+
+@app.post("/api/yard/stock/finds")
+async def api_yard_stock_find(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_yard(current_user)
+    unit = await yard_create_unit(request, db, current_user, "pending", "yard_find")
+    yard_audit(db, current_user.id, "Yard find reported", f"{unit.stock_number} found in the yard; waiting for approval")
+    db.commit()
+    return {"success": True, "unit": yard_unit_payload(unit, full=True)}
+
+def yard_get_unit(db, unit_id):
+    unit = db.query(models.YardStockUnit).filter(models.YardStockUnit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    return unit
+
+@app.post("/api/yard/stock/units/{unit_id}/decision")
+async def api_yard_stock_decision(unit_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    body = await request.json()
+    decision = body.get("decision")
+    note = yard_clean(body.get("note"), 300)
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Approve or reject")
+    if decision == "reject" and not note:
+        raise HTTPException(status_code=400, detail="Give a reason for rejecting")
+    yard_lock(db)
+    unit = yard_get_unit(db, unit_id)
+    if unit.status != "pending":
+        raise HTTPException(status_code=409, detail="This vehicle is no longer waiting for approval")
+    if decision == "approve" and db.query(models.YardStockUnit).filter(models.YardStockUnit.stock_number == unit.stock_number, models.YardStockUnit.status == "active").first():
+        raise HTTPException(status_code=409, detail=f"{unit.stock_number} is already on the list. Reject this one with a note.")
+    unit.status = "active" if decision == "approve" else "rejected"
+    unit.decided_by, unit.decided_by_name, unit.decided_at, unit.decision_note = current_user.id, current_user.full_name, datetime.utcnow(), note or None
+    if decision == "approve":
+        unit.listed_at = datetime.utcnow()
+    yard_audit(db, current_user.id, "Yard find " + ("approved" if decision == "approve" else "rejected"), f"{unit.stock_number}" + (f": {note}" if note else ""))
+    db.commit()
+    return {"success": True, "status": unit.status}
+
+@app.post("/api/yard/stock/units/{unit_id}/remove")
+async def api_yard_stock_remove(unit_id: int, request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    body = await request.json()
+    reason = yard_clean(body.get("reason"), 300)
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Say why it comes off the list")
+    unit = yard_get_unit(db, unit_id)
+    if unit.status != "active":
+        raise HTTPException(status_code=409, detail="Only vehicles on the list can be removed")
+    unit.status, unit.removed_kind = "removed", "manual"
+    unit.removed_at, unit.removed_by, unit.removed_by_name, unit.removed_reason = datetime.utcnow(), current_user.id, current_user.full_name, reason
+    yard_audit(db, current_user.id, "Yard stock removed", f"{unit.stock_number} off the yard list: {reason}")
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/yard/stock/units/{unit_id}/restore")
+async def api_yard_stock_restore(unit_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    unit = yard_get_unit(db, unit_id)
+    if unit.status not in ("removed", "replaced"):
+        raise HTTPException(status_code=409, detail="Only removed vehicles can be put back")
+    if db.query(models.YardStockUnit).filter(models.YardStockUnit.stock_number == unit.stock_number, models.YardStockUnit.status == "active").first():
+        raise HTTPException(status_code=409, detail=f"{unit.stock_number} is already on the list")
+    previous = unit.removed_reason or unit.removed_kind
+    unit.status = "active"
+    # A restored vehicle must not be removed again for the same delivered job.
+    unit.listed_at = datetime.utcnow()
+    unit.removed_kind = unit.removed_reason = unit.removed_at = unit.removed_by = unit.removed_by_name = unit.removed_job_id = None
+    yard_audit(db, current_user.id, "Yard stock restored", f"{unit.stock_number} back on the yard list (was: {previous})")
+    db.commit()
+    return {"success": True}
+
+@app.post("/api/yard/stock/units/{unit_id}/photo")
+async def api_yard_stock_photo(unit_id: int, photo: UploadFile = File(None), db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    require_stock_manager(current_user)
+    unit = yard_get_unit(db, unit_id)
+    if unit.status in ("rejected",):
+        raise HTTPException(status_code=409, detail="This vehicle was rejected")
+    rel = await yard_save_photo(photo)
+    now = datetime.utcnow()
+    db.add(models.YardUnitPhoto(unit_id=unit.id, photo_path=rel, replaced_path=unit.photo_path, added_by=current_user.id, added_by_name=current_user.full_name, added_at=now))
+    replaced = bool(unit.photo_path)
+    unit.photo_path, unit.photo_by, unit.photo_by_name, unit.photo_at = rel, current_user.id, current_user.full_name, now
+    yard_audit(db, current_user.id, "Yard stock photo " + ("replaced" if replaced else "added"), f"{unit.stock_number} photo")
+    db.commit()
+    return {"success": True, "photo_url": yard_unit_photo_url(unit), "photo_by": unit.photo_by_name, "photo_at": yard_stamp(unit.photo_at)}
+
+@app.get("/api/yard/stock/units/{unit_id}/photo")
+async def api_yard_stock_photo_get(unit_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    unit = yard_get_unit(db, unit_id)
+    allowed = is_stock_manager(current_user) or (unit.status in ("active", "removed", "replaced") and current_user.role != "supplier") or unit.created_by == current_user.id
+    if not allowed or not unit.photo_path:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    path = os.path.realpath(os.path.join(UPLOAD_DIR, unit.photo_path))
+    if not path.startswith(os.path.realpath(YARD_PHOTO_DIR) + os.sep) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(path, media_type=YARD_PHOTO_TYPES.get(os.path.splitext(path)[1], "application/octet-stream"),
+                        headers={"Content-Disposition": "inline", "Cache-Control": "private, max-age=86400"})
+
+def yard_photo_map_cached(db):
+    """One photo lookup per request session."""
+    if "_yard_photos" not in db.info:
+        db.info["_yard_photos"] = yard_photo_map(db)
+    return db.info["_yard_photos"]

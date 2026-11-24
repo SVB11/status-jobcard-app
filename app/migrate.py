@@ -7,6 +7,7 @@ NEW_COLUMNS = {
         "password_changed_at": "DATETIME",
         "supplier_company": "VARCHAR",
         "yard_access": "BOOLEAN DEFAULT 0",
+        "stock_manager": "BOOLEAN DEFAULT 0",
     },
     "job_cards": {
         "vin_number": "VARCHAR",
@@ -71,6 +72,10 @@ NEW_COLUMNS = {
         "update_requested_at": "DATETIME",
         "update_requested_by": "VARCHAR",
         "update_request_note": "TEXT",
+    },
+    "stock_takes": {
+        "source": "VARCHAR",
+        "upload_id": "INTEGER",
     },
     "wash_requests": {
         "stock_number": "VARCHAR",

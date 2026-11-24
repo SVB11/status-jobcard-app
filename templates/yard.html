@@ -21,6 +21,24 @@
 .yard-by {font-size:10px;line-height:1.25;letter-spacing:0;color:#9aa6b4;margin-top:2px;padding:0 1px;overflow-wrap:anywhere}
 .yard-note {color:#9aa6b4;font-size:13px;margin:8px 0}
 #yardError {color:#fca5a5;margin:12px 0}
+.yard-row.unit {grid-template-columns:46px 74px 1fr;padding-left:5px}
+.yard-row.unit h2 {flex-direction:column;align-items:flex-start;justify-content:center;font-size:13.5px}
+.yard-row.unit h2 small {display:block;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted,#9aa6b4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:74px}
+.yard-pic {width:46px;height:42px;border-radius:8px;overflow:hidden;background:var(--surface-2,#1a2028);border:1px solid var(--line-strong,#3a4450);display:flex;align-items:center;justify-content:center;font-size:9.5px;line-height:1.05;color:var(--muted,#9aa6b4);text-align:center;padding:0;min-height:42px}
+.yard-pic img {width:100%;height:100%;object-fit:cover}
+button.yard-pic {cursor:pointer}
+.yard-sec {grid-column:1/-1;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#9aa6b4);margin:8px 0 2px}
+.yard-find {background:var(--surface,#12161c);border:1px solid var(--line,#2a3340);border-radius:12px;padding:8px 10px;margin:14px 0}
+.yard-find summary {font-weight:800;cursor:pointer;min-height:40px;display:flex;align-items:center;color:var(--link,#7ec2ff)}
+.yard-find label {display:block;font-size:12px;font-weight:700;color:var(--muted,#9aa6b4);margin:7px 0 3px}
+.yard-find input,.yard-find select {width:100%;border-radius:9px;border:1px solid var(--line-strong,#3a4450);padding:6px 10px}
+.yard-find .two {display:grid;grid-template-columns:1fr 1fr;gap:0 8px}
+.yard-find button[type=submit] {margin-top:10px;min-height:44px;padding:8px 14px;border-radius:9px;background:var(--blue,#005CAA);color:#fff;font-weight:800}
+.yard-pending {display:grid;gap:5px}
+.yard-pending article {display:grid;grid-template-columns:56px 1fr;gap:8px;align-items:center;background:var(--surface,#12161c);border:1px solid var(--line,#2a3340);border-left:4px solid var(--amber,#D4A017);border-radius:10px;padding:5px}
+.yard-pending .yard-pic {width:56px;height:56px}
+.yard-pending b {color:var(--link,#7ec2ff)}
+.yard-pending div {font-size:12px;line-height:1.3;min-width:0}
 @media(max-width:480px){.yard-summary div{padding:9px;font-size:12px}.yard-summary strong{font-size:23px}.yard-toolbar select{width:100%}.yard-grid{grid-template-columns:1fr}}
 @media(max-width:360px){.yard-row{padding:6px;column-gap:6px;grid-template-columns:56px 1fr}.yard-row h2{font-size:14px}.yard-tick{font-size:12px;gap:4px;padding:4px}.yard-tick .tick-symbol{font-size:15px}.yard-by{font-size:10px}}
 </style>
@@ -40,9 +58,30 @@
 <div id="yardError" role="alert"></div>
 <p id="visibleCount" class="yard-note"></p>
 <div id="yardRows" class="yard-grid" aria-live="polite">Loading yard check…</div>
+<div id="listExtras" hidden>
+  <h2 class="nl-h1 text-base font-bold" style="margin-top:18px">Waiting for approval <span id="pendingCount"></span></h2>
+  <p class="yard-note" id="pendingNote">Vehicles found in the yard that are not on the stock list.{% if can_manage %} <a href="/yard/stock#pending">Approve or reject on the Stock list page</a>.{% endif %}</p>
+  <div id="pendingRows" class="yard-pending"></div>
+  <details class="yard-find" id="findBox">
+    <summary>＋ Report a vehicle not on the list</summary>
+    <form id="findForm" autocomplete="off">
+      <div class="two">
+        <div><label for="f_stock">WS / stock no *</label><input id="f_stock" name="stock_number" required maxlength="32"></div>
+        <div><label for="f_section">Section *</label><select id="f_section" name="section" required><option value="">Choose…</option>{% for s in sections %}<option>{{ s }}</option>{% endfor %}</select></div>
+        <div><label for="f_make">Make</label><input id="f_make" name="make" maxlength="120"></div>
+        <div><label for="f_reg">Registration</label><input id="f_reg" name="registrations" maxlength="120"></div>
+      </div>
+      <label for="f_desc">Description</label><input id="f_desc" name="description" maxlength="600" placeholder="e.g. white tanker trailer, back row">
+      <label for="f_photo">Photo *</label><input id="f_photo" type="file" accept="image/*" capture="environment" required>
+      <button type="submit" id="findBtn">Send for approval</button>
+    </form>
+  </details>
+</div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/js/yard_photo.js?v=1"></script>
 <script>
+const canManage = {{ 'true' if can_manage else 'false' }};
 let yardData = null;
 const yardHeaders = () => ({'Authorization':'Bearer '+(localStorage.getItem('token')||''),'Content-Type':'application/json'});
 const yEsc = v => String(v == null ? '' : v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -75,8 +114,54 @@ function renderYard(){
     document.getElementById('yardSummary').innerHTML='<div><strong>'+s.missing+'</strong>WS numbers missing a tick</div><div><strong>'+s.on_site+' / '+s.total+'</strong>On site</div><div><strong>'+s.stickers+' / '+s.total+'</strong>Stickers fitted</div>';
     const rows=yardData.rows.filter(r=>!document.getElementById('missingOnly').checked||!r.on_site||!r.sticker_fitted);
     document.getElementById('visibleCount').textContent='Showing '+rows.length+' of '+s.total+' WS numbers';
+    const listMode=yardData.mode==='list'||yardData.round.source==='list';
+    document.getElementById('listExtras').hidden=!(listMode&&!ro);
+    if(listMode){renderUnits(rows,ro);renderPending();return;}
     document.getElementById('yardRows').innerHTML=rows.map(r=>'<article class="yard-row" data-job="'+r.job_id+'"><h2>'+yEsc(r.label)+'</h2><div class="yard-ticks">'+[['on_site','On site','on_site'],['sticker_fitted','WS sticker fitted','sticker']].map(([field,label,prefix])=>'<div><button class="yard-tick w-full" type="button" '+(ro?'disabled':'onclick="tickYard('+r.job_id+',\''+field+'\','+(!r[field])+')"')+' aria-pressed="'+r[field]+'" aria-label="'+yEsc(label+' '+r.label)+'"><span class="tick-symbol">'+(r[field]?'✓':'○')+'</span>'+label+'</button><div class="yard-by">'+(r[prefix+'_at']?yEsc((r[field]?'Checked':'Unchecked')+' · '+r[prefix+'_by'])+'<br>'+yEsc(yTime(r[prefix+'_at'])):'Not checked yet')+'</div></div>').join('')+'</div></article>').join('')||'<p>Nothing missing. All checked.</p>';
 }
+function unitTicks(r,ro){
+    return [['on_site','On site','on_site'],['sticker_fitted','WS sticker fitted','sticker']].map(([field,label,prefix])=>'<div><button class="yard-tick w-full" type="button" '+(ro?'disabled':'onclick="tickUnit('+r.unit_id+',\''+field+'\','+(!r[field])+')"')+' aria-pressed="'+r[field]+'" aria-label="'+yEsc(label+' '+r.stock_number)+'"><span class="tick-symbol">'+(r[field]?'✓':'○')+'</span>'+label+'</button><div class="yard-by">'+(r[prefix+'_at']?yEsc((r[field]?'Checked':'Unchecked')+' · '+r[prefix+'_by'])+'<br>'+yEsc(yTime(r[prefix+'_at'])):'Not checked yet')+'</div></div>').join('');
+}
+function unitPic(r,ro){
+    const inner=r.photo_url?'<img src="'+yEsc(r.photo_url)+'" alt="" loading="lazy">':(canManage&&!ro?'📷<br>Add':'No<br>photo');
+    return (canManage&&!ro)?'<button type="button" class="yard-pic" title="Add or replace photo" aria-label="'+yEsc((r.photo_url?'Replace photo ':'Add photo ')+r.stock_number)+'" onclick="unitPhoto('+r.unit_id+',this)">'+inner+'</button>':'<span class="yard-pic">'+inner+'</span>';
+}
+function renderUnits(rows,ro){
+    let html='',last=null;
+    rows.forEach(r=>{
+        if(r.section!==last){html+='<div class="yard-sec">'+yEsc(r.section||'')+'</div>';last=r.section;}
+        const sub=[r.make,r.model].filter(Boolean).join(' ')||r.description||'';
+        html+='<article class="yard-row unit" data-unit="'+r.unit_id+'">'+unitPic(r,ro)+'<h2>'+yEsc(r.stock_number)+'<small title="'+yEsc(sub)+'">'+yEsc(sub)+'</small></h2><div class="yard-ticks">'+unitTicks(r,ro)+'</div></article>';
+    });
+    document.getElementById('yardRows').innerHTML=html||'<p>Nothing missing. All checked.</p>';
+}
+function renderPending(){
+    const list=yardData.pending||[];
+    document.getElementById('pendingCount').textContent=list.length?'('+list.length+')':'';
+    document.getElementById('pendingRows').innerHTML=list.map(u=>'<article>'+'<span class="yard-pic">'+(u.photo_url?'<img src="'+yEsc(u.photo_url)+'" alt="">':'')+'</span><div><b>'+yEsc(u.stock_number)+'</b> · '+yEsc(u.section)+'<br>'+yEsc([u.make,u.registrations,u.description].filter(Boolean).join(' · '))+'<br><span class="yard-by">Found by '+yEsc(u.created_by)+' · '+yEsc(yTime(u.listed_at))+'</span></div></article>').join('')||'<p class="yard-note">Nothing waiting.</p>';
+}
+async function tickUnit(unit,field,checked){
+    document.querySelectorAll('.yard-tick').forEach(b=>b.disabled=true);
+    try{await yFetch('/api/yard/'+yardData.round.id+'/tick',{method:'POST',body:JSON.stringify({unit_id:unit,field,checked})});await loadRound();}
+    catch(e){document.getElementById('yardError').textContent=e.message;await loadRound();}
+}
+async function unitPhoto(unit,btn){
+    try{btn.disabled=true;await window.stsYard.replaceUnitPhoto(unit);}
+    catch(e){document.getElementById('yardError').textContent=e.message;}
+    await loadRound();
+}
+document.getElementById('findForm').addEventListener('submit',async ev=>{
+    ev.preventDefault();
+    const f=document.getElementById('f_photo').files[0];
+    if(!f){document.getElementById('yardError').textContent='A photo is required.';return;}
+    const btn=document.getElementById('findBtn');btn.disabled=true;
+    try{
+        const fd=new FormData(ev.target);fd.append('photo',await window.stsYard.shrink(f),'photo.jpg');
+        await window.stsYard.send('/api/yard/stock/finds',fd);
+        ev.target.reset();document.getElementById('findBox').open=false;
+        document.getElementById('yardError').textContent='';await loadRound();
+    }catch(e){document.getElementById('yardError').textContent=e.message;}finally{btn.disabled=false;}
+});
 async function tickYard(job,field,checked){
     document.querySelectorAll('.yard-tick').forEach(b=>b.disabled=true);
     try{await yFetch('/api/yard/'+yardData.round.id+'/tick',{method:'POST',body:JSON.stringify({job_id:job,field,checked})});await loadRound();}

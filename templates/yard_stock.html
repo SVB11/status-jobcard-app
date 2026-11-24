@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}Stock list{% endblock %}
+{% block header_right %}<a href="/logout" class="text-sm">Logout</a>{% endblock %}
+{% block head %}
+<style>
+.ys-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 10px}
+.ys-tabs button{flex:1 1 auto;min-height:40px;padding:6px 10px;border-radius:9px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);font-weight:700;font-size:13px}
+.ys-tabs button[aria-selected=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+.ys-tabs button[aria-selected=true] .ys-count{background:#fff;color:#005CAA}
+.ys-count{display:inline-block;min-width:20px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--amber-soft);color:var(--amber-text);font-size:12px}
+.ys-panel{display:none}.ys-panel.on{display:block}
+.ys-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;margin:8px 0}
+.ys-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.ys-bar input[type=search],.ys-bar select{flex:1 1 150px;min-height:42px;border-radius:9px;border:1px solid var(--line-strong);padding:6px 10px}
+.ys-btn{min-height:40px;padding:6px 12px;border-radius:9px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);font-weight:700;font-size:13px}
+.ys-btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.ys-btn.warn{background:var(--amber-soft);border-color:var(--amber);color:var(--amber-text)}
+.ys-btn:disabled{opacity:.55}
+.ys-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:5px}
+.ys-row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:5px;display:grid;grid-template-columns:56px 1fr auto;gap:8px;align-items:center;min-width:0}
+.ys-thumb{width:56px;height:56px;border-radius:9px;object-fit:cover;background:var(--surface-2);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;line-height:1.1;padding:0;overflow:hidden}
+.ys-thumb img{width:100%;height:100%;object-fit:cover}
+.ys-main{min-width:0}
+.ys-ws{font-weight:800;color:var(--link);font-size:14px;line-height:1.2}
+.ys-sub{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.ys-meta{font-size:11px;color:var(--muted);line-height:1.25;overflow-wrap:anywhere}
+.ys-acts{display:flex;flex-direction:column;gap:4px}
+.ys-acts .ys-btn{min-height:36px;padding:4px 8px;font-size:12px;white-space:nowrap}
+.ys-badge{display:inline-block;font-size:10.5px;font-weight:700;padding:0 6px;border-radius:6px;border:1px solid var(--line-strong);color:var(--muted);vertical-align:1px}
+.ys-badge.amber{border-color:var(--amber);color:var(--amber-text);background:var(--amber-soft)}
+.ys-issue{font-size:11.5px;color:var(--amber-text);line-height:1.3}
+.ys-prow{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line-strong);border-radius:10px;padding:6px 8px;display:grid;grid-template-columns:30px 1fr;gap:6px;align-items:start}
+.ys-prow.flag{border-left-color:var(--amber)}
+.ys-prow input{width:22px;height:22px;min-height:22px;margin-top:2px}
+.ys-section{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:12px 0 4px}
+.ys-form label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:8px 0 3px}
+.ys-form input,.ys-form select,.ys-form textarea{width:100%;border-radius:9px;border:1px solid var(--line-strong);padding:6px 10px}
+.ys-grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 8px}
+.ys-photo-pick{display:flex;gap:10px;align-items:center;margin-top:4px}
+.ys-photo-pick img{width:72px;height:72px;object-fit:cover;border-radius:9px;border:1px solid var(--line-strong)}
+.ys-big{width:96px;height:96px}
+.ys-note{color:var(--muted);font-size:13px;margin:6px 0}
+#ysError{color:var(--amber-text);margin:8px 0;font-weight:700}
+#ysOk{color:var(--green-text);margin:8px 0;font-weight:700}
+.ys-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.ys-sum div{background:var(--surface-2);border-radius:9px;padding:6px;font-size:11px;color:var(--muted);text-align:center}
+.ys-sum strong{display:block;font-size:19px;color:var(--link)}
+@media(max-width:400px){.ys-list{grid-template-columns:1fr}.ys-row{grid-template-columns:52px 1fr auto;gap:6px}.ys-thumb{width:52px;height:52px}}
+.ys-thumb.ys-big{width:96px;height:96px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="nl-overline">Yard check · Stock list</div>
+<h1 class="nl-h1 text-2xl font-bold">Stock list</h1>
+<p class="ys-note">The yard check works from this list. Prices and CRM details are never read or stored.</p>
+<div class="ys-tabs" role="tablist">
+  <button type="button" role="tab" data-tab="list">List <span class="ys-count" id="cActive">–</span></button>
+  <button type="button" role="tab" data-tab="upload">Upload</button>
+  <button type="button" role="tab" data-tab="add">Add vehicle</button>
+  <button type="button" role="tab" data-tab="pending">Approvals <span class="ys-count" id="cPending">–</span></button>
+  <button type="button" role="tab" data-tab="removed">Removed</button>
+</div>
+<div id="ysError" role="alert"></div><div id="ysOk" role="status"></div>
+
+<section class="ys-panel" id="p-list">
+  <div class="ys-bar">
+    <input type="search" id="q" placeholder="Search WS, make, reg" aria-label="Search the stock list">
+    <select id="secFilter" aria-label="Section"><option value="">All sections</option>{% for s in sections %}<option>{{ s }}</option>{% endfor %}</select>
+    <label class="ys-note" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="noPhoto" style="width:20px;height:20px;min-height:20px"> No photo yet</label>
+  </div>
+  <p class="ys-note" id="listCount"></p>
+  <div class="ys-list" id="activeRows">Loading…</div>
+</section>
+
+<section class="ys-panel" id="p-upload">
+  <div class="ys-card">
+    <p class="ys-note">Upload the Master Stock Sheet as a PDF (Microsoft Print to PDF) or the .xlsx file. You'll see a preview first; nothing changes until you tap Confirm.</p>
+    <div class="ys-bar">
+      <input type="file" id="stockFile" accept=".pdf,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Stock list file">
+      <button type="button" class="ys-btn primary" id="uploadBtn">Read file</button>
+    </div>
+  </div>
+  <div id="preview"></div>
+</section>
+
+<section class="ys-panel" id="p-add">
+  <form class="ys-card ys-form" id="addForm" autocomplete="off">
+    <p class="ys-note">Add one vehicle to the yard list. A photo is required.</p>
+    <div class="ys-grid2">
+      <div><label for="a_stock">WS / stock no *</label><input id="a_stock" name="stock_number" required maxlength="32" placeholder="WS5712"></div>
+      <div><label for="a_section">Section *</label><select id="a_section" name="section" required><option value="">Choose…</option>{% for s in sections %}<option>{{ s }}</option>{% endfor %}</select></div>
+      <div><label for="a_year">Year</label><input id="a_year" name="year" inputmode="numeric" maxlength="10"></div>
+      <div><label for="a_make">Make</label><input id="a_make" name="make" maxlength="120"></div>
+      <div><label for="a_model">Model</label><input id="a_model" name="model" maxlength="120"></div>
+      <div><label for="a_reg">Registration(s)</label><input id="a_reg" name="registrations" maxlength="120"></div>
+    </div>
+    <label for="a_desc">Description</label><input id="a_desc" name="description" maxlength="600">
+    <label for="a_av">Availability</label><select id="a_av" name="availability"><option>AVAILABLE</option><option>APPROVAL</option></select>
+    <label for="a_photo">Photo *</label>
+    <div class="ys-photo-pick"><img id="a_prev" alt="" hidden><input type="file" id="a_photo" accept="image/*" capture="environment" required></div>
+    <div class="ys-bar"><button type="submit" class="ys-btn primary" id="addBtn">Add to the list</button></div>
+  </form>
+</section>
+
+<section class="ys-panel" id="p-pending">
+  <p class="ys-note">Vehicles reported from the yard. Approve to put them on the list, or reject with a note.</p>
+  <div id="pendingRows" class="ys-list">Loading…</div>
+</section>
+
+<section class="ys-panel" id="p-removed">
+  <p class="ys-note">Removed vehicles stay on record (who, when and why). Put one back if it was removed by mistake.</p>
+  <div id="removedRows" class="ys-list">Loading…</div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/yard_photo.js?v=1"></script>
+<script>
+const Y = window.stsYard, esc = Y.esc;
+const SECTIONS = {{ sections|list|tojson }};
+const $ = id => document.getElementById(id);
+let active = [], preview = null;
+function say(err, ok){ $('ysError').textContent = err || ''; $('ysOk').textContent = ok || ''; }
+async function api(url, opts){
+  opts = opts || {};
+  const r = await fetch(url, Object.assign({headers:{'Authorization':'Bearer '+(localStorage.getItem('token')||''),'Content-Type':'application/json'}}, opts));
+  if (r.status === 401) { location.href = '/login'; throw new Error('Sign in again.'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || 'Could not save.');
+  return d;
+}
+function showTab(t){
+  if (!document.getElementById('p-'+t)) t = 'list';
+  document.querySelectorAll('.ys-tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+  document.querySelectorAll('.ys-panel').forEach(p => p.classList.toggle('on', p.id === 'p-'+t));
+  if (location.hash !== '#'+t) history.replaceState(null, '', '#'+t);
+  say();
+  if (t === 'list') loadActive(); if (t === 'pending') loadPending(); if (t === 'removed') loadRemoved();
+}
+document.querySelectorAll('.ys-tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function thumb(u, big){
+  const cls = 'ys-thumb' + (big ? ' ys-big' : '');
+  return u.photo_url ? '<span class="'+cls+'"><img src="'+esc(u.photo_url)+'" alt="Photo '+esc(u.stock_number)+'" loading="lazy"></span>'
+                     : '<span class="'+cls+'">No photo</span>';
+}
+function line(u){ return [u.year, u.make, u.model].filter(Boolean).join(' ') || u.description || ''; }
+function setCounts(c){ if (!c) return; $('cActive').textContent = c.active; $('cPending').textContent = c.pending; }
+
+async function loadActive(){
+  try { const d = await api('/api/yard/stock/units?status=active'); active = d.units; setCounts(d.counts); renderActive(); }
+  catch(e){ say(e.message); }
+}
+function renderActive(){
+  const q = $('q').value.trim().toUpperCase(), sec = $('secFilter').value, np = $('noPhoto').checked;
+  const rows = active.filter(u => (!sec || u.section === sec) && (!np || !u.photo_url) &&
+     (!q || [u.stock_number,u.make,u.model,u.registrations,u.description].join(' ').toUpperCase().includes(q)));
+  $('listCount').textContent = rows.length + ' of ' + active.length + ' vehicles · ' + active.filter(u => !u.photo_url).length + ' without a photo';
+  let html = '', last = null;
+  rows.forEach(u => {
+    if (u.section !== last) { html += '<div class="ys-section" style="grid-column:1/-1">'+esc(u.section || 'No section')+'</div>'; last = u.section; }
+    html += '<article class="ys-row" data-unit="'+u.unit_id+'">' + thumb(u) +
+      '<div class="ys-main"><div class="ys-ws">'+esc(u.stock_number)+(u.availability && u.availability !== 'AVAILABLE' ? ' <span class="ys-badge amber">'+esc(u.availability)+'</span>' : '')+'</div>' +
+      '<div class="ys-sub">'+esc(line(u))+'</div>' +
+      '<div class="ys-meta">'+esc(u.registrations || 'No reg')+(u.photo_at ? ' · Photo '+esc(u.photo_by||'')+' '+esc(Y.time(u.photo_at)) : '')+'</div></div>' +
+      '<div class="ys-acts"><button type="button" class="ys-btn primary" onclick="photo('+u.unit_id+',this)">📷 '+(u.photo_url ? 'Replace photo' : 'Add photo')+'</button>' +
+      '<button type="button" class="ys-btn" onclick="removeUnit('+u.unit_id+')">Remove</button></div></article>';
+  });
+  $('activeRows').innerHTML = html || '<p class="ys-note">No vehicles on the list yet. Upload the stock list or add a vehicle.</p>';
+}
+['q','secFilter','noPhoto'].forEach(id => $(id).addEventListener('input', renderActive));
+async function photo(id, btn){
+  try { btn.disabled = true; btn.textContent = 'Saving…';
+    const d = await Y.replaceUnitPhoto(id);
+    if (d) { say('', 'Photo saved.'); }
+  } catch(e){ say(e.message); }
+  await loadActive();
+}
+async function removeUnit(id){
+  const u = active.find(x => x.unit_id === id); if (!u) return;
+  const reason = prompt('Why does '+u.stock_number+' come off the yard list? (e.g. sold, moved to CWS)');
+  if (reason === null) return;
+  try { await api('/api/yard/stock/units/'+id+'/remove', {method:'POST', body: JSON.stringify({reason})}); say('', u.stock_number+' removed.'); }
+  catch(e){ say(e.message); }
+  loadActive();
+}
+
+/* Upload + preview */
+$('uploadBtn').onclick = async () => {
+  const f = $('stockFile').files[0]; if (!f) { say('Choose the PDF or .xlsx file first.'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  $('uploadBtn').disabled = true; $('uploadBtn').textContent = 'Reading…';
+  try { preview = await Y.send('/api/yard/stock/upload', fd); renderPreview(); say(); }
+  catch(e){ say(e.message); }
+  finally { $('uploadBtn').disabled = false; $('uploadBtn').textContent = 'Read file'; }
+};
+function renderPreview(){
+  if ($('flagOnly')) window._flagOnly = $('flagOnly').checked;
+  const p = preview, c = p.counts || {};
+  const flagged = p.rows.filter(r => r.issues.length).length;
+  let h = '<div class="ys-card"><div class="ys-sum">' + SECTIONS.map(s => '<div><strong>'+(c[s] || 0)+'</strong>'+esc(s)+'</div>').join('') + '</div>' +
+    '<p class="ys-note">'+p.rows.length+' vehicles read from '+esc(p.file_name)+'. <b style="color:var(--amber-text)">'+flagged+' need a look</b> (amber). Untick any line that should not be on the list.</p>' +
+    (p.warnings || []).map(w => '<div class="ys-issue">⚠ '+esc((w.page ? 'Page '+w.page+': ' : w.row ? 'Row '+w.row+': ' : '')+(w.issue || w))+'</div>').join('') +
+    (p.dropping && p.dropping.length ? '<p class="ys-note">Coming off the list (not in this file): <b>'+p.dropping.map(esc).join(', ')+'</b></p>' : '') +
+    '<div class="ys-bar"><label class="ys-note" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="flagOnly" style="width:20px;height:20px;min-height:20px" onchange="renderPreview()"'+(window._flagOnly?' checked':'')+'> Only lines that need a look</label></div></div><div class="ys-list">';
+  let last = null;
+  p.rows.forEach((r, i) => {
+    if (window._flagOnly && !r.issues.length) return;
+    const d = r.data;
+    if (d.section !== last) { h += '<div class="ys-section" style="grid-column:1/-1">'+esc(d.section || 'No section')+'</div>'; last = d.section; }
+    h += '<label class="ys-prow'+(r.issues.length ? ' flag' : '')+'"><input type="checkbox" data-i="'+i+'"'+(r.include ? ' checked' : '')+' onchange="preview.rows['+i+'].include=this.checked;countIncl()">' +
+      '<div class="ys-main"><div class="ys-ws">'+esc(d.stock_number || '(no stock no)')+(r.existing ? ' <span class="ys-badge">on list'+(r.has_photo ? ' · photo kept' : '')+'</span>' : ' <span class="ys-badge">new</span>')+'</div>' +
+      '<div class="ys-sub">'+esc([d.year, d.make, d.model].filter(Boolean).join(' '))+'</div>' +
+      '<div class="ys-meta">'+esc(d.description)+' · '+esc(d.registrations || 'No reg')+' · '+esc(d.availability)+'</div>' +
+      r.issues.map(x => '<div class="ys-issue">⚠ '+esc(x)+'</div>').join('') + '</div></label>';
+  });
+  h += '</div><div class="ys-card"><p class="ys-note" id="inclCount"></p><div class="ys-bar">' +
+       '<button type="button" class="ys-btn primary" id="confirmBtn" onclick="confirmUpload()">Confirm and start new yard check</button>' +
+       '<button type="button" class="ys-btn" onclick="discardUpload()">Discard</button></div></div>';
+  $('preview').innerHTML = h; countIncl();
+}
+function countIncl(){ const n = preview.rows.filter(r => r.include).length; const el = $('inclCount'); if (el) el.textContent = n + ' of ' + preview.rows.length + ' lines will go on the list.'; }
+async function confirmUpload(){
+  const include = preview.rows.map((r, i) => r.include ? i : -1).filter(i => i >= 0);
+  if (!confirm('Put '+include.length+' vehicles on the list?\n\nThe current yard check closes as it stands (kept in history) and a fresh one starts from this list.')) return;
+  $('confirmBtn').disabled = true;
+  try { const d = await api('/api/yard/stock/upload/'+preview.upload_id+'/confirm', {method:'POST', body: JSON.stringify({include})});
+        preview = null; $('preview').innerHTML = ''; $('stockFile').value = '';
+        say('', 'List confirmed: '+d.added+' new, '+d.kept+' kept, '+d.dropped+' off the list. New yard check started.'); loadActive(); }
+  catch(e){ say(e.message); $('confirmBtn').disabled = false; }
+}
+async function discardUpload(){
+  try { await api('/api/yard/stock/upload/'+preview.upload_id+'/discard', {method:'POST'}); } catch(e){}
+  preview = null; $('preview').innerHTML = ''; $('stockFile').value = ''; say('', 'Preview discarded. Nothing changed.');
+}
+
+/* Add vehicle */
+$('a_photo').addEventListener('change', () => { const f = $('a_photo').files[0]; const img = $('a_prev');
+  if (f) { img.src = URL.createObjectURL(f); img.hidden = false; } else img.hidden = true; });
+$('addForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const f = $('a_photo').files[0]; if (!f) { say('A photo is required.'); return; }
+  $('addBtn').disabled = true;
+  try {
+    const fd = new FormData($('addForm')); fd.delete('photo'); fd.append('photo', await Y.shrink(f), 'photo.jpg');
+    const d = await Y.send('/api/yard/stock/units', fd);
+    $('addForm').reset(); $('a_prev').hidden = true; say('', d.unit.stock_number+' added to the list.');
+  } catch(e){ say(e.message); } finally { $('addBtn').disabled = false; }
+};
+
+/* Approvals */
+async function loadPending(){
+  try { const d = await api('/api/yard/stock/units?status=pending'); setCounts(d.counts);
+    $('pendingRows').innerHTML = d.units.map(u => '<article class="ys-row" style="grid-template-columns:96px 1fr" data-unit="'+u.unit_id+'">'+thumb(u, true) +
+      '<div class="ys-main"><div class="ys-ws">'+esc(u.stock_number)+' <span class="ys-badge amber">Waiting</span></div>' +
+      '<div class="ys-sub">'+esc(line(u))+'</div><div class="ys-meta">'+esc(u.section)+' · '+esc(u.registrations || 'No reg')+'</div>' +
+      '<div class="ys-meta">Found by '+esc(u.created_by)+' · '+esc(Y.time(u.listed_at))+'</div>' +
+      '<div class="ys-bar" style="margin:4px 0 0"><button type="button" class="ys-btn primary" onclick="decide('+u.unit_id+',\'approve\')">Approve</button>' +
+      '<button type="button" class="ys-btn warn" onclick="decide('+u.unit_id+',\'reject\')">Reject</button></div></div></article>').join('') ||
+      '<p class="ys-note">Nothing waiting for approval.</p>';
+  } catch(e){ say(e.message); }
+}
+async function decide(id, decision){
+  let note = '';
+  if (decision === 'reject') { note = prompt('Why is this rejected?'); if (note === null) return; }
+  try { await api('/api/yard/stock/units/'+id+'/decision', {method:'POST', body: JSON.stringify({decision, note})}); say('', decision === 'approve' ? 'Approved: now on the list.' : 'Rejected.'); }
+  catch(e){ say(e.message); }
+  loadPending();
+}
+
+/* Removed */
+async function loadRemoved(){
+  try { const d = await api('/api/yard/stock/units?status=removed'); setCounts(d.counts);
+    const kind = {manual:'Removed', delivered:'Delivered', replaced:'Not on new list'};
+    $('removedRows').innerHTML = d.units.map(u => '<article class="ys-row" data-unit="'+u.unit_id+'">'+thumb(u) +
+      '<div class="ys-main"><div class="ys-ws">'+esc(u.stock_number)+' <span class="ys-badge">'+esc(u.status === 'rejected' ? 'Rejected find' : (kind[u.removed_kind] || u.removed_kind || ''))+'</span></div>' +
+      '<div class="ys-sub">'+esc(line(u))+'</div>' +
+      '<div class="ys-meta">'+esc(u.status === 'rejected' ? (u.decided_by+' · '+Y.time(u.decided_at)+' · '+(u.decision_note||'')) : ((u.removed_by||'')+' · '+Y.time(u.removed_at)+' · '+(u.removed_reason||'')))+'</div></div>' +
+      (u.status === 'rejected' ? '<span></span>' : '<div class="ys-acts"><button type="button" class="ys-btn" onclick="restoreUnit('+u.unit_id+')">Put back</button></div>') + '</article>').join('') ||
+      '<p class="ys-note">Nothing removed yet.</p>';
+  } catch(e){ say(e.message); }
+}
+async function restoreUnit(id){
+  try { await api('/api/yard/stock/units/'+id+'/restore', {method:'POST'}); say('', 'Back on the list.'); } catch(e){ say(e.message); }
+  loadRemoved();
+}
+window.addEventListener('hashchange', () => showTab((location.hash || '#list').slice(1)));
+showTab((location.hash || '#list').slice(1));
+</script>
+{% endblock %}

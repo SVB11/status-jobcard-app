@@ -145,6 +145,11 @@
                         ? '<span class="text-xs px-2 py-1 border rounded bg-white text-gray-500">Yard check on</span>'
                         : '<button type="button" onclick="toggleYardAccess(' + u.id + ', ' + (u.yard_access ? 'false' : 'true') + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' +
                           (u.yard_access ? 'Yard check on' : 'Yard check off') + '</button>') +
+                    ((u.role === 'supplier' || u.role === 'yard') ? '' :
+                        ((u.role === 'admin' || u.role === 'accounts')
+                            ? '<span class="text-xs px-2 py-1 border rounded bg-white text-gray-500">Stock list on</span>'
+                            : '<button type="button" onclick="toggleStockManager(' + u.id + ', ' + (u.stock_manager ? 'false' : 'true') + ')" class="text-xs px-2 py-1 border rounded hover:bg-white" title="Upload the stock list, add or remove vehicles, add photos and approve yard finds">' +
+                              (u.stock_manager ? 'Stock list on' : 'Stock list off') + '</button>')) +
                     '<button onclick="toggleUser(' + u.id + ')" class="text-xs px-2 py-1 border rounded hover:bg-white">' + 
                     (u.is_active ? 'Deactivate' : 'Activate') + '</button>' +
                     '<button onclick="resetPassword(' + u.id + ', \'' + u.username + '\')" class="text-xs px-2 py-1 border rounded hover:bg-white">Reset PW</button>' +
@@ -217,6 +222,21 @@
             });
             const data = await res.json().catch(function(){ return {}; });
             if (!res.ok) { alert(data.detail || 'Could not update Yard check'); return; }
+            loadUsers();
+        } catch (err) {
+            alert('Failed');
+        }
+    }
+
+    async function toggleStockManager(id, enabled) {
+        try {
+            const res = await fetch('/api/admin/users/' + id + '/stock-manager', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stock_manager: !!enabled })
+            });
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) { alert(data.detail || 'Could not update Stock list access'); return; }
             loadUsers();
         } catch (err) {
             alert('Failed');
