@@ -40,14 +40,15 @@
         '/jobs': '<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
         '/locations': '<svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
         '/stock': '<svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
+        '/yard/stock': '<svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
         '/yard': '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8l2 2 4-4"/><path d="M8 15h8"/></svg>',
         '/jobs/create': '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>'
     };
-    var LABELS = { '/dashboard': 'Dashboard', '/supplier': 'Dashboard', '/jobs': 'Jobs', '/locations': 'Locations', '/stock': 'Stock', '/yard': 'Yard check', '/jobs/create': 'Create' };
+    var LABELS = { '/dashboard': 'Dashboard', '/supplier': 'Dashboard', '/jobs': 'Jobs', '/locations': 'Locations', '/stock': 'Stock', '/yard/stock': 'Stock list', '/yard': 'Yard check', '/jobs/create': 'Create' };
     function buildTabbar() {
         var nav = document.querySelector('header .nav-scroll');
         if (!nav || document.getElementById('tabbar')) return;
-        var want = ['a[href="/dashboard"], a[href="/supplier"]', '#navJobs', '#navLocations', '#navStock', '#navCreate'];
+        var want = ['a[href="/dashboard"], a[href="/supplier"]', '#navJobs', '#navLocations', '#navStockList, #navStock', '#navCreate'];
         var picked = [];
         want.forEach(function (sel) {
             var a = nav.querySelector(sel);
