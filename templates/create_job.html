@@ -2,6 +2,34 @@
 
 {% block title %}Create Job Card{% endblock %}
 
+{% block head %}
+<style>
+.ws-picker-wrap { position: relative; }
+.ws-picker-hint { font-size: 12px; color: var(--muted, #6b7683); margin: 4px 0 0; }
+#wsPickerList {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 40;
+  margin-top: 2px; max-height: 240px; overflow: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line-strong, #cbd5e1);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  display: none;
+}
+#wsPickerList.open { display: block; }
+#wsPickerList button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; min-height: 44px;
+  border: 0; background: transparent; color: var(--text, #111827);
+  border-bottom: 1px solid var(--line, #e5e7eb);
+  cursor: pointer;
+}
+#wsPickerList button:last-child { border-bottom: 0; }
+#wsPickerList button:hover, #wsPickerList button[aria-selected="true"] { background: var(--surface-2, #f3f4f6); }
+.ws-pick-ws { font-weight: 800; color: var(--link, #025daa); }
+.ws-pick-sub { font-size: 12px; color: var(--muted, #6b7683); }
+</style>
+{% endblock %}
+
 {% block header_right %}
 <div class="flex items-center gap-3">
     <span id="userInfo" class="text-sm text-gray-600"></span>
@@ -29,10 +57,13 @@
         <div>
             <h2 class="text-lg font-semibold text-status-blue border-b pb-2 mb-4">Vehicle Information</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Stock Number (WS####) *</label>
-                    <input type="text" name="stock_number" id="stock_number" required placeholder="e.g. WS5555"
+                <div class="ws-picker-wrap">
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="stock_number">Stock Number (WS####) *</label>
+                    <input type="text" name="stock_number" id="stock_number" required placeholder="e.g. WS5555" autocomplete="off"
+                           aria-autocomplete="list" aria-controls="wsPickerList" aria-expanded="false"
                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-status-blue outline-none uppercase">
+                    <div id="wsPickerList" role="listbox" aria-label="Stock list matches"></div>
+                    <p class="ws-picker-hint">Search the stock list or type a WS number. Picking a vehicle fills the details below; you can still edit them.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Year *</label>
@@ -485,5 +516,97 @@
             submitBtn.textContent = 'Submit Job Card to Workshop';
         }
     });
+
+    function setField(name, value) {
+        const el = document.querySelector('[name="' + name + '"]') || document.getElementById(name);
+        if (el) el.value = value == null ? '' : value;
+    }
+    function fillFromStock(u) {
+        if (!u) return;
+        setField('stock_number', u.stock_number || '');
+        setField('year', u.year || '');
+        setField('vehicle_description', u.vehicle_description || '');
+        setField('main_type', u.main_type || '');
+        setField('sub_type', u.sub_type || '');
+        setField('registration_number', u.registration_number || '');
+        loadTasks();
+        hidePicker();
+    }
+    const wsInput = document.getElementById('stock_number');
+    const wsList = document.getElementById('wsPickerList');
+    let wsTimer = null, wsItems = [], wsHighlight = -1;
+    function hidePicker() {
+        if (!wsList) return;
+        wsList.classList.remove('open');
+        wsList.innerHTML = '';
+        if (wsInput) wsInput.setAttribute('aria-expanded', 'false');
+        wsHighlight = -1;
+    }
+    function showPicker(units) {
+        wsItems = units || [];
+        wsHighlight = -1;
+        if (!wsItems.length) { hidePicker(); return; }
+        wsList.innerHTML = wsItems.map(function(u, i) {
+            const sub = [u.year, u.make, u.model].filter(Boolean).join(' ') || u.description || '';
+            const reg = u.registrations ? ' · ' + u.registrations : '';
+            return '<button type="button" role="option" data-i="' + i + '"><div class="ws-pick-ws">' + esc(u.stock_number) + '</div><div class="ws-pick-sub">' + esc(sub + reg) + '</div></button>';
+        }).join('');
+        wsList.classList.add('open');
+        wsInput.setAttribute('aria-expanded', 'true');
+        Array.prototype.forEach.call(wsList.querySelectorAll('button'), function(btn) {
+            btn.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                fillFromStock(wsItems[parseInt(btn.getAttribute('data-i'), 10)]);
+            });
+        });
+    }
+    async function searchStock(q) {
+        if (!token) return;
+        const url = '/api/yard/stock/picker' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+        const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (r.status === 401) return;
+        const d = await r.json().catch(function(){ return {}; });
+        showPicker(d.units || []);
+    }
+    if (wsInput && wsList) {
+        wsInput.addEventListener('input', function() {
+            const q = wsInput.value;
+            clearTimeout(wsTimer);
+            wsTimer = setTimeout(function(){ searchStock(q); }, 200);
+        });
+        wsInput.addEventListener('focus', function() {
+            searchStock(wsInput.value);
+        });
+        wsInput.addEventListener('keydown', function(ev) {
+            if (!wsList.classList.contains('open')) return;
+            const buttons = wsList.querySelectorAll('button');
+            if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+                ev.preventDefault();
+                if (!buttons.length) return;
+                if (ev.key === 'ArrowDown') wsHighlight = (wsHighlight + 1) % buttons.length;
+                else wsHighlight = (wsHighlight - 1 + buttons.length) % buttons.length;
+                buttons.forEach(function(b, i){ b.setAttribute('aria-selected', i === wsHighlight ? 'true' : 'false'); });
+                buttons[wsHighlight].scrollIntoView({ block: 'nearest' });
+            } else if (ev.key === 'Enter' && wsHighlight >= 0 && wsItems[wsHighlight]) {
+                ev.preventDefault();
+                fillFromStock(wsItems[wsHighlight]);
+            } else if (ev.key === 'Escape') {
+                hidePicker();
+            }
+        });
+        document.addEventListener('click', function(ev) {
+            if (!wsInput.contains(ev.target) && !wsList.contains(ev.target)) hidePicker();
+        });
+    }
+    (async function prefillStockUnit() {
+        if (!token) return;
+        const params = new URLSearchParams(location.search);
+        const id = params.get('stock_unit');
+        if (!id) return;
+        const r = await fetch('/api/yard/stock/picker?unit_id=' + encodeURIComponent(id), { headers: { 'Authorization': 'Bearer ' + token } });
+        const d = await r.json().catch(function(){ return {}; });
+        if (r.ok && d.units && d.units[0]) fillFromStock(d.units[0]);
+    })();
+
 </script>
 {% endblock %}

@@ -85,6 +85,8 @@ async def security_headers(request: Request, call_next):
     request.state.yard_only = bool(user and user.role == "yard")
     request.state.has_yard_access = bool(user and user_has_yard_access(user))
     request.state.is_stock_manager = bool(user and is_stock_manager(user))
+    request.state.can_view_yard_stock = bool(user and can_view_yard_stock(user))
+    request.state.can_start_job = bool(user and can_create_job(user))
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -167,6 +169,10 @@ def render_template(name: str, **context):
         context["has_yard_access"] = bool(getattr(getattr(context.get("request"), "state", None), "has_yard_access", False))
     if "is_stock_manager" not in context:
         context["is_stock_manager"] = bool(getattr(getattr(context.get("request"), "state", None), "is_stock_manager", False))
+    if "can_view_yard_stock" not in context:
+        context["can_view_yard_stock"] = bool(getattr(getattr(context.get("request"), "state", None), "can_view_yard_stock", False))
+    if "can_start_job" not in context:
+        context["can_start_job"] = bool(getattr(getattr(context.get("request"), "state", None), "can_start_job", False))
     template = jinja_env.get_template(name)
     return HTMLResponse(template.render(**context))
 
@@ -5034,6 +5040,58 @@ def require_stock_manager(user):
     if not is_stock_manager(user):
         raise HTTPException(status_code=403, detail="Stock list managers only")
 
+def can_create_job(user) -> bool:
+    """Roles that already get the Create job tab: sales, workshop, admin and accounts."""
+    if not user or not getattr(user, "is_active", True):
+        return False
+    return (getattr(user, "role", "") or "") in ("sales", "workshop", "admin", "accounts")
+
+def can_view_yard_stock(user) -> bool:
+    """Stock list managers plus sales and workshop (view only)."""
+    if not user or not getattr(user, "is_active", True):
+        return False
+    if is_stock_manager(user):
+        return True
+    return (getattr(user, "role", "") or "") in ("sales", "workshop")
+
+def require_yard_stock_viewer(user):
+    if not (can_view_yard_stock(user) or can_create_job(user)):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+# Stock-list section -> closest existing create-job main_type. The form stays editable.
+STOCK_SECTION_TO_MAIN_TYPE = {
+    "TANKERS": "Tanker (other)",
+    "TRUCK TRACTORS": "Truck Tractor",
+    "RIGIDS": "Rigid (other)",
+    "TRAILERS": "Trailer (other)",
+}
+
+def yard_job_prefill(u):
+    """Map an active yard_stock_units row onto the existing create-job field names."""
+    make = (u.make or "").strip()
+    model = (u.model or "").strip()
+    desc = (u.description or "").strip()
+    vehicle_description = " ".join(part for part in (make, model) if part) or desc
+    sub_type = desc if vehicle_description != desc else (model or "")
+    regs = (u.registrations or "").strip()
+    return {
+        "unit_id": u.id,
+        "stock_number": u.stock_number,
+        "year": u.year or "",
+        "vehicle_description": vehicle_description,
+        "main_type": STOCK_SECTION_TO_MAIN_TYPE.get((u.section or "").upper(), ""),
+        "sub_type": sub_type,
+        "registration_number": regs,
+        "vin_number": "",
+        "section": u.section,
+        "make": u.make,
+        "model": u.model,
+        "description": u.description,
+        "registrations": u.registrations,
+        "availability": u.availability,
+        "photo_url": yard_unit_photo_url(u),
+    }
+
 def yard_photo_kind(raw: bytes):
     """Return the file extension from the file's own bytes, never from its name or browser type."""
     if raw[:3] == b"\xff\xd8\xff":
@@ -5246,9 +5304,17 @@ def yard_form_fields(form):
 
 @app.get("/yard/stock", response_class=HTMLResponse)
 async def yard_stock_page(request: Request, current_user: models.User = Depends(auth.get_current_active_user)):
-    if not is_stock_manager(current_user):
+    if not can_view_yard_stock(current_user):
         return RedirectResponse(url="/yard" if user_has_yard_access(current_user) else "/dashboard")
-    return render_template("yard_stock.html", request=request, page_title="Stock list", sections=YARD_SECTIONS)
+    return render_template(
+        "yard_stock.html",
+        request=request,
+        page_title="Stock list",
+        sections=YARD_SECTIONS,
+        is_stock_manager=is_stock_manager(current_user),
+        can_start_job=can_create_job(current_user),
+        view_only=not is_stock_manager(current_user),
+    )
 
 @app.post("/api/yard/stock/upload")
 async def api_yard_stock_upload(file: UploadFile = File(None), db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
@@ -5544,3 +5610,53 @@ def yard_photo_map_cached(db):
     if "_yard_photos" not in db.info:
         db.info["_yard_photos"] = yard_photo_map(db)
     return db.info["_yard_photos"]
+
+
+def yard_active_units_query(db):
+    """Active list vehicles only (not pending, rejected, removed or replaced; delivered units are removed)."""
+    yard_sync_delivered(db)
+    db.commit()
+    units = db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()
+    order = {s: i for i, s in enumerate(YARD_SECTIONS)}
+    units.sort(key=lambda u: (order.get(u.section, 99), u.stock_number or ""))
+    return units
+
+def yard_picker_matches(units, q: str):
+    q = (q or "").strip().upper()
+    q_key = "".join(q.split())
+    if not q:
+        return units
+    out = []
+    for u in units:
+        blob = " ".join([
+            u.stock_number or "",
+            u.make or "",
+            u.model or "",
+            u.description or "",
+            u.registrations or "",
+            u.year or "",
+            u.section or "",
+        ]).upper()
+        key = "".join((u.stock_number or "").split()).upper()
+        if q in blob or (q_key and q_key in key):
+            out.append(u)
+    return out
+
+@app.get("/api/yard/stock/picker")
+async def api_yard_stock_picker(q: str = "", unit_id: int = None, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    """Search or fetch active stock-list vehicles for the create-job picker and view-only list. Login required."""
+    require_yard_stock_viewer(current_user)
+    if unit_id is not None:
+        unit = yard_get_unit(db, unit_id)
+        if unit.status != "active":
+            raise HTTPException(status_code=404, detail="Vehicle not found")
+        row = yard_unit_payload(unit)
+        row.update(yard_job_prefill(unit))
+        return {"units": [row]}
+    units = yard_picker_matches(yard_active_units_query(db), q)[:500]
+    out = []
+    for u in units:
+        row = yard_unit_payload(u)
+        row.update(yard_job_prefill(u))
+        out.append(row)
+    return {"units": out}
