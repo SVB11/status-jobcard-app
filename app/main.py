@@ -221,6 +221,20 @@ def is_job_salesman(job, user) -> bool:
         return False
     return (job.salesman_name or "").strip().casefold() == (user.full_name or "").strip().casefold()
 
+def has_sales_rights(user) -> bool:
+    """Sales role, or an admin user with the sales_rights flag (Sebastian on one login)."""
+    if not user:
+        return False
+    return (user.role or "") == "sales" or bool(getattr(user, "sales_rights", False))
+
+def job_salesman_users(db, job, skip_roles=()):
+    """Active users who get the salesman's notices for this job: sales role or sales_rights flag, name match."""
+    from sqlalchemy import or_
+    q = db.query(models.User).filter(models.User.is_active == True, or_(models.User.role == "sales", models.User.sales_rights == True))
+    if job.salesman_name:
+        q = q.filter(models.User.full_name == job.salesman_name)
+    return [u for u in q.all() if (u.role or "") not in skip_roles]
+
 def assert_sales_owner(db, job, user, body, action):
     if is_job_salesman(job, user):
         return
@@ -339,7 +353,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         "user_id": user.id,
         "must_change_password": bool(getattr(user, "must_change_password", False)),
         "supplier_company": getattr(user, "supplier_company", None),
-        "yard_access": user_has_yard_access(user)
+        "yard_access": user_has_yard_access(user),
+        "sales_rights": has_sales_rights(user)
     }
     resp = JSONResponse(payload)
     resp.set_cookie(
@@ -687,6 +702,77 @@ def delivery_wash_open(job):
     wash = [t for t in (job.tasks or []) if is_delivery_wash_task(getattr(t, "task_name", "") or "")]
     return bool(wash) and not all((t.status or "") == "Completed" for t in wash)
 
+# ---------- "Waiting on" sign-off display (admin/accounts view only; display, no rule changes) ----------
+
+def can_see_waiting_on(user) -> bool:
+    return bool(user) and (user.role or "") in ("admin", "accounts")
+
+def waiting_on_task_rows(db, job_ids):
+    """One query: job_id -> list of (task_name, status, needs_approval)."""
+    out = {}
+    if not job_ids:
+        return out
+    rows = db.query(models.JobTask.job_card_id, models.JobTask.task_name, models.JobTask.status, models.JobTask.needs_approval).filter(models.JobTask.job_card_id.in_(list(job_ids))).all()
+    for jid, name, st, appr in rows:
+        out.setdefault(jid, []).append((name, st, appr))
+    return out
+
+def signoff_waiting_on(job, viewer, task_rows=None):
+    """Short lines saying who the job is waiting on. Uses the same fields the sign-off rules use; changes nothing."""
+    if not job or is_archived(job) or (job.status or "") in CLOSED_STATUSES:
+        return []
+    if task_rows is None:
+        task_rows = [(t.task_name, t.status, getattr(t, "needs_approval", False)) for t in (job.tasks or [])]
+    status = job.status or ""
+    showroom = is_showroom(job)
+    salesman = (job.salesman_name or "").strip() or "salesman"
+    sales = "You (sales)" if viewer is not None and is_job_salesman(job, viewer) else f"Sales ({salesman})"
+    lines = []
+    approvals = sum(1 for n, st, appr in task_rows if appr and (st or "") != "Completed")
+    open_tasks = sum(1 for n, st, appr in task_rows if (st or "") != "Completed" and not is_delivery_wash_task(n or ""))
+    wash_open = any(is_delivery_wash_task(n or "") for n, st, a in task_rows) and not all((st or "") == "Completed" for n, st, a in task_rows if is_delivery_wash_task(n or ""))
+    if approvals:
+        lines.append("Admin — approve extra task" if approvals == 1 else f"Admin — approve {approvals} extra tasks")
+    if status == "Pending Admin Approval":
+        lines.append("Admin — approve showroom job")
+        return lines
+    if status == "Submitted to Workshop":
+        lines.append("Workshop — accept job")
+        return lines
+    if status == "PDI Failed - Returned to Workshop":
+        lines.append("Workshop — fix PDI fails")
+    if open_tasks:
+        lines.append("Workshop — 1 task open" if open_tasks == 1 else f"Workshop — {open_tasks} tasks open")
+    if status not in ("Work Completed", "PDI in Progress", "PDI Completed", "Ready for Delivery"):
+        return lines
+    if showroom:
+        if not job.ready_workshop:
+            lines.append("Workshop — showroom sign-off")
+        elif status == "Ready for Delivery":
+            if wash_open:
+                lines.append("Workshop — wash for delivery")
+            lines.append("Workshop or sales — deliver / close")
+        return lines
+    if type_family(job.main_type) == "tanker":
+        if not job.empty_signed_workshop:
+            lines.append("Workshop — tanker empty check")
+        if not job.empty_signed_sales:
+            lines.append(f"{sales} — tanker empty check")
+    if not job.pdi_signed_workshop:
+        lines.append("Workshop — PDI sign-off")
+    if not job.pdi_signed_sales:
+        lines.append(f"{sales} — PDI sign-off")
+    if job.pdi_signed_workshop and job.pdi_signed_sales:
+        if not job.ready_workshop:
+            lines.append("Workshop — mark ready")
+        if not job.ready_sales:
+            lines.append(f"{sales} — mark ready")
+    if status == "Ready for Delivery":
+        if wash_open:
+            lines.append("Workshop — wash for delivery")
+        lines.append(f"{sales} — deliver / close")
+    return lines
+
 def archive_blockers(job):
     missing = []
     if is_showroom(job):
@@ -757,9 +843,11 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
         query = query.filter(models.JobCard.created_by == created_by)
     jobs = query.limit(400).all()
     counts = stock_repeat_counts(jobs)
+    show_waiting = can_see_waiting_on(current_user)
+    task_map = waiting_on_task_rows(db, [j.id for j in jobs]) if show_waiting else {}
     result = []
     for j in jobs:
-        result.append(with_display({
+        row = with_display({
             "id": j.id,
             "job_number": j.job_number,
             "stock_number": j.stock_number,
@@ -781,7 +869,10 @@ async def api_list_jobs(request: Request, status: str = None, salesman: str = No
             "ready_sales": bool(j.ready_sales),
             "ready_workshop": bool(j.ready_workshop),
             "photo_url": job_photo_url(j, yard_photo_map_cached(db))
-        }, j, counts))
+        }, j, counts)
+        if show_waiting:
+            row["waiting_on"] = signoff_waiting_on(j, current_user, task_map.get(j.id, []))
+        result.append(row)
     return {"jobs": result}
 
 @app.get("/health")
@@ -1072,6 +1163,8 @@ async def api_signoff_queue(db: Session = Depends(get_db), current_user: models.
             "open_tasks": open_tasks,
             "action": action,
         })
+        if can_see_waiting_on(current_user):
+            out[-1]["waiting_on"] = signoff_waiting_on(j, current_user)
     return {"jobs": out}
 
 @app.get("/api/jobs/{job_id}")
@@ -1213,6 +1306,7 @@ async def api_get_job(job_id: int, request: Request, db: Session = Depends(get_d
         "empty_signed_sales_at": job.empty_signed_sales_at.isoformat() if getattr(job, "empty_signed_sales_at", None) else None,
         "status": job.status,
         "archived": is_archived(job),
+        "waiting_on": signoff_waiting_on(job, current_user) if can_see_waiting_on(current_user) else None,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "created_by": job.created_by,
         "created_by_name": user_name(db, job.created_by),
@@ -2267,8 +2361,9 @@ async def api_update_pdi_item(job_id: int, item_id: int, request: Request, db: S
             notify_role(db, "accounts", msg, job.id)
             if job.created_by:
                 db.add(models.Notification(user_id=job.created_by, job_card_id=job.id, message=msg))
-            sales_users = db.query(models.User).filter(models.User.role == "sales", models.User.full_name == job.salesman_name).all()
-            for su in sales_users:
+            for su in job_salesman_users(db, job, skip_roles=("admin", "accounts")):
+                if job.created_by and su.id == job.created_by:
+                    continue
                 db.add(models.Notification(user_id=su.id, job_card_id=job.id, message=msg))
 
     db.commit()
@@ -3569,11 +3664,8 @@ def notify_role(db, role, message, job_id=None):
         ids.append(u.id)
     send_web_push(db, ids, "Status Job Cards", message, f"/jobs/{job_id}" if job_id else "/dashboard")
 
-def notify_salesman(db, job, message):
-    q = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True)
-    if job.salesman_name:
-        q = q.filter(models.User.full_name == job.salesman_name)
-    users = q.all()
+def notify_salesman(db, job, message, skip_roles=()):
+    users = job_salesman_users(db, job, skip_roles)
     ids = []
     for u in users:
         db.add(models.Notification(user_id=u.id, job_card_id=job.id, message=message))
@@ -3607,7 +3699,8 @@ def work_is_done(tasks):
     return bool(real) and all((t.status or "") == "Completed" for t in real)
 
 def notify_signoff(db, job, message):
-    notify_salesman(db, job, message)
+    # Admin/accounts already get this message below; skip them here so nobody gets it twice.
+    notify_salesman(db, job, message, skip_roles=("admin", "accounts"))
     notify_role(db, "workshop", message, job.id)
     notify_role(db, "admin", message, job.id)
     notify_role(db, "accounts", message, job.id)
@@ -4201,7 +4294,8 @@ async def api_set_activity(job_id: int, request: Request, db: Session = Depends(
     )
     # Current activity is a note only. A real extra job is added under Work / Prep Tasks.
     msg = f"Update on {job_display_id(job)}: {job.current_location or ''} {job.current_activity or ''}".strip()
-    sales = db.query(models.User).filter(models.User.role == "sales", models.User.is_active == True, models.User.full_name == job.salesman_name).all()
+    # Admin/accounts get this message through notify_role below.
+    sales = job_salesman_users(db, job, skip_roles=("admin", "accounts")) if job.salesman_name else []
     for u in sales:
         db.add(models.Notification(user_id=u.id, job_card_id=job.id, message=msg))
     send_web_push(db, [u.id for u in sales], "Status Job Cards", msg, f"/jobs/{job.id}")

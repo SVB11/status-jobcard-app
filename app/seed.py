@@ -48,6 +48,12 @@ def seed_database():
     if damian and damian.role != "marketing":
         damian.role = "marketing"
         db.commit()
+    # Sebastian works as admin and salesman on one login: give his admin user sales rights (flag only).
+    seb = db.query(models.User).filter(models.User.username == "sebastian").first()
+    if seb and seb.role == "admin" and not getattr(seb, "sales_rights", False):
+        seb.sales_rights = True
+        db.commit()
+        print("Sales rights switched on for 1 admin user")
     if added:
         print("Added users:", ", ".join(added))
     else:
