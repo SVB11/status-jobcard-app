@@ -4928,6 +4928,8 @@ os.makedirs(YARD_PHOTO_DIR, exist_ok=True)
 MAX_STOCK_FILE_BYTES = 10 * 1024 * 1024
 MAX_YARD_PHOTO_BYTES = 15 * 1024 * 1024
 YARD_PHOTO_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic"}
+YARD_PHOTO_MAX_SIDE = 1280
+YARD_PHOTO_JPEG_QUALITY = 80
 
 def is_stock_manager(user) -> bool:
     """Admin/accounts (is_admin_user) always; anyone else only with the admin-granted stock_manager flag."""
@@ -4951,6 +4953,39 @@ def yard_photo_kind(raw: bytes):
         return ".heic"
     return None
 
+def yard_normalize_photo(raw: bytes, ext: str):
+    """Fix EXIF orientation, shrink to 1280 on the longest side, re-encode as JPEG ~80, and strip EXIF/GPS.
+    If the bytes cannot be decoded (typical for HEIC without a plugin), keep the original file as uploaded."""
+    try:
+        from io import BytesIO
+        from PIL import Image, ImageOps
+        im = Image.open(BytesIO(raw))
+        im = ImageOps.exif_transpose(im) or im
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            if im.mode == "P":
+                im = im.convert("RGBA")
+            bg = Image.new("RGB", im.size, (26, 32, 40))
+            alpha = im.split()[-1] if im.mode in ("RGBA", "LA") else None
+            bg.paste(im, mask=alpha)
+            im = bg
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        w, h = im.size
+        longest = max(w, h)
+        if longest > YARD_PHOTO_MAX_SIDE:
+            scale = YARD_PHOTO_MAX_SIDE / float(longest)
+            im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
+        for key in list(im.info.keys()):
+            im.info.pop(key, None)
+        out = BytesIO()
+        im.save(out, format="JPEG", quality=YARD_PHOTO_JPEG_QUALITY, optimize=True, progressive=True)
+        data = out.getvalue()
+        if not data or data[:3] != b"\xff\xd8\xff":
+            return raw, ext
+        return data, ".jpg"
+    except Exception:
+        return raw, ext
+
 async def yard_save_photo(upload: UploadFile) -> str:
     if upload is None or not getattr(upload, "filename", None):
         raise HTTPException(status_code=400, detail="A photo is required")
@@ -4960,6 +4995,7 @@ async def yard_save_photo(upload: UploadFile) -> str:
     ext = yard_photo_kind(raw)
     if not ext or len(raw) < 100:
         raise HTTPException(status_code=400, detail="Photo must be a JPEG, PNG, WEBP or HEIC image")
+    raw, ext = yard_normalize_photo(raw, ext)
     rel = f"yard/{uuid.uuid4().hex}{ext}"
     with open(os.path.join(UPLOAD_DIR, rel), "wb") as fh:
         fh.write(raw)

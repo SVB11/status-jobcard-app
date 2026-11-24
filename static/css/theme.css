@@ -551,7 +551,7 @@ html[data-theme] #filterBar { padding:10px 0 14px; }
 html[data-theme] #filterBar>div { gap:5px; }
 /* Compact lists keep every photo and all card information. */
 html[data-theme] #jobsContainer .g-card { display:flex; align-items:flex-start; gap:10px; padding:14px; }
-html[data-theme] #jobsContainer .g-card .stock-thumb { width:86px; height:90px; flex-shrink:0; margin:0; object-fit:contain; }
+html[data-theme] #jobsContainer .g-card .stock-thumb { width:120px; height:auto; aspect-ratio:3/2; flex-shrink:0; margin:0; object-fit:contain; background:var(--surface-2); }
 html[data-theme] #jobsContainer .g-card .glass-inner { min-width:0; padding:0; flex:1; }
 html[data-theme] #jobsContainer .g-card .text-lg { font-family:var(--mono); font-size:15px; }
 html[data-theme] #jobsContainer .g-card .mt-3 { margin-top:7px; gap:4px; }
@@ -571,7 +571,7 @@ html[data-theme] #usersList>* { overflow-wrap:anywhere; min-width:0; }
 html[data-theme] input[type=checkbox] { accent-color:var(--blue); }
 @media(max-width:480px) {
   html[data-theme] #jobsContainer .g-card { padding:12px; gap:9px; }
-  html[data-theme] #jobsContainer .g-card .stock-thumb { width:68px; height:78px; }
+  html[data-theme] #jobsContainer .g-card .stock-thumb { width:96px; height:auto; aspect-ratio:3/2; }
   html[data-theme] #jobsContainer .g-card .text-sm { font-size:13px; }
   html[data-theme] #list table { font-size:11px; }
   html[data-theme] #list td button { padding:8px 5px; font-size:11px; }

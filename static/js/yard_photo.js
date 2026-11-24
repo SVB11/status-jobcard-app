@@ -1,6 +1,6 @@
 /* Yard stock photos: camera/gallery pick, shrink on the phone before upload, shared helpers. */
 (function () {
-  var MAX_SIDE = 1600;
+  var MAX_SIDE = 1280;
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -16,7 +16,7 @@
       c.width = Math.max(1, Math.round(bmp.width * scale));
       c.height = Math.max(1, Math.round(bmp.height * scale));
       c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      var blob = await new Promise(function (res) { c.toBlob(res, 'image/jpeg', 0.85); });
+      var blob = await new Promise(function (res) { c.toBlob(res, 'image/jpeg', 0.8); });
       if (blob) return new File([blob], 'photo.jpg', { type: 'image/jpeg' });
     } catch (e) { /* browser cannot decode (e.g. HEIC off Safari): send the original, the server checks it */ }
     if (file.size > 15 * 1024 * 1024) throw new Error('Photo is larger than 15 MB.');
