@@ -906,7 +906,11 @@
                 typeBadge.className = 'text-xs px-2 py-1 rounded ' + (show ? 'bg-purple-700 text-white' : 'bg-[#025daa] text-white');
             }
             if (j.photo_url) {
-                document.getElementById('stockPhoto').src = j.photo_url;
+                const sp = document.getElementById('stockPhoto');
+                sp.src = j.photo_url;
+                sp.setAttribute('data-viewer-src', j.photo_url);
+                sp.setAttribute('data-viewer-label', 'Photo ' + (j.stock_number || ''));
+                sp.style.cursor = 'pointer';
                 document.getElementById('stockPhotoWrap').classList.remove('hidden');
             }
             document.getElementById('stockNumber').textContent = j.stock_number;
