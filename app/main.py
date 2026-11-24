@@ -33,7 +33,7 @@ MAX_FAILED = 6
 LOCK_MINUTES = 15
 
 # Paths a 'yard' role user may reach (public paths are handled before this check).
-YARD_ROLE_PATHS = ("/yard", "/logout", "/set-password", "/api/me/set-password", "/api/push/subscribe")
+YARD_ROLE_PATHS = ("/yard", "/yard/print", "/logout", "/set-password", "/api/me/set-password", "/api/push/subscribe")
 
 def yard_role_path_allowed(path: str) -> bool:
     return path in YARD_ROLE_PATHS or path.startswith("/api/yard/")
@@ -4904,6 +4904,44 @@ async def api_yard_start(db: Session = Depends(get_db), current_user: models.Use
     db.commit()
     return {"success": True, "id": new.id, "closed_id": current.id}
 
+YARD_PRINT_OTHER = "ADDED BY HAND / YARD FINDS"
+
+def yard_print_groups(db, current):
+    """Vehicles of the current round for the printed yard sheet. Only WS, make, model and reg: no price, CRM or client data."""
+    groups = {s: [] for s in YARD_SECTIONS}
+    groups[YARD_PRINT_OTHER] = []
+    if current.source == "list":
+        units = db.query(models.YardStockUnit).filter(models.YardStockUnit.status == "active").all()
+        units.sort(key=lambda u: u.stock_number or "")
+        for u in units:
+            key = u.section if (u.source == "upload" and u.section in YARD_SECTIONS) else YARD_PRINT_OTHER
+            groups[key].append({"ws": u.stock_number, "make": u.make or "", "model": u.model or "", "reg": u.registrations or ""})
+    else:
+        jobs = active_jobs(db).order_by(models.JobCard.stock_number, models.JobCard.id).all()
+        counts = stock_repeat_counts(jobs)
+        for j in jobs:
+            groups[YARD_PRINT_OTHER].append({"ws": job_display_label(j, counts), "make": j.vehicle_description or "",
+                                             "model": "", "reg": getattr(j, "registration_number", None) or ""})
+    return [(name, rows) for name, rows in groups.items() if rows]
+
+@app.get("/yard/print", response_class=HTMLResponse)
+async def yard_print_page(request: Request, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
+    if not (user_has_yard_access(current_user) or is_stock_manager(current_user)) or current_user.role == "supplier":
+        return RedirectResponse(url="/dashboard")
+    yard_lock(db)
+    current = yard_current(db)
+    if current.source == "list":
+        yard_sync_delivered(db)
+    groups = yard_print_groups(db, current)
+    upload = None
+    if current.upload_id:
+        upload = db.query(models.YardStockUpload).filter(models.YardStockUpload.id == current.upload_id).first()
+    db.commit()
+    return render_template("yard_print.html", request=request, round_id=current.id, groups=groups,
+                           total=sum(len(r) for _, r in groups), list_mode=current.source == "list",
+                           upload_date=sast_text(upload.confirmed_at) if upload and upload.confirmed_at else None,
+                           printed_at=sast_text(datetime.utcnow()))
+
 @app.get("/api/yard/history")
 async def api_yard_history(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     require_yard(current_user)
@@ -5155,9 +5193,15 @@ async def api_yard_stock_upload(file: UploadFile = File(None), db: Session = Dep
         unit = active.get(d["stock_number"])
         row["existing"] = bool(unit)
         row["has_photo"] = bool(unit and unit.photo_path)
+        # Only vehicles from an earlier list upload drop off when unticked; hand-added ones stay.
+        row["existing_upload"] = bool(unit and unit.source == "upload")
     listed = {r["data"]["stock_number"] for r in parsed["rows"]}
     # Only vehicles that came from an earlier list upload drop off; hand-added vehicles and approved finds stay until removed by hand.
     parsed["dropping"] = sorted(s for s, u in active.items() if s not in listed and u.source == "upload")
+    open_round = db.query(models.StockTake).filter(models.StockTake.closed_at == None).first()
+    # "update": confirming updates the current list-based yard check (ticks kept); "start": first list round.
+    parsed["mode"] = "update" if (open_round and open_round.source == "list") else "start"
+    parsed["round_id"] = open_round.id if (open_round and open_round.source == "list") else None
     safe_name = re.sub(r"[^A-Za-z0-9 ._()-]", "_", name)[:120]
     for old in db.query(models.YardStockUpload).filter(models.YardStockUpload.status == "preview").all():
         old.status = "discarded"
@@ -5241,18 +5285,29 @@ async def api_yard_stock_upload_confirm(upload_id: int, request: Request, db: Se
             unit.removed_at = now
             unit.removed_by = current_user.id
             unit.removed_by_name = current_user.full_name
-            unit.removed_reason = f"Not on stock list upload {up.id}"
+            unit.removed_reason = f"Not on new list (upload {up.id})"
             dropped += 1
     db.flush()
     current = yard_current(db)
-    new = yard_close_and_start(db, current, current_user, "list", up.id)
+    if current.source == "list":
+        # No reset: the current list-based yard check carries on. Remaining vehicles keep their ticks
+        # (ticks are stored per vehicle), new vehicles start unticked, dropped ones leave the round.
+        current.upload_id = up.id
+        round_id, closed_id = current.id, None
+        note = f"Stock take {current.id} updated (ticks kept)."
+    else:
+        # First stock-list upload (or the round is job-based): start a list round as before.
+        new = yard_close_and_start(db, current, current_user, "list", up.id)
+        round_id, closed_id = new.id, current.id
+        note = f"Stock take {current.id} closed, {new.id} started."
     up.status = "confirmed"
     up.confirmed_by, up.confirmed_by_name, up.confirmed_at = current_user.id, current_user.full_name, now
-    up.stock_take_id = new.id
+    up.stock_take_id = round_id
     yard_audit(db, current_user.id, "Yard stock list confirmed",
-               f"Upload {up.id}: {len(chosen)} vehicles ({added} new, {kept} kept, {dropped} off the list). Stock take {current.id} closed, {new.id} started.")
+               f"Upload {up.id}: {len(chosen)} vehicles ({added} new, {kept} unchanged, {dropped} off the list). {note}")
     db.commit()
-    return {"success": True, "round_id": new.id, "closed_id": current.id, "added": added, "kept": kept, "dropped": dropped}
+    return {"success": True, "round_id": round_id, "closed_id": closed_id, "updated": closed_id is None,
+            "added": added, "kept": kept, "dropped": dropped}
 
 @app.get("/api/yard/stock/units")
 async def api_yard_stock_units(status: str = "active", db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
