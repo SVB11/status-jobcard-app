@@ -22,7 +22,10 @@
             <p id="jobIdHint" class="hidden text-xs text-[#9aa6b4] mt-1"></p>
             <p class="text-[#9aa6b4]"><span id="jobTypeBadge" class="text-xs px-2 py-1 rounded bg-[#025daa] text-white mr-2">SOLD</span><span id="vehicleLine"></span></p>
         </div>
-        <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
+        <div class="flex flex-col gap-2 w-full sm:w-auto">
+            <div id="waitingOnBox" class="hidden p-2 rounded-lg text-sm" style="border:1px solid #f59e0b;color:#f59e0b"></div>
+            <div id="actionButtons" class="flex gap-2 flex-wrap"></div>
+        </div>
     </div>
     <div id="stageBar" class="nl-stagebar" aria-label="Where this job is"><ol class="nl-stages" id="stageList"></ol></div>
 <div id="emptyCheckJobBox" class="hidden mb-4 rounded-xl border-2 border-orange-500">
@@ -1042,6 +1045,16 @@
                 buttons += '<a href="/jobs/' + jobId + '/client-report" class="px-4 py-2 bg-green-700 text-white rounded-lg text-sm">Client report / WhatsApp</a>';
             }
             document.getElementById('actionButtons').innerHTML = buttons;
+            const wBox = document.getElementById('waitingOnBox');
+            if (wBox) {
+                const w = j.waiting_on || [];
+                if (w.length) {
+                    wBox.innerHTML = '<strong>Waiting on:</strong> ' + w.map(escHtml).join(' · ');
+                    wBox.classList.remove('hidden');
+                } else {
+                    wBox.classList.add('hidden');
+                }
+            }
             const canWash = role === 'sales' || role === 'marketing' || isAdmin || (fullName || '').toLowerCase().indexOf('damian') === 0;
             if (canWash && j.status !== 'Delivered / Closed') {
                 document.getElementById('washReqBox').classList.remove('hidden');
