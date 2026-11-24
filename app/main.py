@@ -1723,7 +1723,8 @@ async def api_list_users(db: Session = Depends(get_db), current_user: models.Use
                 "created_at": u.created_at.isoformat() if u.created_at else None,
                 "password_changed_at": u.password_changed_at.date().isoformat() if getattr(u, "password_changed_at", None) else None
             } for u in users
-        ]
+        ],
+        "supplier_companies": list_supplier_companies(db),
     }
 
 @app.post("/api/admin/users")
@@ -1764,6 +1765,8 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
         is_active=True
     )
     db.add(user)
+    if role == "supplier":
+        ensure_supplier_company_listed(db, company)
     db.commit()
     db.refresh(user)
     if yard_access:
@@ -1782,6 +1785,7 @@ async def api_create_user(request: Request, db: Session = Depends(get_db), curre
             "username": user.username,
             "full_name": user.full_name,
             "role": user.role,
+            "supplier_company": user.supplier_company,
             "yard_access": bool(user.yard_access),
             "has_yard_access": user_has_yard_access(user),
         }
@@ -2381,6 +2385,57 @@ def grouped_third_parties(db: Session):
         return [{"service": k, "providers": v} for k, v in grouped.items()]
     return THIRD_PARTY_SERVICES
 
+def list_supplier_companies(db):
+    """Names offered on the Users form and anywhere PFT / FK are listed."""
+    names = []
+    seen = set()
+    def add(n):
+        n = (n or "").strip()
+        if not n:
+            return
+        key = n.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        names.append(n)
+    for (company,) in db.query(models.User.supplier_company).filter(models.User.supplier_company.isnot(None)).all():
+        add(company)
+    add("PFT")
+    add("FK Tanker Solutions")
+    rows = db.query(models.ThirdPartyCompany).filter(models.ThirdPartyCompany.is_active == True).order_by(models.ThirdPartyCompany.name).all()
+    for r in rows:
+        add(r.name)
+    return names
+
+def ensure_supplier_company_listed(db, name: str):
+    """Add a new supplier name to Pressure Test (same list as PFT / FK) if it is not already on the 3rd party list."""
+    name = (name or "").strip()
+    if not name:
+        return
+    rows = db.query(models.ThirdPartyCompany).all()
+    for r in rows:
+        existing = (r.name or "").strip()
+        if existing.lower() == name.lower() or company_match(existing, name):
+            if not r.is_active:
+                r.is_active = True
+            return
+    db.add(models.ThirdPartyCompany(category="Pressure Test", name=name, is_active=True))
+
+def allowed_third_party_map(db):
+    allowed = {}
+    for source in (THIRD_PARTY_SERVICES, grouped_third_parties(db)):
+        for s in source:
+            allowed.setdefault(s["service"], [])
+            for p in s["providers"]:
+                if p not in allowed[s["service"]]:
+                    allowed[s["service"]].append(p)
+    # Login company names (PFT, FK Tanker Solutions, and any new supplier) are valid Pressure Test providers.
+    allowed.setdefault("Pressure Test", [])
+    for n in list_supplier_companies(db):
+        if n not in allowed["Pressure Test"]:
+            allowed["Pressure Test"].append(n)
+    return allowed
+
 @app.get("/api/lists")
 async def api_lists(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_active_user)):
     return {
@@ -2716,7 +2771,7 @@ async def api_add_third_party(job_id: int, request: Request, db: Session = Depen
     if not service or not provider:
         raise HTTPException(status_code=400, detail="Service and provider are required")
     if not outside:
-        allowed = {s["service"]: s["providers"] for s in THIRD_PARTY_SERVICES}
+        allowed = allowed_third_party_map(db)
         if service not in allowed or provider not in allowed[service]:
             raise HTTPException(status_code=400, detail="Invalid service or provider")
         if service == "Barrel Test":
