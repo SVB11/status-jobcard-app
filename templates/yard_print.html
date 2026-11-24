@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<title>Yard sheet · Stock take #{{ round_id }}</title>
+<style>
+/* Print sheet: always black on white, whatever theme the app is in. Only WS, make, model and reg are shown. */
+@page { size: A4 portrait; margin: 12mm 10mm 14mm; }
+html, body { background: #fff !important; color: #000 !important; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; margin: 14px; line-height: 1.3; }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.bar button, .bar a { font: inherit; font-size: 15px; font-weight: 700; min-height: 44px; padding: 8px 16px; border: 2px solid #000; border-radius: 8px; background: #fff; color: #000; text-decoration: none; display: inline-flex; align-items: center; }
+.bar button { background: #000; color: #fff; }
+.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; }
+.logo { height: 54px; width: auto; filter: grayscale(1) brightness(0); }
+h1 { font-size: 22px; margin: 2px 0 0; color: #000; }
+.meta { text-align: right; font-size: 11.5px; }
+.meta div { white-space: nowrap; }
+.legend { font-size: 11px; margin: 0 0 6px; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; break-inside: avoid; }
+th, td { border: 1px solid #000; padding: 5px 6px; text-align: left; vertical-align: middle; overflow-wrap: anywhere; color: #000; }
+th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; background: #fff; }
+td.ws { font-weight: 700; }
+td.n { text-align: right; font-size: 10.5px; }
+.sec td { font-weight: 800; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; border-left: 0; border-right: 0; padding-top: 10px; }
+th.tick, td.tick { text-align: center; }
+th.tick { overflow-wrap: normal; word-break: keep-all; hyphens: none; }
+.ws-box { display: inline-block; width: 18px; height: 18px; border: 2px solid #000; background: #fff; vertical-align: middle; }
+.c-n { width: 6%; } .c-ws { width: 16%; } .c-make { width: 18%; } .c-model { width: 26%; } .c-reg { width: 20%; } .c-tick { width: 14%; }
+.foot { margin-top: 22px; font-size: 13px; display: flex; gap: 30px; flex-wrap: wrap; }
+.foot span { display: inline-block; min-width: 190px; border-bottom: 1px solid #000; height: 18px; vertical-align: bottom; }
+.empty { border: 1px solid #000; padding: 14px; margin-top: 10px; }
+@media (max-width: 520px) {
+  body { margin: 8px; font-size: 11px; }
+  .head { flex-direction: column; align-items: flex-start; }
+  .meta { text-align: left; }
+  th, td { padding: 4px 3px; }
+  .c-n { width: 7%; } .c-ws { width: 19%; } .c-make { width: 17%; } .c-model { width: 21%; } .c-reg { width: 18%; } .c-tick { width: 18%; }
+  th { font-size: 9.5px; letter-spacing: 0; }
+}
+@media print {
+  body { margin: 0; font-size: 11px; }
+  .no-print { display: none !important; }
+  .head { flex-direction: row; align-items: flex-end; }
+  .meta { text-align: right; }
+}
+</style>
+</head>
+<body>
+<div class="bar no-print">
+  <button type="button" onclick="window.print()">Print</button>
+  <a href="/yard">Back to Yard check</a>
+</div>
+<header class="head">
+  <div>
+    <img src="/static/images/status_logo.svg" class="logo" alt="STATUS Truck Sales">
+    <h1>Yard sheet</h1>
+  </div>
+  <div class="meta">
+    <div>Stock take #{{ round_id }}</div>
+    <div>List uploaded: {{ upload_date or ("no list uploaded yet" if not list_mode else "–") }}</div>
+    <div>Printed: {{ printed_at }}</div>
+    <div><strong>Total: {{ total }} vehicles</strong></div>
+  </div>
+</header>
+<p class="legend">Tick the box when the WS sticker is fitted. All vehicles listed are stock on the floor.</p>
+{% if total %}
+<table>
+  <colgroup><col class="c-n"><col class="c-ws"><col class="c-make"><col class="c-model"><col class="c-reg"><col class="c-tick"></colgroup>
+  <thead><tr><th>#</th><th>WS number</th><th>Make</th><th>Model</th><th>Reg</th><th class="tick">WS sticker fitted</th></tr></thead>
+  <tbody>
+  {% set ns = namespace(n=0) %}
+  {% for name, rows in groups %}
+    <tr class="sec"><td colspan="6">{{ name|title }} ({{ rows|length }})</td></tr>
+    {% for r in rows %}{% set ns.n = ns.n + 1 %}
+    <tr class="veh"><td class="n">{{ ns.n }}</td><td class="ws">{{ r.ws }}</td><td>{{ r.make }}</td><td>{{ r.model }}</td><td>{{ r.reg }}</td><td class="tick"><span class="ws-box" role="img" aria-label="WS sticker fitted: empty box"></span></td></tr>
+    {% endfor %}
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">No vehicles on the current yard check.</div>
+{% endif %}
+<div class="foot"><div>Checked by <span></span></div><div>Date <span></span></div></div>
+</body>
+</html>

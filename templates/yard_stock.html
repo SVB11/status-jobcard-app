@@ -40,6 +40,7 @@ button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-
 .ys-photo-pick{display:flex;gap:10px;align-items:center;margin-top:4px}
 .ys-photo-pick img{width:144px;aspect-ratio:3/2;height:auto;object-fit:contain;background:var(--surface-2);border-radius:9px;border:1px solid var(--line-strong)}
 .ys-note{color:var(--muted);font-size:13px;margin:6px 0}
+.ys-sum.ys-chg{grid-template-columns:repeat(3,1fr);margin-top:8px}
 #ysError{color:var(--amber-text);margin:8px 0;font-weight:700}
 #ysOk{color:var(--green-text);margin:8px 0;font-weight:700}
 .ys-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
@@ -71,12 +72,13 @@ button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-
     <label class="ys-note" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="noPhoto" style="width:20px;height:20px;min-height:20px"> No photo yet</label>
   </div>
   <p class="ys-note" id="listCount"></p>
+  <p class="ys-note"><a href="/yard/print" target="_blank" rel="noopener" style="font-weight:700;color:var(--link)">🖨 Print yard sheet</a></p>
   <div class="ys-list" id="activeRows">Loading…</div>
 </section>
 
 <section class="ys-panel" id="p-upload">
   <div class="ys-card">
-    <p class="ys-note">Upload the Master Stock Sheet as a PDF (Microsoft Print to PDF) or the .xlsx file. You'll see a preview first; nothing changes until you tap Confirm.</p>
+    <p class="ys-note">Upload the Master Stock Sheet as a PDF (Microsoft Print to PDF) or the .xlsx file. You'll see a preview first; nothing changes until you tap Confirm. Confirming updates the current yard check: vehicles still on the list keep their ticks.</p>
     <div class="ys-bar">
       <input type="file" id="stockFile" accept=".pdf,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Stock list file">
       <button type="button" class="ys-btn primary" id="uploadBtn">Read file</button>
@@ -204,7 +206,7 @@ function renderPreview(){
   let h = '<div class="ys-card"><div class="ys-sum">' + SECTIONS.map(s => '<div><strong>'+(c[s] || 0)+'</strong>'+esc(s)+'</div>').join('') + '</div>' +
     '<p class="ys-note">'+p.rows.length+' vehicles read from '+esc(p.file_name)+'. <b style="color:var(--amber-text)">'+flagged+' need a look</b> (amber). Untick any line that should not be on the list.</p>' +
     (p.warnings || []).map(w => '<div class="ys-issue">⚠ '+esc((w.page ? 'Page '+w.page+': ' : w.row ? 'Row '+w.row+': ' : '')+(w.issue || w))+'</div>').join('') +
-    (p.dropping && p.dropping.length ? '<p class="ys-note">Coming off the list (not in this file): <b>'+p.dropping.map(esc).join(', ')+'</b></p>' : '') +
+    '<div class="ys-sum ys-chg" id="chgSum"></div><p class="ys-note" id="chgNote"></p><p class="ys-note" id="dropNote"></p>' +
     '<div class="ys-bar"><label class="ys-note" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="flagOnly" style="width:20px;height:20px;min-height:20px" onchange="renderPreview()"'+(window._flagOnly?' checked':'')+'> Only lines that need a look</label></div></div><div class="ys-list">';
   let last = null;
   p.rows.forEach((r, i) => {
@@ -218,18 +220,35 @@ function renderPreview(){
       r.issues.map(x => '<div class="ys-issue">⚠ '+esc(x)+'</div>').join('') + '</div></label>';
   });
   h += '</div><div class="ys-card"><p class="ys-note" id="inclCount"></p><div class="ys-bar">' +
-       '<button type="button" class="ys-btn primary" id="confirmBtn" onclick="confirmUpload()">Confirm and start new yard check</button>' +
+       '<button type="button" class="ys-btn primary" id="confirmBtn" onclick="confirmUpload()">'+(p.mode === 'update' ? 'Confirm and update yard check' : 'Confirm list')+'</button>' +
        '<button type="button" class="ys-btn" onclick="discardUpload()">Discard</button></div></div>';
   $('preview').innerHTML = h; countIncl();
 }
-function countIncl(){ const n = preview.rows.filter(r => r.include).length; const el = $('inclCount'); if (el) el.textContent = n + ' of ' + preview.rows.length + ' lines will go on the list.'; }
+function changes(){
+  // to add: ticked lines not on the list yet; unchanged: ticked lines already on the list (ticks kept);
+  // to remove: earlier-upload vehicles not in this file, or unticked here. Hand-added vehicles always stay.
+  const p = preview, inc = p.rows.filter(r => r.include);
+  const unticked = p.rows.filter(r => !r.include && r.existing_upload && r.data.stock_number && !inc.some(x => x.data.stock_number === r.data.stock_number)).map(r => r.data.stock_number);
+  const remove = Array.from(new Set((p.dropping || []).concat(unticked))).sort();
+  return {add: inc.filter(r => !r.existing).length, same: inc.filter(r => r.existing).length, remove};
+}
+function countIncl(){
+  const n = preview.rows.filter(r => r.include).length; const el = $('inclCount'); if (el) el.textContent = n + ' of ' + preview.rows.length + ' lines ticked.';
+  const c = changes();
+  if ($('chgSum')) $('chgSum').innerHTML = '<div><strong>'+c.add+'</strong>To add</div><div><strong>'+c.remove.length+'</strong>To remove</div><div><strong>'+c.same+'</strong>Unchanged</div>';
+  if ($('chgNote')) $('chgNote').textContent = preview.mode === 'update'
+      ? 'Updates the current yard check (#'+preview.round_id+'): unchanged vehicles keep their ticks, new ones start unticked. Hand-added vehicles and approved yard finds stay.'
+      : 'This is the first stock list: the yard check will work from it once you confirm.';
+  if ($('dropNote')) $('dropNote').innerHTML = c.remove.length ? 'Coming off the list (not on the new list): <b>'+c.remove.map(esc).join(', ')+'</b>. You can put them back from Removed.' : '';
+}
 async function confirmUpload(){
   const include = preview.rows.map((r, i) => r.include ? i : -1).filter(i => i >= 0);
-  if (!confirm('Put '+include.length+' vehicles on the list?\n\nThe current yard check closes as it stands (kept in history) and a fresh one starts from this list.')) return;
+  const c = changes();
+  if (!confirm('Update the stock list?\n\n'+c.add+' to add, '+c.remove.length+' to remove, '+c.same+' unchanged.'+(preview.mode === 'update' ? '\n\nThe current yard check carries on: unchanged vehicles keep their ticks.' : ''))) return;
   $('confirmBtn').disabled = true;
   try { const d = await api('/api/yard/stock/upload/'+preview.upload_id+'/confirm', {method:'POST', body: JSON.stringify({include})});
         preview = null; $('preview').innerHTML = ''; $('stockFile').value = '';
-        say('', 'List confirmed: '+d.added+' new, '+d.kept+' kept, '+d.dropped+' off the list. New yard check started.'); loadActive(); }
+        say('', 'List confirmed: '+d.added+' added, '+d.dropped+' removed, '+d.kept+' unchanged.'+(d.updated ? ' Yard check updated; ticks kept.' : ' Yard check now works from this list.')); loadActive(); }
   catch(e){ say(e.message); $('confirmBtn').disabled = false; }
 }
 async function discardUpload(){
