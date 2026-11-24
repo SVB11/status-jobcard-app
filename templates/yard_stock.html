@@ -17,9 +17,10 @@
 .ys-btn.warn{background:var(--amber-soft);border-color:var(--amber);color:var(--amber-text)}
 .ys-btn:disabled{opacity:.55}
 .ys-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:5px}
-.ys-row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:5px;display:grid;grid-template-columns:56px 1fr auto;gap:8px;align-items:center;min-width:0}
-.ys-thumb{width:56px;height:56px;border-radius:9px;object-fit:cover;background:var(--surface-2);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;line-height:1.1;padding:0;overflow:hidden}
-.ys-thumb img{width:100%;height:100%;object-fit:cover}
+.ys-row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:5px;display:grid;grid-template-columns:108px 1fr auto;gap:8px;align-items:center;min-width:0}
+.ys-thumb{width:108px;aspect-ratio:3/2;height:auto;border-radius:9px;background:var(--surface-2);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;line-height:1.1;padding:0;overflow:hidden;flex-shrink:0}
+button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-webkit-appearance:none}
+.ys-thumb img{width:100%;height:100%;object-fit:contain;background:var(--surface-2)}
 .ys-main{min-width:0}
 .ys-ws{font-weight:800;color:var(--link);font-size:14px;line-height:1.2}
 .ys-sub{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
@@ -37,16 +38,17 @@
 .ys-form input,.ys-form select,.ys-form textarea{width:100%;border-radius:9px;border:1px solid var(--line-strong);padding:6px 10px}
 .ys-grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 8px}
 .ys-photo-pick{display:flex;gap:10px;align-items:center;margin-top:4px}
-.ys-photo-pick img{width:72px;height:72px;object-fit:cover;border-radius:9px;border:1px solid var(--line-strong)}
-.ys-big{width:96px;height:96px}
+.ys-photo-pick img{width:144px;aspect-ratio:3/2;height:auto;object-fit:contain;background:var(--surface-2);border-radius:9px;border:1px solid var(--line-strong)}
 .ys-note{color:var(--muted);font-size:13px;margin:6px 0}
 #ysError{color:var(--amber-text);margin:8px 0;font-weight:700}
 #ysOk{color:var(--green-text);margin:8px 0;font-weight:700}
 .ys-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
 .ys-sum div{background:var(--surface-2);border-radius:9px;padding:6px;font-size:11px;color:var(--muted);text-align:center}
 .ys-sum strong{display:block;font-size:19px;color:var(--link)}
-@media(max-width:400px){.ys-list{grid-template-columns:1fr}.ys-row{grid-template-columns:52px 1fr auto;gap:6px}.ys-thumb{width:52px;height:52px}}
-.ys-thumb.ys-big{width:96px;height:96px}
+@media(max-width:400px){.ys-list{grid-template-columns:1fr}.ys-row{grid-template-columns:96px 1fr auto;gap:6px}.ys-thumb{width:96px}}
+@media(min-width:700px){.ys-row{grid-template-columns:132px 1fr auto}.ys-thumb{width:132px}}
+.ys-thumb.ys-big{width:168px}
+.ys-row.ys-row-big{grid-template-columns:168px 1fr}
 </style>
 {% endblock %}
 {% block content %}
@@ -113,7 +115,7 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/yard_photo.js?v=1"></script>
+<script src="/static/js/yard_photo.js?v=2"></script>
 <script>
 const Y = window.stsYard, esc = Y.esc;
 const SECTIONS = {{ sections|list|tojson }};
@@ -139,8 +141,11 @@ function showTab(t){
 document.querySelectorAll('.ys-tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 function thumb(u, big){
   const cls = 'ys-thumb' + (big ? ' ys-big' : '');
-  return u.photo_url ? '<span class="'+cls+'"><img src="'+esc(u.photo_url)+'" alt="Photo '+esc(u.stock_number)+'" loading="lazy"></span>'
-                     : '<span class="'+cls+'">No photo</span>';
+  if (u.photo_url) {
+    return '<button type="button" class="'+cls+'" data-viewer-src="'+esc(u.photo_url)+'" data-viewer-label="Photo '+esc(u.stock_number)+'" aria-label="View photo of '+esc(u.stock_number)+'">' +
+      '<img src="'+esc(u.photo_url)+'" alt="Photo '+esc(u.stock_number)+'" loading="lazy"></button>';
+  }
+  return '<span class="'+cls+'">No photo</span>';
 }
 function line(u){ return [u.year, u.make, u.model].filter(Boolean).join(' ') || u.description || ''; }
 function setCounts(c){ if (!c) return; $('cActive').textContent = c.active; $('cPending').textContent = c.pending; }
@@ -249,7 +254,7 @@ $('addForm').onsubmit = async ev => {
 /* Approvals */
 async function loadPending(){
   try { const d = await api('/api/yard/stock/units?status=pending'); setCounts(d.counts);
-    $('pendingRows').innerHTML = d.units.map(u => '<article class="ys-row" style="grid-template-columns:96px 1fr" data-unit="'+u.unit_id+'">'+thumb(u, true) +
+    $('pendingRows').innerHTML = d.units.map(u => '<article class="ys-row ys-row-big" data-unit="'+u.unit_id+'">'+thumb(u, true) +
       '<div class="ys-main"><div class="ys-ws">'+esc(u.stock_number)+' <span class="ys-badge amber">Waiting</span></div>' +
       '<div class="ys-sub">'+esc(line(u))+'</div><div class="ys-meta">'+esc(u.section)+' · '+esc(u.registrations || 'No reg')+'</div>' +
       '<div class="ys-meta">Found by '+esc(u.created_by)+' · '+esc(Y.time(u.listed_at))+'</div>' +
