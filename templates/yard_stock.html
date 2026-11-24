@@ -55,13 +55,19 @@ button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-
 {% block content %}
 <div class="nl-overline">Yard check · Stock list</div>
 <h1 class="nl-h1 text-2xl font-bold">Stock list</h1>
+{% if is_stock_manager %}
 <p class="ys-note">The yard check works from this list. Prices and CRM details are never read or stored.</p>
+{% else %}
+<p class="ys-note">Look up a vehicle and start a job. Uploading and editing the list is for stock list managers. Prices and CRM details are never read or stored.</p>
+{% endif %}
 <div class="ys-tabs" role="tablist">
   <button type="button" role="tab" data-tab="list">List <span class="ys-count" id="cActive">–</span></button>
+  {% if is_stock_manager %}
   <button type="button" role="tab" data-tab="upload">Upload</button>
   <button type="button" role="tab" data-tab="add">Add vehicle</button>
   <button type="button" role="tab" data-tab="pending">Approvals <span class="ys-count" id="cPending">–</span></button>
   <button type="button" role="tab" data-tab="removed">Removed</button>
+  {% endif %}
 </div>
 <div id="ysError" role="alert"></div><div id="ysOk" role="status"></div>
 
@@ -76,6 +82,7 @@ button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-
   <div class="ys-list" id="activeRows">Loading…</div>
 </section>
 
+{% if is_stock_manager %}
 <section class="ys-panel" id="p-upload">
   <div class="ys-card">
     <p class="ys-note">Upload the Master Stock Sheet as a PDF (Microsoft Print to PDF) or the .xlsx file. You'll see a preview first; nothing changes until you tap Confirm. Confirming updates the current yard check: vehicles still on the list keep their ticks.</p>
@@ -115,12 +122,15 @@ button.ys-thumb{cursor:pointer;font:inherit;color:var(--muted);appearance:none;-
   <p class="ys-note">Removed vehicles stay on record (who, when and why). Put one back if it was removed by mistake.</p>
   <div id="removedRows" class="ys-list">Loading…</div>
 </section>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="/static/js/yard_photo.js?v=2"></script>
 <script>
 const Y = window.stsYard, esc = Y.esc;
 const SECTIONS = {{ sections|list|tojson }};
+const CAN_MANAGE = {{ 'true' if is_stock_manager else 'false' }};
+const CAN_START = {{ 'true' if can_start_job else 'false' }};
 const $ = id => document.getElementById(id);
 let active = [], preview = null;
 function say(err, ok){ $('ysError').textContent = err || ''; $('ysOk').textContent = ok || ''; }
@@ -153,8 +163,13 @@ function line(u){ return [u.year, u.make, u.model].filter(Boolean).join(' ') || 
 function setCounts(c){ if (!c) return; $('cActive').textContent = c.active; $('cPending').textContent = c.pending; }
 
 async function loadActive(){
-  try { const d = await api('/api/yard/stock/units?status=active'); active = d.units; setCounts(d.counts); renderActive(); }
-  catch(e){ say(e.message); }
+  try {
+    const d = await api(CAN_MANAGE ? '/api/yard/stock/units?status=active' : '/api/yard/stock/picker');
+    active = d.units || [];
+    if (d.counts) setCounts(d.counts);
+    else if ($('cActive')) $('cActive').textContent = active.length;
+    renderActive();
+  } catch(e){ say(e.message); }
 }
 function renderActive(){
   const q = $('q').value.trim().toUpperCase(), sec = $('secFilter').value, np = $('noPhoto').checked;
@@ -168,10 +183,12 @@ function renderActive(){
       '<div class="ys-main"><div class="ys-ws">'+esc(u.stock_number)+(u.availability && u.availability !== 'AVAILABLE' ? ' <span class="ys-badge amber">'+esc(u.availability)+'</span>' : '')+'</div>' +
       '<div class="ys-sub">'+esc(line(u))+'</div>' +
       '<div class="ys-meta">'+esc(u.registrations || 'No reg')+(u.photo_at ? ' · Photo '+esc(u.photo_by||'')+' '+esc(Y.time(u.photo_at)) : '')+'</div></div>' +
-      '<div class="ys-acts"><button type="button" class="ys-btn primary" onclick="photo('+u.unit_id+',this)">📷 '+(u.photo_url ? 'Replace photo' : 'Add photo')+'</button>' +
-      '<button type="button" class="ys-btn" onclick="removeUnit('+u.unit_id+')">Remove</button></div></article>';
+      '<div class="ys-acts">'+(CAN_START ? '<a class="ys-btn primary" href="/jobs/create?stock_unit='+u.unit_id+'">Start job</a>' : '') +
+      (CAN_MANAGE ? '<button type="button" class="ys-btn primary" onclick="photo('+u.unit_id+',this)">📷 '+(u.photo_url ? 'Replace photo' : 'Add photo')+'</button>' +
+      '<button type="button" class="ys-btn" onclick="removeUnit('+u.unit_id+')">Remove</button>' : '') +
+      '</div></article>';
   });
-  $('activeRows').innerHTML = html || '<p class="ys-note">No vehicles on the list yet. Upload the stock list or add a vehicle.</p>';
+  $('activeRows').innerHTML = html || '<p class="ys-note">'+(CAN_MANAGE ? 'No vehicles on the list yet. Upload the stock list or add a vehicle.' : 'No vehicles on the list yet.')+'</p>';
 }
 ['q','secFilter','noPhoto'].forEach(id => $(id).addEventListener('input', renderActive));
 async function photo(id, btn){
@@ -191,7 +208,7 @@ async function removeUnit(id){
 }
 
 /* Upload + preview */
-$('uploadBtn').onclick = async () => {
+if (CAN_MANAGE && $('uploadBtn')) $('uploadBtn').onclick = async () => {
   const f = $('stockFile').files[0]; if (!f) { say('Choose the PDF or .xlsx file first.'); return; }
   const fd = new FormData(); fd.append('file', f);
   $('uploadBtn').disabled = true; $('uploadBtn').textContent = 'Reading…';
@@ -257,6 +274,7 @@ async function discardUpload(){
 }
 
 /* Add vehicle */
+if (CAN_MANAGE && $('a_photo') && $('addForm')) {
 $('a_photo').addEventListener('change', () => { const f = $('a_photo').files[0]; const img = $('a_prev');
   if (f) { img.src = URL.createObjectURL(f); img.hidden = false; } else img.hidden = true; });
 $('addForm').onsubmit = async ev => {
@@ -269,6 +287,7 @@ $('addForm').onsubmit = async ev => {
     $('addForm').reset(); $('a_prev').hidden = true; say('', d.unit.stock_number+' added to the list.');
   } catch(e){ say(e.message); } finally { $('addBtn').disabled = false; }
 };
+}
 
 /* Approvals */
 async function loadPending(){

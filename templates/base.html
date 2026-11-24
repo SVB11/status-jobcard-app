@@ -218,7 +218,7 @@
                 <a href="/yard">Yard check</a>
                 {% else %}
                 <a href="/yard" id="navYard"{% if not has_yard_access %} class="hidden"{% endif %}>Yard check</a>
-                {% if is_stock_manager %}<a href="/yard/stock" id="navStockList">Stock list</a>{% endif %}
+                {% if can_view_yard_stock %}<a href="/yard/stock" id="navStockList">Stock list</a>{% endif %}
                 <a href="/dashboard">Dashboard</a>
                 <a href="/jobs" id="navJobs">Jobs</a>
                 <a href="/locations" id="navLocations" class="hidden">Locations</a>
