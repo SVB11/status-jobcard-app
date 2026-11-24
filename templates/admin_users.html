@@ -47,13 +47,23 @@
                     <option value="supplier">Supplier</option>
                 </select>
             </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700 pt-1">
+                <input type="checkbox" id="supplier_profile" class="w-5 h-5">
+                Supplier profile
+            </label>
             <div id="companyBox" class="hidden">
                 <label class="block text-xs font-medium text-gray-600 mb-1">Supplier company *</label>
                 <select id="supplier_company" class="w-full px-3 py-2 border rounded-lg text-sm">
                     <option value="">Select company</option>
                     <option value="PFT">PFT</option>
                     <option value="FK Tanker Solutions">FK Tanker Solutions</option>
+                    <option value="__new__">Add a new supplier…</option>
                 </select>
+                <div id="newCompanyBox" class="hidden mt-2">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">New supplier name *</label>
+                    <input type="text" id="supplier_company_new" class="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-status-blue" placeholder="Type the supplier name">
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Pick PFT, FK or any other listed supplier, or add a new name. A new name also appears when assigning 3rd party work.</p>
             </div>
             <label class="flex items-center gap-2 text-sm text-gray-700 pt-1">
                 <input type="checkbox" id="yard_access" class="w-5 h-5">
@@ -88,10 +98,58 @@
         if (roleHasYard(document.getElementById('role').value)) { box.checked = true; box.disabled = true; }
         else { box.disabled = false; }
     }
+    function syncSupplierProfile(){
+        var roleEl = document.getElementById('role');
+        var tick = document.getElementById('supplier_profile');
+        var isSup = roleEl.value === 'supplier' || tick.checked;
+        document.getElementById('companyBox').classList.toggle('hidden', !isSup);
+        if (isSup && roleEl.value !== 'supplier') roleEl.value = 'supplier';
+        tick.checked = roleEl.value === 'supplier';
+        var sel = document.getElementById('supplier_company');
+        document.getElementById('newCompanyBox').classList.toggle('hidden', sel.value !== '__new__');
+    }
+    function chosenSupplierCompany(){
+        var sel = document.getElementById('supplier_company').value;
+        if (sel === '__new__') return (document.getElementById('supplier_company_new').value || '').trim();
+        return (sel || '').trim();
+    }
+    function fillSupplierCompanies(names){
+        var sel = document.getElementById('supplier_company');
+        var current = sel.value;
+        var list = [];
+        var seen = {};
+        function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function add(n){
+            n = (n || '').trim();
+            if (!n || n === '__new__' || seen[n.toLowerCase()]) return;
+            seen[n.toLowerCase()] = true;
+            list.push(n);
+        }
+        add('PFT');
+        add('FK Tanker Solutions');
+        (names || []).forEach(add);
+        var html = '<option value="">Select company</option>';
+        list.forEach(function(n){ html += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
+        html += '<option value="__new__">Add a new supplier…</option>';
+        sel.innerHTML = html;
+        if (current && (current === '__new__' || seen[current.toLowerCase()])) sel.value = current;
+        document.getElementById('newCompanyBox').classList.toggle('hidden', sel.value !== '__new__');
+    }
     document.getElementById('role').addEventListener('change', function(){
-        document.getElementById('companyBox').classList.toggle('hidden', this.value !== 'supplier');
+        document.getElementById('supplier_profile').checked = this.value === 'supplier';
+        syncSupplierProfile();
         syncCreateYardTick();
     });
+    document.getElementById('supplier_profile').addEventListener('change', function(){
+        if (this.checked) document.getElementById('role').value = 'supplier';
+        else if (document.getElementById('role').value === 'supplier') document.getElementById('role').value = 'sales';
+        syncSupplierProfile();
+        syncCreateYardTick();
+    });
+    document.getElementById('supplier_company').addEventListener('change', function(){
+        document.getElementById('newCompanyBox').classList.toggle('hidden', this.value !== '__new__');
+    });
+    syncSupplierProfile();
     syncCreateYardTick();
     const isAdminUser = (role === 'admin' || role === 'accounts' || fullName.toLowerCase() === 'sebastian van biljon');
     if (!isAdminUser) {
@@ -130,6 +188,7 @@
                 document.getElementById('usersList').innerHTML = '<p class="text-red-600 text-sm">Could not load users. Sign out and sign in as <strong>sebastian</strong> (admin). ' + (data.detail || '') + '</p>';
                 return;
             }
+            fillSupplierCompanies(data.supplier_companies || []);
             const users = data.users || [];
             let html = '';
             users.forEach(function(u) {
@@ -177,7 +236,7 @@
                     username: document.getElementById('username').value,
                     password: document.getElementById('password').value,
                     role: document.getElementById('role').value,
-                    supplier_company: document.getElementById('supplier_company').value,
+                    supplier_company: chosenSupplierCompany(),
                     yard_access: document.getElementById('yard_access').checked
                 })
             });
@@ -192,6 +251,9 @@
             msg.className = 'text-sm text-green-600';
             msg.classList.remove('hidden');
             document.getElementById('addUserForm').reset();
+            document.getElementById('supplier_profile').checked = false;
+            document.getElementById('supplier_company_new').value = '';
+            syncSupplierProfile();
             syncCreateYardTick();
             loadUsers();
         } catch (err) {
