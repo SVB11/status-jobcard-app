@@ -1416,11 +1416,23 @@ def workshop_people(db: Session):
         models.User.role == "workshop", models.User.is_active == True
     ).order_by(models.User.full_name).all()
 
+def is_third_party_booking_task(task) -> bool:
+    """True when a 3rd-party company is already booked, or the task is an explicit outside / '3rd party:' booking."""
+    if not task:
+        return False
+    if (getattr(task, "third_party_provider", None) or "").strip():
+        return True
+    name = (getattr(task, "task_name", None) or "").strip().lower()
+    return name.startswith("outside 3rd party") or name.startswith("3rd party:")
+
 def apply_task_assignment(db, task, body, new_status, old_status, changer):
-    """Who is doing the task. Required when a task moves into In Progress."""
+    """Who is doing the task. Required when a task moves into In Progress, except 3rd-party bookings."""
     moving_in = new_status == "In Progress" and old_status != "In Progress"
     has_pick = "responsible_user_id" in body
     if not moving_in and not has_pick:
+        return []
+    # 3rd-party bookings do not need a workshop responsible person. A name sent in is still saved.
+    if moving_in and not has_pick and is_third_party_booking_task(task):
         return []
     paint = is_paint_task(task.task_name)
     rid = body.get("responsible_user_id")
