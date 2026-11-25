@@ -842,11 +842,17 @@
         window.location.href = '/login';
     }
 
+    function waitingOnHtml(j) {
+        const w = (j && j.waiting_on) || [];
+        if (!w.length) return '';
+        const e = function(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+        return '<div class="waiting-on text-xs mt-1" style="color:#f59e0b"><strong>Waiting on:</strong> ' + w.map(e).join(' · ') + '</div>';
+    }
     function jobRow(j) {
         return '<a href="/jobs/' + j.id + '" class="block p-3 bg-gray-50 rounded-lg hover:bg-gray-100">' +
             '<div class="font-medium">' + jobDisplayLabel(j) + ' ' + (j.vehicle_description || '') + ' ' + (j.year || '') + '</div>' +
             '<div class="text-xs text-gray-500">' + j.status + (j.current_location ? ' | ' + j.current_location : '') +
-            ' | Sales: ' + j.salesman_name + '</div></a>';
+            ' | Sales: ' + j.salesman_name + '</div>' + waitingOnHtml(j) + '</a>';
     }
 
     async function loadJobList(url, targetId) {
@@ -1217,7 +1223,7 @@
                 return '<a href="' + href + '" class="block p-2 rounded border border-green-700 bg-[#11151c]">' +
                     '<div class="font-semibold">' + j.stock_number + ' · ' + (j.vehicle_description||'') + '</div>' +
                     '<div class="text-xs text-[#9aa6b4]">' + (j.status||'') + ' — ' + j.action +
-                    (j.open_tasks && j.open_tasks.length ? ' · ' + j.open_tasks.join('; ') : '') + '</div></a>';
+                    (j.open_tasks && j.open_tasks.length ? ' · ' + j.open_tasks.join('; ') : '') + '</div>' + waitingOnHtml(j) + '</a>';
             }).join('');
         } catch (e) {}
     }

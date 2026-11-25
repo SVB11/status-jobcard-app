@@ -108,6 +108,12 @@
         const box = document.getElementById('jobsContainer');
         const sales = rows.filter(function(j){ return (j.job_purpose || 'sold') !== 'showroom'; });
         const showroom = rows.filter(function(j){ return j.job_purpose === 'showroom'; });
+        function waitingOnHtml(j) {
+            const w = (j && j.waiting_on) || [];
+            if (!w.length) return '';
+            const e = function(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+            return '<div class="waiting-on text-xs mt-1" style="color:#f59e0b"><strong>Waiting on:</strong> ' + w.map(e).join(' · ') + '</div>';
+        }
         function card(j) {
             const accept = (role === 'workshop' || role === 'admin' || role === 'accounts') && j.status === 'Submitted to Workshop';
             const show = (j.job_purpose || 'sold') === 'showroom';
@@ -123,6 +129,7 @@
                 '<span class="text-xs px-2 py-1 rounded ' + statusClass(j.status) + '">' + (j.status || '') + '</span>' +
                 '</div>' +
                 (accept ? '<div class="mt-3 text-xs uppercase tracking-wider text-[#7ec2ff]">Tap card then Accept on the job</div>' : '') +
+                waitingOnHtml(j) +
                 '</div></a>';
         }
         function section(title, list, emptyText) {

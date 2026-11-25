@@ -8,6 +8,7 @@ NEW_COLUMNS = {
         "supplier_company": "VARCHAR",
         "yard_access": "BOOLEAN DEFAULT 0",
         "stock_manager": "BOOLEAN DEFAULT 0",
+        "sales_rights": "BOOLEAN DEFAULT 0",
     },
     "job_cards": {
         "vin_number": "VARCHAR",

@@ -52,6 +52,7 @@ class User(Base):
     supplier_company = Column(String, nullable=True)
     yard_access = Column(Boolean, default=False)
     stock_manager = Column(Boolean, default=False)  # may upload/add/remove yard stock and add photos
+    sales_rights = Column(Boolean, default=False)  # admin who also works as a salesman (gets salesman notices)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
