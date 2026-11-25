@@ -1085,6 +1085,13 @@
         return { override: true, on_behalf_of: id, reason: reason.trim() };
     }
 
+    function isThirdPartyBookingTask(t) {
+        if (!t) return false;
+        if ((t.third_party_provider || '').trim()) return true;
+        const name = (t.task_name || '').trim().toLowerCase();
+        return name.indexOf('outside 3rd party') === 0 || name.indexOf('3rd party:') === 0;
+    }
+
     async function updateTaskStatus(taskId, newStatus) {
         const task = (currentJob && currentJob.tasks || []).find(function(t){ return t.id === taskId; });
         const payload = {
@@ -1107,7 +1114,7 @@
                 payload.fail_list = fails.trim();
             }
         }
-        if (newStatus === 'In Progress' && task && task.status !== 'In Progress') {
+        if (newStatus === 'In Progress' && task && task.status !== 'In Progress' && !isThirdPartyBookingTask(task)) {
             let pick;
             try { pick = await askAssignment(task); } catch (e) { alert(e.message); return; }
             if (!pick) return;
